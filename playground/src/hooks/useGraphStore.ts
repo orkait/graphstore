@@ -198,7 +198,9 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
   },
 
   resetGraph: async () => {
-    await api.reset()
+    try {
+      await api.reset()
+    } catch { /* server may be down */ }
     set({
       graph: { nodes: [], edges: [] },
       results: [],
@@ -209,5 +211,14 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
 
   clearResults: () => set({ results: [], highlightedNodeIds: new Set(), highlightedEdges: new Set() }),
 
-  updateConfig: (partial) => set((s) => ({ config: { ...s.config, ...partial } })),
+  updateConfig: (partial) => {
+    set((s) => ({ config: { ...s.config, ...partial } }))
+    // Sync server-side settings
+    const serverUpdate: Record<string, number> = {}
+    if (partial.ceilingMb !== undefined) serverUpdate.ceiling_mb = partial.ceilingMb
+    if (partial.costThreshold !== undefined) serverUpdate.cost_threshold = partial.costThreshold
+    if (Object.keys(serverUpdate).length > 0) {
+      api.updateConfig(serverUpdate).catch(() => {})
+    }
+  },
 }))

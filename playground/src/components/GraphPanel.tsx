@@ -73,6 +73,7 @@ export function GraphPanel() {
       f: searchFilter,
       v: viewMode,
       h: [...highlightedNodeIds].sort(),
+      he: [...highlightedEdges].sort(),
     })
 
     if (structureKey === prevStructureRef.current) return

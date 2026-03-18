@@ -13,31 +13,104 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
 
   const renderTable = () => {
     if (!result?.data) return <span className="text-muted-foreground">No data</span>
-    if (Array.isArray(result.data)) {
+
+    // Path: array of string IDs
+    if (result.kind === 'path' && Array.isArray(result.data)) {
+      return (
+        <div className="text-xs flex items-center gap-1 flex-wrap">
+          {result.data.map((id: string, i: number) => (
+            <span key={i} className="flex items-center gap-1">
+              <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary">{id}</span>
+              {i < result.data.length - 1 && <span className="text-muted-foreground">→</span>}
+            </span>
+          ))}
+        </div>
+      )
+    }
+
+    // Paths: array of arrays of string IDs
+    if (result.kind === 'paths' && Array.isArray(result.data)) {
+      return (
+        <div className="space-y-1">
+          {result.data.map((path: string[], pi: number) => (
+            <div key={pi} className="text-xs flex items-center gap-1 flex-wrap">
+              <span className="text-muted-foreground mr-1">#{pi + 1}</span>
+              {path.map((id: string, i: number) => (
+                <span key={i} className="flex items-center gap-1">
+                  <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary">{id}</span>
+                  {i < path.length - 1 && <span className="text-muted-foreground">→</span>}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    // Distance: single number
+    if (result.kind === 'distance') {
+      const d = result.data as number
+      return <span className="text-sm">{d === -1 ? 'No path found' : `Distance: ${d}`}</span>
+    }
+
+    // Match: array of binding objects
+    if (result.kind === 'match' && Array.isArray(result.data)) {
       if (result.data.length === 0)
-        return <span className="text-muted-foreground">Empty result</span>
-      const keys = Object.keys(result.data[0])
+        return <span className="text-muted-foreground">No matches</span>
+      const allKeys = new Set<string>()
+      result.data.forEach((b: Record<string, string>) => Object.keys(b).forEach(k => allKeys.add(k)))
+      const keys = [...allKeys]
       return (
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-border">
-              {keys.map((k) => (
-                <th key={k} className="text-left p-1 text-muted-foreground">{k}</th>
-              ))}
+              {keys.map(k => <th key={k} className="text-left p-1 text-muted-foreground">{k}</th>)}
             </tr>
           </thead>
           <tbody>
-            {result.data.map((row: Record<string, unknown>, i: number) => (
+            {result.data.map((row: Record<string, string>, i: number) => (
               <tr key={i} className="border-b border-border/50">
-                {keys.map((k) => (
-                  <td key={k} className="p-1">{JSON.stringify(row[k])}</td>
-                ))}
+                {keys.map(k => <td key={k} className="p-1">{row[k] || ''}</td>)}
               </tr>
             ))}
           </tbody>
         </table>
       )
     }
+
+    // Array of objects (nodes, edges)
+    if (Array.isArray(result.data)) {
+      if (result.data.length === 0)
+        return <span className="text-muted-foreground">Empty result</span>
+      // Check first item is an object (not a string/number)
+      if (typeof result.data[0] === 'object' && result.data[0] !== null) {
+        const keys = Object.keys(result.data[0])
+        return (
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border">
+                {keys.map((k) => (
+                  <th key={k} className="text-left p-1 text-muted-foreground">{k}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {result.data.map((row: Record<string, unknown>, i: number) => (
+                <tr key={i} className="border-b border-border/50">
+                  {keys.map((k) => (
+                    <td key={k} className="p-1">{JSON.stringify(row[k])}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      }
+      // Array of primitives
+      return <span className="text-sm">{JSON.stringify(result.data)}</span>
+    }
+
+    // Single object (stats, node, plan, etc.)
     if (typeof result.data === 'object') {
       const obj = result.data as Record<string, unknown>
       const keys = Object.keys(obj)
@@ -54,6 +127,7 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
         </table>
       )
     }
+
     return <span className="text-sm">{JSON.stringify(result.data)}</span>
   }
 
