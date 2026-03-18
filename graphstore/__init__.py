@@ -38,6 +38,28 @@ from graphstore.errors import (
 )
 from graphstore.memory import estimate as _estimate_memory, DEFAULT_CEILING_BYTES
 
+__all__ = [
+    "GraphStore",
+    "CoreStore",
+    "SchemaRegistry",
+    "Result",
+    "Edge",
+    "parse",
+    "clear_cache",
+    "Executor",
+    "SystemExecutor",
+    "GraphStoreError",
+    "QueryError",
+    "NodeNotFound",
+    "NodeExists",
+    "CeilingExceeded",
+    "VersionMismatch",
+    "SchemaError",
+    "CostThresholdExceeded",
+    "BatchRollback",
+    "DEFAULT_CEILING_BYTES",
+]
+
 # All system AST types
 _SYS_TYPES = tuple(
     getattr(ast_nodes, name)
@@ -64,9 +86,10 @@ class GraphStore:
         self._conn: sqlite3.Connection | None = None
 
         # Initialize store
-        if self._path:
-            self._path.mkdir(parents=True, exist_ok=True)
-            db_file = self._path / "graphstore.db"
+        p = self._path
+        if p is not None:
+            p.mkdir(parents=True, exist_ok=True)
+            db_file = p / "graphstore.db"
             self._conn = open_database(db_file)
 
             # Try to load existing data
@@ -100,7 +123,7 @@ class GraphStore:
                 if isinstance(ast, ast_nodes.SysCheckpoint):
                     self.checkpoint()
                     result = Result(kind="ok", data=None, count=0)
-                elif isinstance(ast, ast_nodes.SysWal) and ast.action == "REPLAY":
+                elif isinstance(ast, ast_nodes.SysWal) and ast.action == "REPLAY":  # type: ignore[attr-defined]
                     self._replay_wal()
                     result = Result(kind="ok", data=None, count=0)
                 else:
@@ -148,9 +171,10 @@ class GraphStore:
 
     def close(self) -> None:
         """Checkpoint + close sqlite connection."""
-        if self._conn:
+        conn = self._conn
+        if conn is not None:
             self.checkpoint()
-            self._conn.close()
+            conn.close()
             self._conn = None
 
     @property
@@ -175,18 +199,20 @@ class GraphStore:
 
     def _wal_append(self, statement: str):
         """Append a mutation to the WAL table."""
-        if self._conn:
-            self._conn.execute(
+        conn = self._conn
+        if conn is not None:
+            conn.execute(
                 "INSERT INTO wal (timestamp, statement) VALUES (?, ?)",
                 (time.time(), statement)
             )
-            self._conn.commit()
+            conn.commit()
 
     def _replay_wal(self):
         """Replay WAL entries from sqlite."""
-        if not self._conn:
+        conn = self._conn
+        if conn is None:
             return
-        rows = self._conn.execute("SELECT statement FROM wal ORDER BY seq").fetchall()
+        rows = conn.execute("SELECT statement FROM wal ORDER BY seq").fetchall()
         if not rows:
             return
 
@@ -202,25 +228,27 @@ class GraphStore:
 
         # Checkpoint to clean state
         if rows:
-            _checkpoint_fn(self._store, self._schema, self._conn)
+            _checkpoint_fn(self._store, self._schema, conn)
 
     def _maybe_auto_checkpoint(self):
         """Auto-checkpoint if WAL exceeds thresholds."""
-        if not self._conn:
+        conn = self._conn
+        if conn is None:
             return
-        row = self._conn.execute("SELECT COUNT(*) FROM wal").fetchone()
+        row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
         if row and row[0] > 50_000:
             self.checkpoint()
 
     def _log_query(self, query: str, elapsed_us: int, result_count: int, error: str | None):
         """Log query to sqlite query_log table."""
-        if not self._conn:
+        conn = self._conn
+        if conn is None:
             return
         try:
-            self._conn.execute(
+            conn.execute(
                 "INSERT INTO query_log (timestamp, query, elapsed_us, result_count, error) VALUES (?,?,?,?,?)",
                 (time.time(), query, elapsed_us, result_count, error)
             )
-            self._conn.commit()
+            conn.commit()
         except Exception:
             pass  # Don't fail on log errors

@@ -4,8 +4,6 @@ import numpy as np
 import pytest
 
 from graphstore.snapshot import GraphSnapshot, SnapshotManager
-from graphstore.strings import StringTable
-from graphstore.edges import EdgeMatrices
 
 
 # ---------------------------------------------------------------------------

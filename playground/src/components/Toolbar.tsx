@@ -34,7 +34,8 @@ export function Toolbar() {
       if (inBatch) { batch.push(line); continue }
       if (trimmed.startsWith('CREATE') || trimmed.startsWith('UPSERT')) queries.push(trimmed)
     }
-    for (const q of queries) await useGraphStore.getState().executeQuery(q)
+    for (const q of queries) await useGraphStore.getState().executeQuery(q, true)
+    await useGraphStore.getState().refreshGraph()
   }
 
   return (

@@ -45,6 +45,10 @@ def cmd_playground(args: argparse.Namespace) -> None:
         url = f"http://{args.host}:{args.port}"
         threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
 
+    import os
+    if args.db_path:
+        os.environ["GRAPHSTORE_DB_PATH"] = args.db_path
+
     uvicorn.run(app, host=args.host, port=args.port)
 
 
@@ -59,6 +63,12 @@ def main(argv: list[str] | None = None) -> None:
         "--no-browser",
         action="store_true",
         help="Do not open browser automatically",
+    )
+    pg.add_argument(
+        "--db-path",
+        type=str,
+        default=None,
+        help="Path to persist playground database",
     )
     pg.set_defaults(func=cmd_playground)
 

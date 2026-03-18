@@ -6,7 +6,6 @@ separately by the server layer.
 
 import time
 
-import numpy as np
 
 from graphstore.dsl.ast_nodes import (
     AncestorsQuery,

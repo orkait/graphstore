@@ -8,13 +8,14 @@ import {
   type Edge,
   type NodeMouseHandler,
 } from '@xyflow/react'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import '@xyflow/react/dist/style.css'
 import { CustomNode } from '@/components/graph/CustomNode'
 import { CustomEdge } from '@/components/graph/CustomEdge'
-import { useGraphStore } from '@/hooks/useGraphStore'
+import { useGraphStore, type ViewMode } from '@/hooks/useGraphStore'
 import { useFlowStore } from '@/hooks/useFlowStore'
 import { applyDagreLayout } from '@/components/graph/layout'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { useMemo, useEffect, useRef, useState, useCallback } from 'react'
 import { Search } from 'lucide-react'
 
@@ -50,6 +51,7 @@ export function GraphPanel() {
   const { viewMode, showMinimap, isDark, nodesep, ranksep, layoutDirection } = config
   const highlightedNodeIds = useGraphStore((s) => s.highlightedNodeIds)
   const highlightedEdges = useGraphStore((s) => s.highlightedEdges)
+  const updateConfig = useGraphStore((s) => s.updateConfig)
 
   const nodes = useFlowStore((s) => s.nodes)
   const edges = useFlowStore((s) => s.edges)
@@ -122,7 +124,7 @@ export function GraphPanel() {
       setFlowNodes(applyDagreLayout(rfNodes, rfEdges, layoutOpts))
       setFlowEdges(rfEdges)
     }
-  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection])
+  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, setFlowNodes, setFlowEdges])
 
   const onNodeMouseEnter: NodeMouseHandler = useCallback((_event, node) => {
     setHoveredNodeId(node.id)
@@ -133,9 +135,9 @@ export function GraphPanel() {
   }, [setHoveredNodeId])
 
   return (
-    <Card className="h-full gap-0 py-0 rounded-lg">
-      <CardHeader className="px-3 py-2 border-b">
-        <CardTitle className="text-xs text-muted-foreground flex items-center gap-2">
+    <Card className="h-full gap-0 py-0 rounded-lg flex flex-col">
+      <CardHeader className="px-3 py-2 border-b flex flex-row items-center justify-between space-y-0 h-[40px] flex-shrink-0">
+        <div className="text-xs text-muted-foreground flex items-center gap-2 flex-1">
           <Search className="w-3 h-3" />
           <input
             type="text"
@@ -149,9 +151,18 @@ export function GraphPanel() {
               Clear
             </button>
           )}
-        </CardTitle>
+        </div>
+        <div className="flex items-center ml-4">
+          <Tabs value={viewMode} onValueChange={(v) => updateConfig({ viewMode: v as ViewMode })} className="h-7 w-[240px]">
+            <TabsList className="grid w-full grid-cols-3 h-7 bg-muted/50 p-1 rounded-md">
+              <TabsTrigger value="live" className="text-[10px] h-5 rounded-sm px-2">Live</TabsTrigger>
+              <TabsTrigger value="query-result" className="text-[10px] h-5 rounded-sm px-2">Results</TabsTrigger>
+              <TabsTrigger value="highlight" className="text-[10px] h-5 rounded-sm px-2">Highlight</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
       </CardHeader>
-      <CardContent className="flex-1 overflow-hidden p-0">
+      <CardContent className="flex-1 min-h-0 overflow-hidden p-0 relative">
         <ReactFlow
           nodes={nodes}
           edges={edges}

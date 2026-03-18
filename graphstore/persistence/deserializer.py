@@ -8,11 +8,9 @@ secondary indices, and tombstones.
 import json
 
 import numpy as np
-from scipy.sparse import csr_matrix
 
 from graphstore.store import CoreStore
 from graphstore.strings import StringTable
-from graphstore.edges import EdgeMatrices
 from graphstore.schema import SchemaRegistry
 from graphstore.persistence.database import SCHEMA_VERSION
 from graphstore.errors import VersionMismatch

@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useGraphStore, type ViewMode, type LayoutMode, type LayoutDirection } from '@/hooks/useGraphStore'
+import { useGraphStore, type LayoutMode, type LayoutDirection } from '@/hooks/useGraphStore'
 
 interface Props {
   open: boolean
@@ -39,17 +39,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
           </TabsList>
 
           <TabsContent value="graph" className="space-y-5 mt-5">
-            <div className="space-y-2">
-              <Label className="text-sm">View Mode</Label>
-              <Select value={config.viewMode} onValueChange={(v) => updateConfig({ viewMode: v as ViewMode })}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="live">Live — always shows full graph</SelectItem>
-                  <SelectItem value="query-result">Query Result — shows only results</SelectItem>
-                  <SelectItem value="highlight">Highlight — dims non-results</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+
             <div className="space-y-2">
               <Label className="text-sm">Layout Algorithm</Label>
               <Select value={config.layoutMode} onValueChange={(v) => updateConfig({ layoutMode: v as LayoutMode })}>

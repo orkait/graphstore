@@ -1,4 +1,5 @@
 import { StreamLanguage } from '@codemirror/language'
+import { autocompletion, CompletionContext } from '@codemirror/autocomplete'
 
 const KEYWORDS = new Set([
   'CREATE', 'NODE', 'NODES', 'EDGE', 'EDGES', 'WHERE', 'FROM', 'TO',
@@ -56,3 +57,16 @@ export const graphstoreLang = StreamLanguage.define({
     return null
   },
 })
+
+const dslOptions = Array.from(KEYWORDS).map(k => ({ label: k, type: 'keyword' }))
+
+function dslCompletion(context: CompletionContext) {
+  const word = context.matchBefore(/\w*/)
+  if (word?.from === word?.to && !context.explicit) return null
+  return {
+    from: word ? word.from : context.pos,
+    options: dslOptions
+  }
+}
+
+export const graphstoreAutocomplete = autocompletion({ override: [dslCompletion] })

@@ -7,8 +7,6 @@ tables within a single transaction.
 import json
 import time
 
-import numpy as np
-from scipy.sparse import csr_matrix
 
 from graphstore.persistence.database import SCHEMA_VERSION
 from graphstore.store import CoreStore

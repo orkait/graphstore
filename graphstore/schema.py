@@ -6,7 +6,7 @@ Unregistered kinds pass through without validation (schema-free mode).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from graphstore.errors import SchemaError
 

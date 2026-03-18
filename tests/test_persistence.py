@@ -1,6 +1,5 @@
 """Tests for graphstore.persistence (database, serializer, deserializer)."""
 
-import json
 import time
 
 import pytest

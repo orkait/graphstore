@@ -1,7 +1,6 @@
 """Tests for graphstore.edges.EdgeMatrices."""
 
 import numpy as np
-import pytest
 
 from graphstore.edges import EdgeMatrices
 

@@ -5,7 +5,6 @@ nodes before they are executed.
 """
 
 from graphstore.dsl.ast_nodes import Condition
-from graphstore.errors import CostThresholdExceeded
 
 DEFAULT_FRONTIER_THRESHOLD = 100_000
 

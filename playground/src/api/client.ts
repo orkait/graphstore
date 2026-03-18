@@ -2,6 +2,7 @@ const BASE = '/api'
 
 export interface Result {
   kind: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any
   count: number
   elapsed_us: number
@@ -10,6 +11,7 @@ export interface Result {
 export interface GraphNode {
   id: string
   kind: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any
 }
 
@@ -17,6 +19,7 @@ export interface GraphEdge {
   source: string
   target: string
   kind: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any
 }
 

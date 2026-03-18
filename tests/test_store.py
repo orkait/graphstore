@@ -440,7 +440,7 @@ class TestTombstoneReuse:
     def test_slot_reused(self):
         s = CoreStore()
         slot0 = s.put_node("a", "thing", {})
-        slot1 = s.put_node("b", "thing", {})
+        s.put_node("b", "thing", {})
         s.delete_node("a")
         # Next put should reuse slot0
         slot2 = s.put_node("c", "thing", {})

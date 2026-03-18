@@ -31,10 +31,13 @@ app.add_middleware(
 _store: GraphStore | None = None
 
 
+import os
+
 def _get_store() -> GraphStore:
     global _store
     if _store is None:
-        _store = GraphStore()
+        db_path = os.environ.get("GRAPHSTORE_DB_PATH")
+        _store = GraphStore(path=db_path if db_path else None)
     return _store
 
 
@@ -127,6 +130,13 @@ def get_graph():
 @app.post("/api/reset")
 def reset():
     global _store
+    db_path = os.environ.get("GRAPHSTORE_DB_PATH")
+    if db_path:
+        # If persistence is active, it's unsafe to casually "reset" the store
+        # in a way that destroys user data on disk via a simple API call.
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail={"error": "Cannot reset a persistent playground.", "type": "GraphStoreError"})
+        
     _store = GraphStore()
     return {"ok": True}
 

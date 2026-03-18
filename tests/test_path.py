@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 from scipy.sparse import csr_matrix
 
 from graphstore.path import (

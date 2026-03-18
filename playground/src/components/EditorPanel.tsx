@@ -1,11 +1,9 @@
 import CodeMirror from '@uiw/react-codemirror'
-import { graphstoreLang } from '@/lang/graphstore'
+import { graphstoreLang, graphstoreAutocomplete } from '@/lang/graphstore'
 import { useGraphStore } from '@/hooks/useGraphStore'
-import { keymap, type ViewUpdate } from '@codemirror/view'
-import type { EditorView } from '@codemirror/view'
+import { keymap, type ViewUpdate, EditorView } from '@codemirror/view'
 import { useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Play, PlayCircle } from 'lucide-react'
 
 function toggleComment(view: EditorView): boolean {
@@ -48,6 +46,8 @@ export function EditorPanel() {
   const executeSelected = useGraphStore((s) => s.executeSelected)
   const editorSelection = useGraphStore((s) => s.editorSelection)
   const isDark = useGraphStore((s) => s.config.isDark)
+  const fontSize = useGraphStore((s) => s.config.fontSize)
+  const updateConfig = useGraphStore((s) => s.updateConfig)
   const hasSelection = editorSelection.trim().length > 0
 
   const getFullLines = useCallback((view: EditorView) => {
@@ -82,24 +82,47 @@ export function EditorPanel() {
     [setEditorSelection],
   )
 
+  const fontTheme = useMemo(
+    () => EditorView.theme({
+      '&': { fontSize: `${fontSize}px` },
+      '.cm-content': { fontFamily: 'inherit', padding: '2px 0' },
+      '.cm-line': { padding: '0 4px' },
+      '.cm-gutterElement': { padding: '0 6px 0 4px', lineHeight: 'inherit' },
+    }),
+    [fontSize],
+  )
+
   const extensions = useMemo(
     () => [
       graphstoreLang,
+      graphstoreAutocomplete,
+      fontTheme,
       keymap.of([
         { key: 'Ctrl-Enter', run: handleRunSelected },
         { key: 'Ctrl-Shift-Enter', run: () => { executeAll(); return true } },
         { key: 'Ctrl-/', run: toggleComment },
       ]),
     ],
-    [handleRunSelected, executeAll],
+    [handleRunSelected, executeAll, fontTheme],
   )
 
   return (
-    <Card className="h-full gap-0 py-0 rounded-lg">
-      <CardHeader className="px-3 py-2 border-b">
-        <CardTitle className="text-xs text-muted-foreground">Editor</CardTitle>
-      </CardHeader>
-      <CardContent className="flex-1 overflow-hidden p-0">
+    <div className="h-full flex flex-col bg-transparent">
+      <div className="px-3 py-1.5 border-b bg-transparent flex-shrink-0 flex items-center justify-between">
+        <div className="text-xs font-semibold text-muted-foreground">Editor</div>
+        <div className="flex items-center gap-0.5 rounded-md border border-border bg-background shadow-sm overflow-hidden">
+          <button
+            className="h-6 w-6 flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors select-none leading-none"
+            onMouseDown={(e) => { e.preventDefault(); updateConfig({ fontSize: Math.max(10, fontSize - 1) }) }}
+          >−</button>
+          <span className="text-xs font-mono w-7 text-center text-foreground tabular-nums">{fontSize}</span>
+          <button
+            className="h-6 w-6 flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors select-none leading-none"
+            onMouseDown={(e) => { e.preventDefault(); updateConfig({ fontSize: Math.min(28, fontSize + 1) }) }}
+          >+</button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-hidden p-0">
         <CodeMirror
           value={editorContent}
           onChange={setEditorContent}
@@ -107,28 +130,28 @@ export function EditorPanel() {
           extensions={extensions}
           theme={isDark ? 'dark' : 'light'}
           height="100%"
-          className="h-full text-sm [&_.cm-editor]:!h-full [&_.cm-scroller]:!overflow-auto"
+          style={{ fontSize: `${fontSize}px` }}
+          className="h-full [&_.cm-editor]:!h-full [&_.cm-editor]:!bg-transparent [&_.cm-scroller]:!overflow-auto [&_.cm-gutters]:!bg-transparent [&_.cm-gutters]:!text-muted-foreground [&_.cm-gutters]:!border-r [&_.cm-gutters]:!border-border [&_.cm-activeLineGutter]:!bg-muted/50 [&_.cm-activeLine]:!bg-muted/30 [&_.cm-selectionBackground]:!bg-primary/20"
           basicSetup={{
             lineNumbers: true,
             foldGutter: false,
             highlightActiveLine: true,
-            autocompletion: false,
           }}
         />
-      </CardContent>
-      <CardFooter className="justify-end px-3 py-1.5">
+      </div>
+      <div className="justify-end px-3 py-1.5 flex items-center border-t bg-transparent flex-shrink-0">
         <Button
           variant="ghost"
           size="sm"
           className="h-7 text-xs gap-1.5"
-          onMouseDown={(e) => { e.preventDefault(); hasSelection ? executeSelected() : executeAll() }}
+          onMouseDown={(e) => { e.preventDefault(); if (hasSelection) executeSelected(); else executeAll() }}
         >
           {hasSelection
             ? <><Play className="w-3.5 h-3.5" /> Run Selected</>
             : <><PlayCircle className="w-3.5 h-3.5" /> Run All</>
           }
         </Button>
-      </CardFooter>
-    </Card>
+      </div>
+    </div>
   )
 }

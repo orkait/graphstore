@@ -11,6 +11,8 @@ import { StatsBar } from '@/components/StatsBar'
 import { Toaster } from '@/components/ui/sonner'
 import { useGraphStore } from '@/hooks/useGraphStore'
 import { useEffect } from 'react'
+import { Card } from '@/components/ui/card'
+import { api } from '@/api/client'
 
 export default function App() {
   const refreshGraph = useGraphStore((s) => s.refreshGraph)
@@ -18,8 +20,12 @@ export default function App() {
   const isDark = useGraphStore((s) => s.config.isDark)
 
   useEffect(() => {
-    refreshGraph().then((graph) => {
-      // If server graph is empty, auto-execute the editor content (default example)
+    // 1. Sync the persisted Zustand config (Memory Ceiling, etc) to the backend server
+    const { ceilingMb, costThreshold } = useGraphStore.getState().config
+    api.updateConfig({ ceiling_mb: ceilingMb, cost_threshold: costThreshold }).catch(console.error)
+
+    // 2. Fetch the graph and conditionally populate the editor example
+    refreshGraph().then(() => {
       const g = useGraphStore.getState().graph
       if (g.nodes.length === 0) executeAll()
     })
@@ -33,15 +39,17 @@ export default function App() {
       <ResizablePanelGroup orientation="horizontal" className="flex-1">
         <ResizablePanel defaultSize={40} minSize={20}>
           <div className="h-full p-2">
-            <ResizablePanelGroup orientation="vertical" className="h-full">
-              <ResizablePanel defaultSize={65} minSize={20}>
-                <EditorPanel />
-              </ResizablePanel>
-              <ResizableHandle withHandle className="my-1" />
-              <ResizablePanel defaultSize={35} minSize={10}>
-                <ResultsPanel />
-              </ResizablePanel>
-            </ResizablePanelGroup>
+            <Card className="h-full rounded-lg overflow-hidden flex flex-col border border-border bg-card">
+              <ResizablePanelGroup orientation="vertical" className="h-full">
+                <ResizablePanel defaultSize={65} minSize={20}>
+                  <EditorPanel />
+                </ResizablePanel>
+                <ResizableHandle withHandle className="bg-border" />
+                <ResizablePanel defaultSize={35} minSize={10}>
+                  <ResultsPanel />
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            </Card>
           </div>
         </ResizablePanel>
         <ResizableHandle withHandle />

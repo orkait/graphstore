@@ -2,7 +2,6 @@ import { useGraphStore, type ResultEntry } from '@/hooks/useGraphStore'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Trash2, ChevronDown, ChevronRight } from 'lucide-react'
 import { useState } from 'react'
@@ -204,16 +203,16 @@ export function ResultsPanel() {
   const results = useGraphStore((s) => s.results)
   const clearResults = useGraphStore((s) => s.clearResults)
   return (
-    <Card className="h-full gap-0 py-0 rounded-lg">
-      <CardHeader className="px-3 py-2 border-b">
-        <CardTitle className="text-xs text-muted-foreground">Results ({results.length})</CardTitle>
-        <CardAction>
-          <Button variant="ghost" size="sm" onClick={clearResults} className="h-6 px-2">
+    <div className="h-full flex flex-col bg-transparent">
+      <div className="px-3 py-2 border-b flex-shrink-0 flex items-center justify-between bg-transparent">
+        <div className="text-xs font-semibold text-muted-foreground">Results ({results.length})</div>
+        <div>
+          <Button variant="ghost" size="sm" onMouseDown={(e) => { e.preventDefault(); clearResults(); }} className="h-6 px-2">
             <Trash2 className="w-3 h-3" />
           </Button>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex-1 overflow-hidden p-0">
+        </div>
+      </div>
+      <div className="flex-1 overflow-hidden p-0">
         <ScrollArea className="h-full p-2">
           {results.map((entry) => (
             <ResultCard key={entry.id} entry={entry} />
@@ -224,7 +223,7 @@ export function ResultsPanel() {
             </div>
           )}
         </ScrollArea>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
