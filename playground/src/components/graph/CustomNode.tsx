@@ -3,32 +3,20 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { useFlowStore } from '@/hooks/useFlowStore'
 import { useGraphStore } from '@/hooks/useGraphStore'
 
-const KIND_STYLES: Record<string, { bg: string; border: string; text: string; badge: string }> = {
-  function: { bg: '#1e3a5f', border: '#3b82f6', text: '#93c5fd', badge: '#3b82f6' },
-  class:    { bg: '#14532d', border: '#22c55e', text: '#86efac', badge: '#22c55e' },
-  module:   { bg: '#3b0764', border: '#a855f7', text: '#d8b4fe', badge: '#a855f7' },
-  service:  { bg: '#431407', border: '#f97316', text: '#fdba74', badge: '#f97316' },
-  database: { bg: '#450a0a', border: '#ef4444', text: '#fca5a5', badge: '#ef4444' },
-  queue:    { bg: '#422006', border: '#eab308', text: '#fde047', badge: '#eab308' },
-}
+const NAMED_KINDS = new Set(['function', 'class', 'module', 'service', 'database', 'queue', 'default'])
+const FALLBACK_NAMES = ['fallback-0', 'fallback-1', 'fallback-2']
 
-const FALLBACK_STYLES = [
-  { bg: '#164e63', border: '#06b6d4', text: '#67e8f9', badge: '#06b6d4' },
-  { bg: '#4a044e', border: '#d946ef', text: '#f0abfc', badge: '#d946ef' },
-  { bg: '#1e1b4b', border: '#6366f1', text: '#a5b4fc', badge: '#6366f1' },
-]
-
-function getKindStyle(kind: string) {
-  if (KIND_STYLES[kind]) return KIND_STYLES[kind]
+function getKindTokenName(kind: string): string {
+  if (NAMED_KINDS.has(kind)) return kind
   let hash = 0
   for (let i = 0; i < kind.length; i++) hash = kind.charCodeAt(i) + ((hash << 5) - hash)
-  return FALLBACK_STYLES[Math.abs(hash) % FALLBACK_STYLES.length]
+  return FALLBACK_NAMES[Math.abs(hash) % FALLBACK_NAMES.length]
 }
 
 export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
   const kind = (data.kind as string) || 'default'
   const degree = (data.degree as number) || 0
-  const s = getKindStyle(kind)
+  const kindName = getKindTokenName(kind)
 
   // Read hover state — returns a primitive boolean, no new objects
   const isHoverTarget = useFlowStore((st) => st.hoveredNodeId === id)
@@ -55,12 +43,16 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
   return (
     <div
       style={{
-        backgroundColor: dimmed ? '#1a1a1a' : s.bg,
-        borderColor: highlighted ? '#60a5fa' : dimmed ? '#333' : s.border,
+        backgroundColor: dimmed ? 'var(--graph-node-dimmed-bg)' : `var(--kind-${kindName}-bg)`,
+        borderColor: highlighted
+          ? 'var(--graph-highlight-border)'
+          : dimmed ? 'var(--graph-node-dimmed-border)'
+          : `var(--kind-${kindName}-border)`,
         borderWidth: highlighted ? '2px' : '1px',
         boxShadow: highlighted
-          ? '0 0 16px rgba(96,165,250,0.5)'
-          : dimmed ? 'none' : `0 0 ${6 + degree * 2}px ${s.border}44`,
+          ? '0 0 16px var(--graph-highlight-shadow)'
+          : dimmed ? 'none'
+          : `0 0 ${6 + degree * 2}px color-mix(in srgb, var(--kind-${kindName}-border) 27%, transparent)`,
         opacity: dimmed ? 0.2 : 1,
         transition: 'opacity 0.2s, background-color 0.2s, border-color 0.2s, box-shadow 0.2s',
         transform: `scale(${dimmed ? 0.95 : scale})`,
@@ -68,10 +60,10 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
       }}
       className="px-3 py-2 rounded-lg border"
     >
-      <Handle type="target" position={Position.Top} className="!w-2 !h-2" style={{ background: s.border }} />
+      <Handle type="target" position={Position.Top} className="!w-2 !h-2" style={{ background: `var(--kind-${kindName}-border)` }} />
       <div
         className="text-xs font-semibold truncate"
-        style={{ color: dimmed ? '#555' : s.text, fontSize: `${11 + Math.min(degree, 3)}px` }}
+        style={{ color: dimmed ? 'var(--graph-node-dimmed-text)' : `var(--kind-${kindName}-text)`, fontSize: `${11 + Math.min(degree, 3)}px` }}
       >
         {data.label as string}
       </div>
@@ -79,20 +71,22 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
         <div
           className="text-[9px] inline-block px-1.5 py-0.5 rounded"
           style={{
-            backgroundColor: `${s.badge}22`,
-            color: dimmed ? '#444' : s.badge,
-            border: `1px solid ${s.badge}44`,
+            backgroundColor: `color-mix(in srgb, var(--kind-${kindName}-badge) 13%, transparent)`,
+            color: dimmed ? 'var(--graph-node-dimmed-text)' : `var(--kind-${kindName}-badge)`,
+            border: dimmed
+              ? '1px solid var(--graph-node-dimmed-text)'
+              : `1px solid color-mix(in srgb, var(--kind-${kindName}-badge) 27%, transparent)`,
           }}
         >
           {kind}
         </div>
         {degree > 0 && !dimmed && (
-          <div className="text-[8px] px-1 py-0.5 rounded" style={{ color: '#888', backgroundColor: '#ffffff11' }}>
+          <div className="text-[8px] px-1 py-0.5 rounded" style={{ color: 'var(--graph-degree-text)', backgroundColor: 'var(--graph-degree-bg)' }}>
             {degree}
           </div>
         )}
       </div>
-      <Handle type="source" position={Position.Bottom} className="!w-2 !h-2" style={{ background: s.border }} />
+      <Handle type="source" position={Position.Bottom} className="!w-2 !h-2" style={{ background: `var(--kind-${kindName}-border)` }} />
     </div>
   )
 })
