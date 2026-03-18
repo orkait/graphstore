@@ -43,27 +43,34 @@ export function EditorPanel() {
   const executeQuery = useGraphStore((s) => s.executeQuery)
   const executeAll = useGraphStore((s) => s.executeAll)
 
+  const getFullLines = useCallback((view: EditorView) => {
+    const { from, to } = view.state.selection.main
+    if (from === to) return ''
+    const firstLine = view.state.doc.lineAt(from)
+    const lastLine = view.state.doc.lineAt(to)
+    return view.state.sliceDoc(firstLine.from, lastLine.to)
+  }, [])
+
   const handleRunSelected = useCallback(
     (view: EditorView) => {
-      const sel = view.state.sliceDoc(
-        view.state.selection.main.from,
-        view.state.selection.main.to,
-      )
-      const text = sel || view.state.doc.lineAt(view.state.selection.main.head).text
+      const text = getFullLines(view) || view.state.doc.lineAt(view.state.selection.main.head).text
       if (text.trim()) executeQuery(text.trim())
       return true
     },
-    [executeQuery],
+    [executeQuery, getFullLines],
   )
 
   const onUpdate = useCallback(
     (update: ViewUpdate) => {
       if (!update.selectionSet) return
-      const sel = update.state.sliceDoc(
-        update.state.selection.main.from,
-        update.state.selection.main.to,
-      )
-      setEditorSelection(sel)
+      const { from, to } = update.state.selection.main
+      if (from === to) {
+        setEditorSelection('')
+        return
+      }
+      const firstLine = update.state.doc.lineAt(from)
+      const lastLine = update.state.doc.lineAt(to)
+      setEditorSelection(update.state.sliceDoc(firstLine.from, lastLine.to))
     },
     [setEditorSelection],
   )
