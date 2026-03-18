@@ -23,7 +23,7 @@ interface Config {
   costThreshold: number
   explainBeforeExecute: boolean
   showElapsed: boolean
-  isDark: boolean
+  isDark: boolean  // client-only; not synced to server
 }
 
 interface GraphStoreState {
