@@ -58,6 +58,7 @@ export function EditorPanel() {
 
   const onUpdate = useCallback(
     (update: ViewUpdate) => {
+      if (!update.selectionSet) return
       const sel = update.state.sliceDoc(
         update.state.selection.main.from,
         update.state.selection.main.to,

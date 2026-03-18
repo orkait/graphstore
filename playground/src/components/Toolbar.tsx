@@ -69,7 +69,10 @@ export function Toolbar() {
         </DropdownMenu>
         <Separator orientation="vertical" className="h-5" />
         {hasSelection ? (
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={executeSelected}>
+          <Button
+            variant="ghost" size="sm" className="h-7 text-xs gap-1.5"
+            onMouseDown={(e) => { e.preventDefault(); executeSelected() }}
+          >
             <Play className="w-3.5 h-3.5" /> Run Selected
           </Button>
         ) : (
