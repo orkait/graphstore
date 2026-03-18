@@ -84,12 +84,13 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
       return <span className="text-sm">{d === -1 ? 'No path found' : `Distance: ${d}`}</span>
     }
 
-    // Match: array of binding objects
-    if (result.kind === 'match' && Array.isArray(result.data)) {
-      if (result.data.length === 0)
+    // Match: object with bindings and edges
+    if (result.kind === 'match') {
+      const bindings = Array.isArray(result.data?.bindings) ? result.data.bindings : []
+      if (bindings.length === 0)
         return <span className="text-muted-foreground">No matches</span>
       const allKeys = new Set<string>()
-      result.data.forEach((b: Record<string, string>) => Object.keys(b).forEach(k => allKeys.add(k)))
+      bindings.forEach((b: Record<string, string>) => Object.keys(b).forEach(k => allKeys.add(k)))
       const keys = [...allKeys]
       return (
         <table className="w-full text-xs">
@@ -99,13 +100,71 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
             </tr>
           </thead>
           <tbody>
-            {result.data.map((row: Record<string, string>, i: number) => (
+            {bindings.map((row: Record<string, string>, i: number) => (
               <tr key={i} className="border-b border-border/50">
                 {keys.map(k => <td key={k} className="p-1">{row[k] || ''}</td>)}
               </tr>
             ))}
           </tbody>
         </table>
+      )
+    }
+
+    // Subgraph: object with nodes and edges arrays
+    if (result.kind === 'subgraph' && typeof result.data === 'object' && result.data !== null) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nodes = Array.isArray((result.data as any).nodes) ? (result.data as any).nodes : []
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const edges = Array.isArray((result.data as any).edges) ? (result.data as any).edges : []
+      return (
+        <div className="space-y-2">
+          {nodes.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold mb-1 text-muted-foreground">Nodes ({nodes.length})</div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {nodes.length > 0 && Object.keys(nodes[0]).map((k) => (
+                      <th key={k} className="text-left p-1 text-muted-foreground">{k}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {nodes.map((row: Record<string, unknown>, i: number) => (
+                    <tr key={i} className="border-b border-border/50">
+                      {Object.keys(row).map((k) => (
+                        <td key={k} className="p-1">{JSON.stringify(row[k])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {edges.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold mb-1 text-muted-foreground">Edges ({edges.length})</div>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    {edges.length > 0 && Object.keys(edges[0]).map((k) => (
+                      <th key={k} className="text-left p-1 text-muted-foreground">{k}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {edges.map((row: Record<string, unknown>, i: number) => (
+                    <tr key={i} className="border-b border-border/50">
+                      {Object.keys(row).map((k) => (
+                        <td key={k} className="p-1">{JSON.stringify(row[k])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )
     }
 

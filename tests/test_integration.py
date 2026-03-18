@@ -242,13 +242,13 @@ def test_complex_queries():
     # MATCH single hop
     r = g.execute('MATCH ("fn0") -[kind = "calls"]-> (b)')
     assert r.count == 1
-    assert r.data[0]["b"] == "fn1"
+    assert r.data["bindings"][0]["b"] == "fn1"
 
     # MATCH multi-hop
     r = g.execute('MATCH ("fn0") -[kind = "calls"]-> (b) -[kind = "calls"]-> (c)')
     assert r.count == 1
-    assert r.data[0]["b"] == "fn1"
-    assert r.data[0]["c"] == "fn2"
+    assert r.data["bindings"][0]["b"] == "fn1"
+    assert r.data["bindings"][0]["c"] == "fn2"
 
 
 # ── Test 11: UPSERT behavior ────────────────────────────────────────

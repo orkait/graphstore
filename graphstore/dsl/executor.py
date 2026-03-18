@@ -278,7 +278,7 @@ class Executor:
     def _ancestors(self, q: AncestorsQuery) -> Result:
         slot = self._resolve_slot(q.node_id)
         if slot is None:
-            return Result(kind="nodes", data=[], count=0)
+            return Result(kind="subgraph", data={"nodes": [], "edges": []}, count=0)
 
         edge_type = self._extract_kind_from_where(q.where)
         # Ancestors = BFS on TRANSPOSED matrix (follow incoming edges)
@@ -290,41 +290,80 @@ class Executor:
                 matrix = matrix.T.tocsr()
 
         if matrix is None:
-            return Result(kind="nodes", data=[], count=0)
+            node_data = self.store.get_node(q.node_id)
+            return Result(
+                kind="subgraph",
+                data={"nodes": [{**node_data, "_query_anchor": True}] if node_data else [], "edges": []},
+                count=0,
+            )
 
         visited = bfs_traverse(matrix, slot, q.depth)
+        visited_slots = {node_idx for node_idx, _ in visited}
+
         nodes = []
         for node_idx, depth in visited:
-            if node_idx == slot:
-                continue  # skip the start node
             nid = self.store._slot_to_id(node_idx)
             if nid:
                 node = self.store.get_node(nid)
                 if node:
+                    node["_depth"] = depth
+                    if node_idx == slot:
+                        node["_query_anchor"] = True
                     nodes.append(node)
-        return Result(kind="nodes", data=nodes, count=len(nodes))
+
+        # Collect forward edges between all visited nodes (incl. anchor)
+        edges = []
+        for node_idx in visited_slots:
+            nid = self.store._slot_to_id(node_idx)
+            if nid:
+                for e in self.store.get_edges_from(nid, kind=edge_type):
+                    tgt_slot = self._resolve_slot(e["target"])
+                    if tgt_slot in visited_slots:
+                        edges.append(e)
+
+        ancestor_count = sum(1 for n in nodes if not n.get("_query_anchor"))
+        return Result(kind="subgraph", data={"nodes": nodes, "edges": edges}, count=ancestor_count)
 
     def _descendants(self, q: DescendantsQuery) -> Result:
         slot = self._resolve_slot(q.node_id)
         if slot is None:
-            return Result(kind="nodes", data=[], count=0)
+            return Result(kind="subgraph", data={"nodes": [], "edges": []}, count=0)
 
         edge_type = self._extract_kind_from_where(q.where)
         matrix = self.store.edge_matrices.get({edge_type} if edge_type else None)
         if matrix is None:
-            return Result(kind="nodes", data=[], count=0)
+            node_data = self.store.get_node(q.node_id)
+            return Result(
+                kind="subgraph",
+                data={"nodes": [{**node_data, "_query_anchor": True}] if node_data else [], "edges": []},
+                count=0,
+            )
 
         visited = bfs_traverse(matrix, slot, q.depth)
+        visited_slots = {node_idx for node_idx, _ in visited}
+
         nodes = []
         for node_idx, depth in visited:
-            if node_idx == slot:
-                continue  # skip the start node
             nid = self.store._slot_to_id(node_idx)
             if nid:
                 node = self.store.get_node(nid)
                 if node:
+                    node["_depth"] = depth
+                    if node_idx == slot:
+                        node["_query_anchor"] = True
                     nodes.append(node)
-        return Result(kind="nodes", data=nodes, count=len(nodes))
+
+        edges = []
+        for node_idx in visited_slots:
+            nid = self.store._slot_to_id(node_idx)
+            if nid:
+                for e in self.store.get_edges_from(nid, kind=edge_type):
+                    tgt_slot = self._resolve_slot(e["target"])
+                    if tgt_slot in visited_slots:
+                        edges.append(e)
+
+        descendant_count = sum(1 for n in nodes if not n.get("_query_anchor"))
+        return Result(kind="subgraph", data={"nodes": nodes, "edges": edges}, count=descendant_count)
 
     def _common_neighbors(self, q: CommonNeighborsQuery) -> Result:
         slot_a = self._resolve_slot(q.node_a)
@@ -356,15 +395,19 @@ class Executor:
             raise CostThresholdExceeded(cost.estimated_frontier, 100_000)
 
         # Execute match pattern using sparse matrix traversal
-        results = self._execute_match_pattern(pattern)
+        bindings, edges = self._execute_match_pattern(pattern)
 
         if q.limit:
-            results = results[: q.limit.value]
+            bindings = bindings[: q.limit.value]
 
-        return Result(kind="match", data=results, count=len(results))
+        return Result(
+            kind="match",
+            data={"bindings": bindings, "edges": edges},
+            count=len(bindings),
+        )
 
-    def _execute_match_pattern(self, pattern: MatchPattern) -> list[dict]:
-        """Execute a MATCH pattern. Returns list of variable binding dicts."""
+    def _execute_match_pattern(self, pattern: MatchPattern) -> tuple[list[dict], list[dict]]:
+        """Execute a MATCH pattern. Returns (bindings, edges)."""
         steps = pattern.steps
         arrows = pattern.arrows
 
@@ -373,7 +416,7 @@ class Executor:
         if first_step.bound_id:
             start_slot = self._resolve_slot(first_step.bound_id)
             if start_slot is None:
-                return []
+                return [], []
             current_slots = [start_slot]
         else:
             # Unbound start - get all nodes matching filter
@@ -389,10 +432,11 @@ class Executor:
                     current_slots.append(s)
 
         if not current_slots:
-            return []
+            return [], []
 
-        # Track bindings for each path
+        # Track bindings and edges for each path
         paths = [[] for _ in current_slots]
+        edge_trails = [[] for _ in current_slots]
 
         # Add first step bindings
         for i, slot in enumerate(current_slots):
@@ -407,8 +451,10 @@ class Executor:
             edge_type = self._extract_edge_type_from_expr(arrow.expr)
             new_paths = []
             new_slots = []
+            new_edge_trails = []
 
             for i, slot in enumerate(current_slots):
+                source_nid = self.store._slot_to_id(slot)
                 neighbors = self.store.edge_matrices.neighbors_out(slot, edge_type)
 
                 for nb in neighbors:
@@ -434,30 +480,44 @@ class Executor:
                     elif next_step.bound_id:
                         new_path.append(("_bound", nid))
 
+                    new_edge_trail = list(edge_trails[i]) + [
+                        {"source": source_nid, "target": nid, "kind": edge_type or ""}
+                    ]
+
                     new_paths.append(new_path)
                     new_slots.append(nb)
+                    new_edge_trails.append(new_edge_trail)
 
             current_slots = new_slots
             paths = new_paths
+            edge_trails = new_edge_trails
 
             if not current_slots:
-                return []
+                return [], []
 
             # Cap at 1000 results
             if len(current_slots) > 1000:
                 current_slots = current_slots[:1000]
                 paths = paths[:1000]
+                edge_trails = edge_trails[:1000]
 
-        # Convert paths to result dicts
-        results = []
+        # Convert paths to binding dicts
+        bindings = []
         for path in paths:
             binding = {}
             for var_name, node_id in path:
                 if not var_name.startswith("_"):
                     binding[var_name] = node_id
-            results.append(binding)
+            bindings.append(binding)
 
-        return results
+        # Deduplicate edges by (source, target, kind)
+        seen_edges: dict[str, dict] = {}
+        for trail in edge_trails:
+            for e in trail:
+                key = f"{e['source']}->{e['target']}:{e['kind']}"
+                seen_edges[key] = e
+
+        return bindings, list(seen_edges.values())
 
     # --- Write handlers ---
 

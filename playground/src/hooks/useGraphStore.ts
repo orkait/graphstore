@@ -131,9 +131,16 @@ function extractHighlights(result: Result): { nodeIds: Set<string>; edgeKeys: Se
         result.data.edges.forEach((e: any) => edgeKeys.add(`${e.source}->${e.target}`))
       break
     case 'match':
-      if (Array.isArray(result.data))
-        result.data.forEach((binding: Record<string, string>) =>
+      if (Array.isArray(result.data?.bindings))
+        result.data.bindings.forEach((binding: Record<string, string>) =>
           Object.values(binding).forEach(id => nodeIds.add(id)))
+      if (Array.isArray(result.data?.edges))
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        result.data.edges.forEach((e: any) => {
+          if (e.source) nodeIds.add(e.source)
+          if (e.target) nodeIds.add(e.target)
+          edgeKeys.add(`${e.source}->${e.target}`)
+        })
       break
   }
   return { nodeIds, edgeKeys }

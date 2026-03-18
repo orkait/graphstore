@@ -251,15 +251,17 @@ class TestDistanceQuery:
 class TestAncestorsQuery:
     def test_ancestors(self, graph):
         r = execute(graph, 'ANCESTORS OF "fn_parse" DEPTH 2 WHERE kind = "calls"')
-        assert r.kind == "nodes"
-        ids = {n["id"] for n in r.data}
+        assert r.kind == "subgraph"
+        ids = {n["id"] for n in r.data["nodes"] if not n.get("_query_anchor")}
         # fn_main -> fn_parse (direct caller)
         # fn_helper -> fn_parse (direct caller)
         # fn_main -> fn_helper (caller of caller)
         assert "fn_main" in ids
         assert "fn_helper" in ids
-        # fn_parse itself should NOT be included
+        # fn_parse itself should NOT be included (excluding anchor)
         assert "fn_parse" not in ids
+        # Verify edges are returned
+        assert len(r.data["edges"]) > 0
 
 
 # =============================================
@@ -269,13 +271,15 @@ class TestAncestorsQuery:
 class TestDescendantsQuery:
     def test_descendants(self, graph):
         r = execute(graph, 'DESCENDANTS OF "fn_main" DEPTH 2 WHERE kind = "calls"')
-        assert r.kind == "nodes"
-        ids = {n["id"] for n in r.data}
+        assert r.kind == "subgraph"
+        ids = {n["id"] for n in r.data["nodes"] if not n.get("_query_anchor")}
         assert "fn_helper" in ids
         assert "fn_parse" in ids
         assert "fn_run" in ids
-        # fn_main itself should NOT be included
+        # fn_main itself should NOT be included (excluding anchor)
         assert "fn_main" not in ids
+        # Verify edges are returned
+        assert len(r.data["edges"]) > 0
 
 
 # =============================================
@@ -321,9 +325,11 @@ class TestMatchQuery:
         assert r.kind == "match"
         assert r.count > 0
         # Each result should have variable "b" bound
-        for binding in r.data:
+        for binding in r.data["bindings"]:
             assert "b" in binding
-        bound_ids = {b["b"] for b in r.data}
+        bound_ids = {b["b"] for b in r.data["bindings"]}
         assert "fn_helper" in bound_ids
         assert "fn_parse" in bound_ids
         assert "fn_run" in bound_ids
+        # Verify edges are returned
+        assert len(r.data["edges"]) > 0
