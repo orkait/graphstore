@@ -95,12 +95,9 @@ def execute(req: ExecuteRequest):
     try:
         result = store.execute(req.query)
     except GraphStoreError as exc:
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse(
-            status_code=400,
-            content={"kind": "error", "data": str(exc), "count": 0, "elapsed_us": 0},
-        )
+        # Return soft errors (NodeExists, duplicate edge) as 200 so the
+        # frontend can continue executing subsequent queries in a batch.
+        return {"kind": "error", "data": str(exc), "count": 0, "elapsed_us": 0}
     return _result_to_dict(result)
 
 

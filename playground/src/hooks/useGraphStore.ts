@@ -161,14 +161,22 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
     const id = `r-${++resultCounter}`
     try {
       const result = await api.execute(query)
-      const { nodeIds, edgeKeys } = extractHighlights(result)
-      set((s) => ({
-        results: [{ id, query, result, error: null, timestamp: Date.now() }, ...s.results],
-        highlightedNodeIds: nodeIds,
-        highlightedEdges: edgeKeys,
-        loading: false,
-      }))
-      if (result.kind === 'ok') await get().refreshGraph()
+      if (result.kind === 'error') {
+        // Server returned a soft error (e.g. NodeExists, duplicate edge)
+        set((s) => ({
+          results: [{ id, query, result: null, error: result.data as string, timestamp: Date.now() }, ...s.results],
+          loading: false,
+        }))
+      } else {
+        const { nodeIds, edgeKeys } = extractHighlights(result)
+        set((s) => ({
+          results: [{ id, query, result, error: null, timestamp: Date.now() }, ...s.results],
+          highlightedNodeIds: nodeIds,
+          highlightedEdges: edgeKeys,
+          loading: false,
+        }))
+        if (result.kind === 'ok') await get().refreshGraph()
+      }
     } catch (err: any) {
       set((s) => ({
         results: [{ id, query, result: null, error: err?.error || String(err), timestamp: Date.now() }, ...s.results],

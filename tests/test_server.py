@@ -57,7 +57,8 @@ class TestExecute:
             "/api/execute",
             json={"query": "THIS IS NOT VALID DSL"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert resp.json()["kind"] == "error"
         body = resp.json()
         assert body["kind"] == "error"
 
