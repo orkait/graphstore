@@ -1,0 +1,283 @@
+"""System DSL executor: handles SYS-prefixed queries.
+
+Maps system AST nodes to CoreStore, SchemaRegistry, and sqlite operations
+for stats, schema management, query logs, WAL, and diagnostics.
+"""
+
+import time
+import sqlite3
+
+from graphstore.store import CoreStore
+from graphstore.schema import SchemaRegistry
+from graphstore.types import Result
+from graphstore.dsl.ast_nodes import (
+    Condition,
+    MatchQuery,
+    NodesQuery,
+    SysCheckpoint,
+    SysClear,
+    SysDescribe,
+    SysEdgeKinds,
+    SysExplain,
+    SysFailedQueries,
+    SysFrequentQueries,
+    SysKinds,
+    SysRebuild,
+    SysRegisterEdgeKind,
+    SysRegisterNodeKind,
+    SysSlowQueries,
+    SysStats,
+    SysUnregister,
+    SysWal,
+    TraverseQuery,
+)
+from graphstore.dsl.cost_estimator import estimate_match_cost, estimate_traverse_cost
+from graphstore.memory import estimate as estimate_memory
+from graphstore.errors import GraphStoreError
+
+
+class SystemExecutor:
+    def __init__(
+        self,
+        store: CoreStore,
+        schema: SchemaRegistry,
+        conn: sqlite3.Connection | None = None,
+    ):
+        self.store = store
+        self.schema = schema
+        self.conn = conn
+        self._start_time = time.time()
+
+    def execute(self, ast) -> Result:
+        start = time.perf_counter_ns()
+        result = self._dispatch(ast)
+        result.elapsed_us = (time.perf_counter_ns() - start) // 1000
+        return result
+
+    def _dispatch(self, ast) -> Result:
+        handlers = {
+            SysStats: self._stats,
+            SysKinds: self._kinds,
+            SysEdgeKinds: self._edge_kinds,
+            SysDescribe: self._describe,
+            SysSlowQueries: self._slow_queries,
+            SysFrequentQueries: self._frequent_queries,
+            SysFailedQueries: self._failed_queries,
+            SysExplain: self._explain,
+            SysRegisterNodeKind: self._register_node_kind,
+            SysRegisterEdgeKind: self._register_edge_kind,
+            SysUnregister: self._unregister,
+            SysCheckpoint: self._checkpoint,
+            SysRebuild: self._rebuild,
+            SysClear: self._clear,
+            SysWal: self._wal,
+        }
+        handler = handlers.get(type(ast))
+        if handler is None:
+            raise GraphStoreError(f"Unknown system command: {type(ast).__name__}")
+        return handler(ast)
+
+    def _stats(self, q: SysStats) -> Result:
+        data = {}
+        if q.target is None or q.target == "NODES":
+            data["node_count"] = self.store.node_count
+        if q.target is None or q.target == "EDGES":
+            data["edge_count"] = self.store.edge_count
+            if q.target is None:
+                data["edge_counts_by_type"] = {
+                    etype: m.nnz
+                    for etype, m in self.store.edge_matrices._typed.items()
+                }
+        if q.target is None or q.target == "MEMORY":
+            data["memory_bytes"] = estimate_memory(
+                self.store.node_count, self.store.edge_count
+            )
+            data["ceiling_bytes"] = self.store._ceiling_bytes
+        if q.target is None or q.target == "WAL":
+            if self.conn:
+                row = self.conn.execute("SELECT COUNT(*) FROM wal").fetchone()
+                data["wal_entries"] = row[0]
+            else:
+                data["wal_entries"] = 0
+        if q.target is None:
+            data["uptime_seconds"] = time.time() - self._start_time
+        return Result(kind="stats", data=data, count=1)
+
+    def _kinds(self, q: SysKinds) -> Result:
+        kinds = self.schema.list_node_kinds()
+        return Result(kind="schema", data=kinds, count=len(kinds))
+
+    def _edge_kinds(self, q: SysEdgeKinds) -> Result:
+        kinds = self.schema.list_edge_kinds()
+        return Result(kind="schema", data=kinds, count=len(kinds))
+
+    def _describe(self, q: SysDescribe) -> Result:
+        if q.entity_type == "NODE":
+            data = self.schema.describe_node_kind(q.name)
+        else:
+            data = self.schema.describe_edge_kind(q.name)
+        return Result(kind="schema", data=data, count=1 if data else 0)
+
+    def _slow_queries(self, q: SysSlowQueries) -> Result:
+        if not self.conn:
+            return Result(kind="log_entries", data=[], count=0)
+        sql = "SELECT timestamp, query, elapsed_us, result_count, error FROM query_log"
+        params: list = []
+        if q.since:
+            sql += " WHERE timestamp >= ?"
+            import datetime
+
+            dt = datetime.datetime.fromisoformat(q.since)
+            params.append(dt.timestamp())
+        sql += " ORDER BY elapsed_us DESC"
+        if q.limit:
+            sql += " LIMIT ?"
+            params.append(q.limit.value)
+        rows = self.conn.execute(sql, params).fetchall()
+        entries = [
+            {
+                "timestamp": r[0],
+                "query": r[1],
+                "elapsed_us": r[2],
+                "result_count": r[3],
+                "error": r[4],
+            }
+            for r in rows
+        ]
+        return Result(kind="log_entries", data=entries, count=len(entries))
+
+    def _frequent_queries(self, q: SysFrequentQueries) -> Result:
+        if not self.conn:
+            return Result(kind="log_entries", data=[], count=0)
+        sql = "SELECT query, COUNT(*) as cnt FROM query_log GROUP BY query ORDER BY cnt DESC"
+        params: list = []
+        if q.limit:
+            sql += " LIMIT ?"
+            params.append(q.limit.value)
+        rows = self.conn.execute(sql, params).fetchall()
+        entries = [{"query": r[0], "count": r[1]} for r in rows]
+        return Result(kind="log_entries", data=entries, count=len(entries))
+
+    def _failed_queries(self, q: SysFailedQueries) -> Result:
+        if not self.conn:
+            return Result(kind="log_entries", data=[], count=0)
+        sql = (
+            "SELECT timestamp, query, elapsed_us, error FROM query_log "
+            "WHERE error IS NOT NULL ORDER BY timestamp DESC"
+        )
+        params: list = []
+        if q.limit:
+            sql += " LIMIT ?"
+            params.append(q.limit.value)
+        rows = self.conn.execute(sql, params).fetchall()
+        entries = [
+            {
+                "timestamp": r[0],
+                "query": r[1],
+                "elapsed_us": r[2],
+                "error": r[3],
+            }
+            for r in rows
+        ]
+        return Result(kind="log_entries", data=entries, count=len(entries))
+
+    def _explain(self, q: SysExplain) -> Result:
+        """Run cost estimator on the inner query without executing."""
+        inner = q.query
+        if isinstance(inner, MatchQuery):
+            cost = estimate_match_cost(inner.pattern, self.store.edge_matrices)
+        elif isinstance(inner, TraverseQuery):
+            edge_type = None
+            if inner.where:
+                expr = inner.where.expr
+                if (
+                    isinstance(expr, Condition)
+                    and expr.field == "kind"
+                    and expr.op == "="
+                ):
+                    edge_type = expr.value
+            cost = estimate_traverse_cost(
+                inner.depth, self.store.edge_matrices, edge_type
+            )
+        elif isinstance(inner, NodesQuery):
+            data = {"type": "scan", "estimated_nodes": self.store.node_count}
+            if inner.where:
+                expr = inner.where.expr
+                if (
+                    isinstance(expr, Condition)
+                    and expr.field in self.store._indexed_fields
+                ):
+                    data["type"] = "index_lookup"
+            return Result(kind="plan", data=data, count=1)
+        else:
+            return Result(
+                kind="plan",
+                data={
+                    "type": "direct",
+                    "note": "no cost estimation for this query type",
+                },
+                count=1,
+            )
+
+        return Result(kind="plan", data=cost.to_dict(), count=1)
+
+    def _register_node_kind(self, q: SysRegisterNodeKind) -> Result:
+        self.schema.register_node_kind(q.kind, q.required, q.optional)
+        return Result(kind="ok", data=None, count=0)
+
+    def _register_edge_kind(self, q: SysRegisterEdgeKind) -> Result:
+        self.schema.register_edge_kind(q.kind, q.from_kinds, q.to_kinds)
+        return Result(kind="ok", data=None, count=0)
+
+    def _unregister(self, q: SysUnregister) -> Result:
+        if q.entity_type == "NODE":
+            self.schema.unregister_node_kind(q.kind)
+        else:
+            self.schema.unregister_edge_kind(q.kind)
+        return Result(kind="ok", data=None, count=0)
+
+    def _checkpoint(self, q: SysCheckpoint) -> Result:
+        # Will be wired up by GraphStore
+        return Result(kind="ok", data=None, count=0)
+
+    def _rebuild(self, q: SysRebuild) -> Result:
+        self.store._rebuild_edges()
+        # Rebuild secondary indices
+        for field in list(self.store._indexed_fields):
+            self.store.add_index(field)
+        return Result(kind="ok", data=None, count=0)
+
+    def _clear(self, q: SysClear) -> Result:
+        if q.target == "LOG":
+            if self.conn:
+                self.conn.execute("DELETE FROM query_log")
+                self.conn.commit()
+        elif q.target == "CACHE":
+            from graphstore.dsl.parser import clear_cache
+
+            clear_cache()
+            self.store.edge_matrices._cache.clear()
+            self.store.edge_matrices._transpose_cache.clear()
+        return Result(kind="ok", data=None, count=0)
+
+    def _wal(self, q: SysWal) -> Result:
+        if q.action == "STATUS":
+            if self.conn:
+                row = self.conn.execute("SELECT COUNT(*) FROM wal").fetchone()
+                count = row[0]
+                size_row = self.conn.execute(
+                    "SELECT COALESCE(SUM(LENGTH(statement)), 0) FROM wal"
+                ).fetchone()
+                size = size_row[0]
+                return Result(
+                    kind="stats",
+                    data={"wal_entries": count, "wal_bytes": size},
+                    count=1,
+                )
+            return Result(
+                kind="stats", data={"wal_entries": 0, "wal_bytes": 0}, count=1
+            )
+        elif q.action == "REPLAY":
+            # Will be wired up by GraphStore
+            return Result(kind="ok", data=None, count=0)
+        return Result(kind="ok", data=None, count=0)

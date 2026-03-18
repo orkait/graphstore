@@ -1,0 +1,138 @@
+start: statement
+?statement: system_query | user_query
+
+// =============================================
+// USER DSL
+// =============================================
+
+?user_query: read_query | write_query | batch
+
+// --- Reads ---
+?read_query: node_q | nodes_q | edges_q | traverse_q | subgraph_q
+           | path_q | paths_q | shortest_q | distance_q
+           | ancestors_q | descendants_q | common_q | match_q
+
+node_q:        "NODE" STRING
+nodes_q:       "NODES" where_clause? limit_clause?
+edges_q:       "EDGES" direction STRING where_clause?
+traverse_q:    "TRAVERSE" "FROM" STRING "DEPTH" NUMBER where_clause?
+subgraph_q:    "SUBGRAPH" "FROM" STRING "DEPTH" NUMBER
+path_q:        "PATH" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER where_clause?
+paths_q:       "PATHS" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER where_clause?
+shortest_q:    "SHORTEST" "PATH" "FROM" STRING "TO" STRING where_clause?
+distance_q:    "DISTANCE" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER
+ancestors_q:   "ANCESTORS" "OF" STRING "DEPTH" NUMBER where_clause?
+descendants_q: "DESCENDANTS" "OF" STRING "DEPTH" NUMBER where_clause?
+common_q:      "COMMON" "NEIGHBORS" "OF" STRING "AND" STRING where_clause?
+match_q:       "MATCH" pattern limit_clause?
+
+direction: "FROM" -> dir_from
+         | "TO" -> dir_to
+
+// --- Pattern matching ---
+pattern: match_step (arrow match_step)+
+match_step: "(" STRING ")" -> bound_step
+          | "(" IDENTIFIER step_where? ")" -> var_step
+step_where: "WHERE" expr
+arrow: "-[" expr "]->"
+
+// --- Writes ---
+?write_query: create_node | update_node | upsert_node
+            | delete_node | delete_nodes
+            | create_edge | delete_edge | delete_edges
+            | increment
+
+create_node:  "CREATE" "NODE" STRING field_pairs
+update_node:  "UPDATE" "NODE" STRING "SET" field_pairs
+upsert_node:  "UPSERT" "NODE" STRING field_pairs
+delete_node:  "DELETE" "NODE" STRING
+delete_nodes: "DELETE" "NODES" where_clause
+
+create_edge:  "CREATE" "EDGE" STRING "->" STRING field_pairs
+delete_edge:  "DELETE" "EDGE" STRING "->" STRING where_clause?
+delete_edges: "DELETE" "EDGES" direction STRING where_clause?
+
+increment:    "INCREMENT" "NODE" STRING IDENTIFIER "BY" NUMBER
+
+batch: "BEGIN" _NL (_batch_stmt _NL)* "COMMIT"
+_batch_stmt: create_node | update_node | upsert_node
+           | delete_node | delete_nodes
+           | create_edge | delete_edge | delete_edges
+           | increment
+
+field_pairs: (IDENTIFIER "=" value)*
+
+// --- Filters ---
+where_clause: "WHERE" expr
+expr: or_expr
+or_expr: and_expr "OR" or_expr | and_expr
+and_expr: not_expr "AND" and_expr | not_expr
+not_expr: "NOT" not_expr -> not_term
+        | atom
+?atom: condition | "(" expr ")" | degree_condition
+condition: IDENTIFIER OP value
+degree_condition: degree_kw IDENTIFIER? OP NUMBER
+degree_kw: "INDEGREE" -> indegree
+          | "OUTDEGREE" -> outdegree
+
+OP: "!=" | ">=" | "<=" | "=" | ">" | "<"
+?value: STRING -> val_string
+      | NUMBER -> val_number
+      | "NULL" -> val_null
+limit_clause: "LIMIT" NUMBER
+
+// =============================================
+// SYSTEM DSL
+// =============================================
+
+system_query: "SYS" sys_command
+
+?sys_command: sys_stats | sys_kinds | sys_edge_kinds
+            | sys_describe | sys_slow | sys_frequent | sys_failed
+            | sys_explain | sys_register_node_kind | sys_register_edge_kind
+            | sys_unregister | sys_checkpoint | sys_rebuild
+            | sys_clear | sys_wal
+
+sys_stats:      "STATS" STATS_TARGET?
+STATS_TARGET:   "NODES" | "EDGES" | "MEMORY" | "WAL"
+
+sys_kinds:      "KINDS"
+sys_edge_kinds: "EDGE" "KINDS"
+sys_describe:   "DESCRIBE" ENTITY_TYPE STRING
+
+sys_slow:       "SLOW" "QUERIES" since_clause? limit_clause?
+sys_frequent:   "FREQUENT" "QUERIES" limit_clause?
+sys_failed:     "FAILED" "QUERIES" limit_clause?
+since_clause:   "SINCE" STRING
+
+sys_explain:    "EXPLAIN" read_query
+
+sys_register_node_kind: "REGISTER" "NODE" "KIND" STRING "REQUIRED" ident_list optional_clause?
+sys_register_edge_kind: "REGISTER" "EDGE" "KIND" STRING "FROM" string_list "TO" string_list
+optional_clause: "OPTIONAL" ident_list
+sys_unregister:         "UNREGISTER" ENTITY_TYPE "KIND" STRING
+
+ENTITY_TYPE: "NODE" | "EDGE"
+
+sys_checkpoint: "CHECKPOINT"
+sys_rebuild:    "REBUILD" "INDICES"
+sys_clear:      "CLEAR" CLEAR_TARGET
+sys_wal:        "WAL" WAL_ACTION
+
+CLEAR_TARGET: "LOG" | "CACHE"
+WAL_ACTION: "STATUS" | "REPLAY"
+
+ident_list: IDENTIFIER ("," IDENTIFIER)*
+string_list: STRING ("," STRING)*
+
+// =============================================
+// TERMINALS
+// =============================================
+
+STRING: "\"" /[^"\\]*(\\.[^"\\]*)*/ "\""
+NUMBER: /-?[0-9]+(\.[0-9]+)?/
+IDENTIFIER: /[a-zA-Z_][a-zA-Z0-9_]*/
+_NL: /\n/+
+
+%import common.WS_INLINE
+%ignore WS_INLINE

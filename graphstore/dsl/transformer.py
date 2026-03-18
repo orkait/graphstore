@@ -1,0 +1,385 @@
+from lark import Transformer, Token
+from graphstore.dsl.ast_nodes import *
+
+
+class DSLTransformer(Transformer):
+    def start(self, args):
+        return args[0]
+
+    def statement(self, args):
+        return args[0]
+
+    def user_query(self, args):
+        return args[0]
+
+    def read_query(self, args):
+        return args[0]
+
+    def write_query(self, args):
+        return args[0]
+
+    def system_query(self, args):
+        return args[0]
+
+    def sys_command(self, args):
+        return args[0]
+
+    # --- Values ---
+    def val_string(self, args):
+        s = str(args[0])
+        if s.startswith('"') and s.endswith('"'):
+            s = s[1:-1]
+        return s.replace('\\"', '"').replace('\\\\', '\\')
+
+    def val_number(self, args):
+        s = str(args[0])
+        return float(s) if '.' in s else int(s)
+
+    def val_null(self, args):
+        return None
+
+    def STRING(self, token):
+        return token
+
+    def NUMBER(self, token):
+        return token
+
+    def IDENTIFIER(self, token):
+        return str(token)
+
+    # --- Read queries ---
+    def node_q(self, args):
+        return NodeQuery(id=self._str(args[0]))
+
+    def nodes_q(self, args):
+        where = self._find(args, WhereClause)
+        limit = self._find(args, LimitClause)
+        return NodesQuery(where=where, limit=limit)
+
+    def edges_q(self, args):
+        direction = args[0]  # "FROM" or "TO"
+        node_id = self._str(args[1])
+        where = self._find(args[2:], WhereClause)
+        return EdgesQuery(direction=direction, node_id=node_id, where=where)
+
+    def traverse_q(self, args):
+        return TraverseQuery(
+            start_id=self._str(args[0]),
+            depth=self._num(args[1]),
+            where=self._find(args[2:], WhereClause),
+        )
+
+    def subgraph_q(self, args):
+        return SubgraphQuery(start_id=self._str(args[0]), depth=self._num(args[1]))
+
+    def path_q(self, args):
+        return PathQuery(
+            from_id=self._str(args[0]),
+            to_id=self._str(args[1]),
+            max_depth=self._num(args[2]),
+            where=self._find(args[3:], WhereClause),
+        )
+
+    def paths_q(self, args):
+        return PathsQuery(
+            from_id=self._str(args[0]),
+            to_id=self._str(args[1]),
+            max_depth=self._num(args[2]),
+            where=self._find(args[3:], WhereClause),
+        )
+
+    def shortest_q(self, args):
+        return ShortestPathQuery(
+            from_id=self._str(args[0]),
+            to_id=self._str(args[1]),
+            where=self._find(args[2:], WhereClause),
+        )
+
+    def distance_q(self, args):
+        return DistanceQuery(
+            from_id=self._str(args[0]),
+            to_id=self._str(args[1]),
+            max_depth=self._num(args[2]),
+        )
+
+    def ancestors_q(self, args):
+        return AncestorsQuery(
+            node_id=self._str(args[0]),
+            depth=self._num(args[1]),
+            where=self._find(args[2:], WhereClause),
+        )
+
+    def descendants_q(self, args):
+        return DescendantsQuery(
+            node_id=self._str(args[0]),
+            depth=self._num(args[1]),
+            where=self._find(args[2:], WhereClause),
+        )
+
+    def common_q(self, args):
+        return CommonNeighborsQuery(
+            node_a=self._str(args[0]),
+            node_b=self._str(args[1]),
+            where=self._find(args[2:], WhereClause),
+        )
+
+    # --- Direction ---
+    def dir_from(self, args):
+        return "FROM"
+
+    def dir_to(self, args):
+        return "TO"
+
+    # --- Pattern matching ---
+    def match_q(self, args):
+        pattern = args[0]
+        limit = self._find(args[1:], LimitClause)
+        return MatchQuery(pattern=pattern, limit=limit)
+
+    def pattern(self, args):
+        steps = []
+        arrows = []
+        for a in args:
+            if isinstance(a, PatternStep):
+                steps.append(a)
+            elif isinstance(a, PatternArrow):
+                arrows.append(a)
+        return MatchPattern(steps=steps, arrows=arrows)
+
+    def bound_step(self, args):
+        return PatternStep(bound_id=self._str(args[0]))
+
+    def var_step(self, args):
+        var_name = str(args[0])
+        where = args[1] if len(args) > 1 else None
+        return PatternStep(variable=var_name, where=where)
+
+    def step_where(self, args):
+        return args[0]
+
+    def arrow(self, args):
+        return PatternArrow(expr=args[0])
+
+    # --- Writes ---
+    def create_node(self, args):
+        return CreateNode(
+            id=self._str(args[0]),
+            fields=args[1] if isinstance(args[1], list) else [],
+        )
+
+    def update_node(self, args):
+        return UpdateNode(
+            id=self._str(args[0]),
+            fields=args[1] if isinstance(args[1], list) else [],
+        )
+
+    def upsert_node(self, args):
+        return UpsertNode(
+            id=self._str(args[0]),
+            fields=args[1] if isinstance(args[1], list) else [],
+        )
+
+    def delete_node(self, args):
+        return DeleteNode(id=self._str(args[0]))
+
+    def delete_nodes(self, args):
+        return DeleteNodes(where=args[0])
+
+    def create_edge(self, args):
+        return CreateEdge(
+            source=self._str(args[0]),
+            target=self._str(args[1]),
+            fields=args[2] if len(args) > 2 and isinstance(args[2], list) else [],
+        )
+
+    def delete_edge(self, args):
+        return DeleteEdge(
+            source=self._str(args[0]),
+            target=self._str(args[1]),
+            where=self._find(args[2:], WhereClause),
+        )
+
+    def delete_edges(self, args):
+        direction = args[0]
+        node_id = self._str(args[1])
+        where = self._find(args[2:], WhereClause)
+        return DeleteEdges(direction=direction, node_id=node_id, where=where)
+
+    def increment(self, args):
+        return Increment(
+            node_id=self._str(args[0]),
+            field=str(args[1]),
+            amount=self._num(args[2]),
+        )
+
+    def batch(self, args):
+        stmts = [a for a in args if not isinstance(a, Token) or a.type != "NEWLINE"]
+        return Batch(statements=stmts)
+
+    def field_pairs(self, args):
+        pairs = []
+        i = 0
+        while i < len(args):
+            name = str(args[i])
+            value = args[i + 1]
+            pairs.append(FieldPair(name=name, value=value))
+            i += 2
+        return pairs
+
+    # --- Filters ---
+    def where_clause(self, args):
+        return WhereClause(expr=args[0])
+
+    def expr(self, args):
+        return args[0]
+
+    def or_expr(self, args):
+        if len(args) == 1:
+            return args[0]
+        # Right-recursive: left_operand, right (which may itself be OrExpr)
+        left, right = args[0], args[1]
+        # Flatten nested OrExpr on the right
+        if isinstance(right, OrExpr):
+            return OrExpr(operands=[left] + right.operands)
+        return OrExpr(operands=[left, right])
+
+    def and_expr(self, args):
+        if len(args) == 1:
+            return args[0]
+        left, right = args[0], args[1]
+        if isinstance(right, AndExpr):
+            return AndExpr(operands=[left] + right.operands)
+        return AndExpr(operands=[left, right])
+
+    def not_term(self, args):
+        return NotExpr(operand=args[0])
+
+    def not_expr(self, args):
+        return args[0]
+
+    def condition(self, args):
+        return Condition(field=str(args[0]), op=str(args[1]), value=args[2])
+
+    def degree_condition(self, args):
+        degree_type = args[0]
+        rest = args[1:]
+        if len(rest) == 3:
+            return DegreeCondition(
+                degree_type=degree_type,
+                edge_kind=str(rest[0]),
+                op=str(rest[1]),
+                value=self._num(rest[2]),
+            )
+        else:
+            return DegreeCondition(
+                degree_type=degree_type,
+                edge_kind=None,
+                op=str(rest[0]),
+                value=self._num(rest[1]),
+            )
+
+    def indegree(self, args):
+        return "INDEGREE"
+
+    def outdegree(self, args):
+        return "OUTDEGREE"
+
+    def limit_clause(self, args):
+        return LimitClause(value=self._num(args[0]))
+
+    # --- System queries ---
+    def sys_stats(self, args):
+        target = str(args[0]) if args else None
+        return SysStats(target=target)
+
+    def sys_kinds(self, args):
+        return SysKinds()
+
+    def sys_edge_kinds(self, args):
+        return SysEdgeKinds()
+
+    def sys_describe(self, args):
+        entity_type = str(args[0])
+        name = self._str(args[1])
+        return SysDescribe(entity_type=entity_type, name=name)
+
+    def sys_slow(self, args):
+        since = None
+        limit = None
+        for a in args:
+            if isinstance(a, str):
+                since = a
+            elif isinstance(a, LimitClause):
+                limit = a
+        return SysSlowQueries(since=since, limit=limit)
+
+    def sys_frequent(self, args):
+        return SysFrequentQueries(limit=self._find(args, LimitClause))
+
+    def sys_failed(self, args):
+        return SysFailedQueries(limit=self._find(args, LimitClause))
+
+    def since_clause(self, args):
+        return self._str(args[0])
+
+    def sys_explain(self, args):
+        return SysExplain(query=args[0])
+
+    def sys_register_node_kind(self, args):
+        kind = self._str(args[0])
+        required = args[1]  # ident_list
+        optional = args[2] if len(args) > 2 else []
+        return SysRegisterNodeKind(kind=kind, required=required, optional=optional)
+
+    def sys_register_edge_kind(self, args):
+        kind = self._str(args[0])
+        from_kinds = args[1]
+        to_kinds = args[2]
+        return SysRegisterEdgeKind(kind=kind, from_kinds=from_kinds, to_kinds=to_kinds)
+
+    def optional_clause(self, args):
+        return args[0]
+
+    def sys_unregister(self, args):
+        entity_type = str(args[0])
+        kind = self._str(args[1])
+        return SysUnregister(entity_type=entity_type, kind=kind)
+
+    def sys_checkpoint(self, args):
+        return SysCheckpoint()
+
+    def sys_rebuild(self, args):
+        return SysRebuild()
+
+    def sys_clear(self, args):
+        target = str(args[0])
+        return SysClear(target=target)
+
+    def sys_wal(self, args):
+        action = str(args[0])
+        return SysWal(action=action)
+
+    def ident_list(self, args):
+        return [str(a) for a in args]
+
+    def string_list(self, args):
+        return [self._str(a) for a in args]
+
+    # --- Helpers ---
+    def _str(self, token) -> str:
+        """Extract string value from token, stripping quotes."""
+        s = str(token)
+        if s.startswith('"') and s.endswith('"'):
+            return s[1:-1].replace('\\"', '"').replace('\\\\', '\\')
+        return s
+
+    def _num(self, token) -> int | float:
+        s = str(token)
+        return float(s) if '.' in s else int(s)
+
+    def _find(self, args, cls):
+        """Find first instance of cls in args."""
+        for a in args:
+            if isinstance(a, cls):
+                return a
+        return None

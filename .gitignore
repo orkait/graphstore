@@ -1,0 +1,5 @@
+graphstore.egg-info/
+__pycache__/
+.venv/
+*.pyc
+.pytest_cache/

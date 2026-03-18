@@ -1,0 +1,38 @@
+"""Core types for graphstore query results and graph elements."""
+
+from dataclasses import dataclass, field
+from typing import Any, TypeAlias
+import json
+
+NodeData: TypeAlias = dict[str, Any]
+
+
+@dataclass
+class Edge:
+    source: str
+    target: str
+    kind: str
+    data: dict = field(default_factory=dict)
+
+
+@dataclass
+class Result:
+    kind: str              # "node", "nodes", "edges", "path", "paths", "match",
+                           # "subgraph", "distance", "stats", "plan", "schema",
+                           # "log_entries", "ok", "error"
+    data: Any              # varies by kind
+    count: int             # number of items in data
+    elapsed_us: int = 0    # execution time in microseconds
+
+    def to_dict(self) -> dict:
+        """JSON-serializable representation."""
+        return {
+            "kind": self.kind,
+            "data": self.data,
+            "count": self.count,
+            "elapsed_us": self.elapsed_us,
+        }
+
+    def to_json(self) -> str:
+        """Compact JSON string."""
+        return json.dumps(self.to_dict(), default=str)
