@@ -6,7 +6,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
-import { Play, RotateCcw, Settings, BookOpen, Sun, Moon } from 'lucide-react'
+import { Play, PlayCircle, RotateCcw, Settings, BookOpen, Sun, Moon } from 'lucide-react'
 import { useGraphStore } from '@/hooks/useGraphStore'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { examples } from '@/examples'
@@ -14,10 +14,14 @@ import { useState, useEffect } from 'react'
 
 export function Toolbar() {
   const executeAll = useGraphStore((s) => s.executeAll)
+  const executeSelected = useGraphStore((s) => s.executeSelected)
+  const editorSelection = useGraphStore((s) => s.editorSelection)
   const resetGraph = useGraphStore((s) => s.resetGraph)
   const setEditorContent = useGraphStore((s) => s.setEditorContent)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isDark, setIsDark] = useState(true)
+
+  const hasSelection = editorSelection.trim().length > 0
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark)
@@ -64,9 +68,15 @@ export function Toolbar() {
           </DropdownMenuContent>
         </DropdownMenu>
         <Separator orientation="vertical" className="h-5" />
-        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={executeAll}>
-          <Play className="w-3.5 h-3.5" /> Run All
-        </Button>
+        {hasSelection ? (
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={executeSelected}>
+            <Play className="w-3.5 h-3.5" /> Run Selected
+          </Button>
+        ) : (
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={executeAll}>
+            <PlayCircle className="w-3.5 h-3.5" /> Run All
+          </Button>
+        )}
         <Separator orientation="vertical" className="h-5" />
         <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={resetGraph}>
           <RotateCcw className="w-3.5 h-3.5" /> Reset

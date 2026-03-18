@@ -29,12 +29,15 @@ interface GraphStoreState {
   results: ResultEntry[]
   config: Config
   editorContent: string
+  editorSelection: string
   highlightedNodeIds: Set<string>
   highlightedEdges: Set<string>
   loading: boolean
 
   setEditorContent: (content: string) => void
+  setEditorSelection: (selection: string) => void
   executeQuery: (query: string) => Promise<void>
+  executeSelected: () => Promise<void>
   executeAll: () => Promise<void>
   refreshGraph: () => Promise<void>
   resetGraph: () => Promise<void>
@@ -137,11 +140,21 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
     showElapsed: true,
   },
   editorContent: '',
+  editorSelection: '',
   highlightedNodeIds: new Set(),
   highlightedEdges: new Set(),
   loading: false,
 
   setEditorContent: (content) => set({ editorContent: content }),
+  setEditorSelection: (selection) => set({ editorSelection: selection }),
+
+  executeSelected: async () => {
+    const sel = get().editorSelection
+    if (sel.trim()) {
+      const queries = splitQueries(sel)
+      for (const q of queries) await get().executeQuery(q)
+    }
+  },
 
   executeQuery: async (query) => {
     set({ loading: true })
