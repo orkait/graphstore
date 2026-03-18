@@ -27,7 +27,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
   const updateConfig = useGraphStore((s) => s.updateConfig)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-zinc-900 border-zinc-800 text-zinc-100 max-w-md">
+      <DialogContent className="bg-card border-border text-foreground max-w-md">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
         </DialogHeader>

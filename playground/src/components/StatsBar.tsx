@@ -6,7 +6,7 @@ export function StatsBar() {
   const lastResult = results[0]
   const elapsed = lastResult?.result?.elapsed_us
   return (
-    <div className="h-7 border-t border-zinc-800 px-3 flex items-center gap-4 text-[10px] text-zinc-500 bg-zinc-900/30">
+    <div className="h-7 border-t border-border px-3 flex items-center gap-4 text-[10px] text-muted-foreground bg-card/30">
       <span>Nodes: {graph.nodes.length}</span>
       <span>Edges: {graph.edges.length}</span>
       {elapsed != null && (

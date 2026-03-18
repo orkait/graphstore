@@ -12,7 +12,11 @@ export function CustomEdge(props: EdgeProps) {
         path={edgePath}
         style={{
           ...style,
-          stroke: highlighted ? '#60a5fa' : dimmed ? '#27272a' : '#52525b',
+          stroke: highlighted
+            ? 'oklch(var(--ring))'
+            : dimmed
+              ? 'oklch(var(--border))'
+              : 'oklch(var(--muted-foreground))',
           strokeWidth: highlighted ? 2 : 1,
           opacity: dimmed ? 0.3 : 1,
           transition: 'all 0.3s',
@@ -22,7 +26,7 @@ export function CustomEdge(props: EdgeProps) {
         <text
           x={(sourceX + targetX) / 2}
           y={(sourceY + targetY) / 2 - 8}
-          className="fill-zinc-500 text-[9px]"
+          className="fill-muted-foreground text-[9px]"
           textAnchor="middle"
         >
           {data.kind as string}

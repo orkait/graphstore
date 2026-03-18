@@ -43,7 +43,7 @@ export function EditorPanel() {
   )
 
   return (
-    <div className="h-full flex flex-col bg-zinc-950">
+    <div className="h-full flex flex-col bg-background">
       <CodeMirror
         value={editorContent}
         onChange={setEditorContent}

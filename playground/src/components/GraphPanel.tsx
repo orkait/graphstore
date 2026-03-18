@@ -29,21 +29,12 @@ export function GraphPanel() {
         edgeTypes={edgeTypes}
         proOptions={proOptions}
         fitView
-        className="bg-zinc-950"
+        className="bg-background"
       >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={20}
-          size={1}
-          color="#27272a"
-        />
-        <Controls className="!bg-zinc-800 !border-zinc-700 !text-zinc-300 [&>button]:!bg-zinc-800 [&>button]:!border-zinc-700 [&>button]:!text-zinc-300 [&>button:hover]:!bg-zinc-700" />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="!text-border" />
+        <Controls className="!bg-card !border-border !text-foreground [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground [&>button:hover]:!bg-accent" />
         {showMinimap && (
-          <MiniMap
-            className="!bg-zinc-900 !border-zinc-800"
-            nodeColor="#3f3f46"
-            maskColor="rgba(0,0,0,0.7)"
-          />
+          <MiniMap className="!bg-card !border-border" nodeColor="var(--muted)" maskColor="rgba(0,0,0,0.7)" />
         )}
       </ReactFlow>
     </div>

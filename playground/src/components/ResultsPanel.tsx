@@ -12,29 +12,25 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
   const result = entry.result
 
   const renderTable = () => {
-    if (!result?.data) return <span className="text-zinc-500">No data</span>
+    if (!result?.data) return <span className="text-muted-foreground">No data</span>
     if (Array.isArray(result.data)) {
       if (result.data.length === 0)
-        return <span className="text-zinc-500">Empty result</span>
+        return <span className="text-muted-foreground">Empty result</span>
       const keys = Object.keys(result.data[0])
       return (
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-zinc-800">
+            <tr className="border-b border-border">
               {keys.map((k) => (
-                <th key={k} className="text-left p-1 text-zinc-400">
-                  {k}
-                </th>
+                <th key={k} className="text-left p-1 text-muted-foreground">{k}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {result.data.map((row: Record<string, unknown>, i: number) => (
-              <tr key={i} className="border-b border-zinc-800/50">
+              <tr key={i} className="border-b border-border/50">
                 {keys.map((k) => (
-                  <td key={k} className="p-1">
-                    {JSON.stringify(row[k])}
-                  </td>
+                  <td key={k} className="p-1">{JSON.stringify(row[k])}</td>
                 ))}
               </tr>
             ))}
@@ -49,8 +45,8 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
         <table className="w-full text-xs">
           <tbody>
             {keys.map((k) => (
-              <tr key={k} className="border-b border-zinc-800/50">
-                <td className="p-1 text-zinc-400 w-32">{k}</td>
+              <tr key={k} className="border-b border-border/50">
+                <td className="p-1 text-muted-foreground w-32">{k}</td>
                 <td className="p-1">{JSON.stringify(obj[k])}</td>
               </tr>
             ))}
@@ -62,9 +58,9 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
   }
 
   return (
-    <div className="border border-zinc-800 rounded-md mb-2 bg-zinc-900/50">
+    <div className="border border-border rounded-md mb-2 bg-card/50">
       <div
-        className="flex items-center gap-2 p-2 cursor-pointer hover:bg-zinc-800/50"
+        className="flex items-center gap-2 p-2 cursor-pointer hover:bg-accent/50"
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? (
@@ -72,7 +68,7 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
         ) : (
           <ChevronRight className="w-3 h-3" />
         )}
-        <code className="text-xs text-zinc-400 truncate flex-1">
+        <code className="text-xs text-muted-foreground truncate flex-1">
           {entry.query}
         </code>
         <Badge
@@ -82,30 +78,24 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
           {isError ? 'error' : result?.kind || 'ok'}
         </Badge>
         {result && (
-          <span className="text-[10px] text-zinc-500">
+          <span className="text-[10px] text-muted-foreground">
             {result.count} &middot; {(result.elapsed_us / 1000).toFixed(1)}ms
           </span>
         )}
       </div>
       {expanded && (
-        <div className="p-2 border-t border-zinc-800">
+        <div className="p-2 border-t border-border">
           {isError ? (
-            <div className="text-red-400 text-xs font-mono">{entry.error}</div>
+            <div className="text-destructive text-xs font-mono">{entry.error}</div>
           ) : (
             <Tabs defaultValue="table" className="w-full">
               <TabsList className="h-7">
-                <TabsTrigger value="table" className="text-xs h-6">
-                  Table
-                </TabsTrigger>
-                <TabsTrigger value="json" className="text-xs h-6">
-                  JSON
-                </TabsTrigger>
+                <TabsTrigger value="table" className="text-xs h-6">Table</TabsTrigger>
+                <TabsTrigger value="json" className="text-xs h-6">JSON</TabsTrigger>
               </TabsList>
-              <TabsContent value="table" className="mt-2">
-                {renderTable()}
-              </TabsContent>
+              <TabsContent value="table" className="mt-2">{renderTable()}</TabsContent>
               <TabsContent value="json" className="mt-2">
-                <pre className="text-xs text-zinc-300 whitespace-pre-wrap overflow-auto max-h-48">
+                <pre className="text-xs text-foreground/80 whitespace-pre-wrap overflow-auto max-h-48">
                   {JSON.stringify(result, null, 2)}
                 </pre>
               </TabsContent>
@@ -121,11 +111,9 @@ export function ResultsPanel() {
   const results = useGraphStore((s) => s.results)
   const clearResults = useGraphStore((s) => s.clearResults)
   return (
-    <div className="h-full flex flex-col bg-zinc-950">
-      <div className="flex items-center justify-between px-2 py-1 border-b border-zinc-800">
-        <span className="text-xs text-zinc-400">
-          Results ({results.length})
-        </span>
+    <div className="h-full flex flex-col bg-background">
+      <div className="flex items-center justify-between px-2 py-1 border-b border-border">
+        <span className="text-xs text-muted-foreground">Results ({results.length})</span>
         <Button variant="ghost" size="sm" onClick={clearResults} className="h-6 px-2">
           <Trash2 className="w-3 h-3" />
         </Button>
@@ -135,7 +123,7 @@ export function ResultsPanel() {
           <ResultCard key={entry.id} entry={entry} />
         ))}
         {results.length === 0 && (
-          <div className="text-zinc-600 text-xs text-center mt-8">
+          <div className="text-muted-foreground/50 text-xs text-center mt-8">
             Run a query to see results
           </div>
         )}

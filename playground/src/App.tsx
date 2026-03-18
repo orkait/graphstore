@@ -11,7 +11,7 @@ import { StatsBar } from '@/components/StatsBar'
 
 export default function App() {
   return (
-    <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100">
+    <div className="h-screen flex flex-col bg-background text-foreground">
       <Toolbar />
       <ResizablePanelGroup orientation="horizontal" className="flex-1">
         <ResizablePanel defaultSize={40} minSize={20}>
