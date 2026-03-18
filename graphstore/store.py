@@ -331,6 +331,17 @@ class CoreStore:
 
     # -- bulk queries --------------------------------------------------------
 
+    def get_all_edges(self) -> list[dict]:
+        """Get all edges across all types."""
+        result = []
+        for etype, edge_list in self._edges_by_type.items():
+            for src_slot, tgt_slot, data in edge_list:
+                src_id = self._slot_to_id(src_slot)
+                tgt_id = self._slot_to_id(tgt_slot)
+                if src_id and tgt_id:
+                    result.append({"source": src_id, "target": tgt_id, "kind": etype, **data})
+        return result
+
     def get_all_nodes(self, kind: str | None = None) -> list[dict]:
         """Get all live nodes, optionally filtered by kind."""
         result = []

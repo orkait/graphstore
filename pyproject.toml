@@ -35,11 +35,19 @@ Homepage = "https://github.com/orkait/graphstore"
 Repository = "https://github.com/orkait/graphstore"
 Issues = "https://github.com/orkait/graphstore/issues"
 
+[project.scripts]
+graphstore = "graphstore.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-benchmark>=4.0",
     "pytest-cov>=4.0",
+    "httpx>=0.24",
+]
+playground = [
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
 ]
 
 [tool.setuptools.packages.find]
