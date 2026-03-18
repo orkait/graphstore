@@ -4,12 +4,10 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/tinygraph/"><img src="https://img.shields.io/pypi/v/tinygraph?color=blue&label=PyPI" alt="PyPI version"></a>
-  <a href="https://pypi.org/project/tinygraph/"><img src="https://img.shields.io/pypi/pyversions/tinygraph" alt="Python versions"></a>
-  <a href="https://github.com/orkait/tinygraph/blob/main/LICENSE"><img src="https://img.shields.io/github/license/orkait/tinygraph" alt="License"></a>
   <a href="https://github.com/orkait/tinygraph/actions/workflows/ci.yml"><img src="https://github.com/orkait/tinygraph/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://codecov.io/gh/orkait/tinygraph"><img src="https://codecov.io/gh/orkait/tinygraph/branch/main/graph/badge.svg" alt="Coverage"></a>
-  <a href="https://github.com/orkait/tinygraph/stargazers"><img src="https://img.shields.io/github/stars/orkait/tinygraph?style=social" alt="Stars"></a>
+  <img src="https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue" alt="Python versions">
+  <a href="https://github.com/orkait/tinygraph/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <img src="https://img.shields.io/badge/version-0.1.0-orange" alt="Version">
 </p>
 
 ---
