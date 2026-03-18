@@ -8,6 +8,7 @@ import { ResultsPanel } from '@/components/ResultsPanel'
 import { GraphPanel } from '@/components/GraphPanel'
 import { Toolbar } from '@/components/Toolbar'
 import { StatsBar } from '@/components/StatsBar'
+import { Toaster } from '@/components/ui/sonner'
 import { useGraphStore } from '@/hooks/useGraphStore'
 import { useEffect } from 'react'
 
@@ -17,6 +18,7 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
+      <Toaster position="top-right" />
       <Toolbar />
       <ResizablePanelGroup orientation="horizontal" className="flex-1">
         <ResizablePanel defaultSize={40} minSize={20}>

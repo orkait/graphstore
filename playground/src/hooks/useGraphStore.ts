@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { toast } from 'sonner'
 import { api, type Result, type GraphData } from '@/api/client'
 
 export type ViewMode = 'live' | 'query-result' | 'highlight'
@@ -178,8 +179,10 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
         if (result.kind === 'ok') await get().refreshGraph()
       }
     } catch (err: any) {
+      const msg = err?.error || String(err)
+      toast.error('Query failed', { description: msg })
       set((s) => ({
-        results: [{ id, query, result: null, error: err?.error || String(err), timestamp: Date.now() }, ...s.results],
+        results: [{ id, query, result: null, error: msg, timestamp: Date.now() }, ...s.results],
         loading: false,
       }))
     }
@@ -194,13 +197,17 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
     try {
       const graph = await api.getGraph()
       set({ graph })
-    } catch { /* ignore */ }
+    } catch {
+      toast.error('Server unreachable', { description: 'Could not fetch graph data' })
+    }
   },
 
   resetGraph: async () => {
     try {
       await api.reset()
-    } catch { /* server may be down */ }
+    } catch {
+      toast.error('Server unreachable', { description: 'Could not reset graph — is the server running?' })
+    }
     set({
       graph: { nodes: [], edges: [] },
       results: [],
@@ -218,7 +225,9 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
     if (partial.ceilingMb !== undefined) serverUpdate.ceiling_mb = partial.ceilingMb
     if (partial.costThreshold !== undefined) serverUpdate.cost_threshold = partial.costThreshold
     if (Object.keys(serverUpdate).length > 0) {
-      api.updateConfig(serverUpdate).catch(() => {})
+      api.updateConfig(serverUpdate).catch(() => {
+        toast.error('Server unreachable', { description: 'Could not update server config' })
+      })
     }
   },
 }))
