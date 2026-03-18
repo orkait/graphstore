@@ -6,38 +6,94 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
+    --background: oklch(0.987 0.008 80);
+    --foreground: oklch(0.220 0.015 55);
+    --card: oklch(0.972 0.012 75);
+    --card-foreground: oklch(0.220 0.015 55);
+    --popover: oklch(0.972 0.012 75);
+    --popover-foreground: oklch(0.220 0.015 55);
+    --primary: oklch(0.220 0.015 55);
+    --primary-foreground: oklch(0.987 0.008 80);
+    --secondary: oklch(0.945 0.018 72);
+    --secondary-foreground: oklch(0.220 0.015 55);
+    --muted: oklch(0.945 0.018 72);
+    --muted-foreground: oklch(0.520 0.018 65);
+    --accent: oklch(0.945 0.018 72);
+    --accent-foreground: oklch(0.220 0.015 55);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
+    --border: oklch(0.878 0.016 70);
+    --input: oklch(0.878 0.016 70);
+    --ring: oklch(0.650 0.020 65);
     --chart-1: oklch(0.809 0.105 251.813);
     --chart-2: oklch(0.623 0.214 259.815);
     --chart-3: oklch(0.546 0.245 262.881);
     --chart-4: oklch(0.488 0.243 264.376);
     --chart-5: oklch(0.424 0.199 265.638);
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+
+    /* Graph node kind colors — light (warm pastel) */
+    --kind-function-bg: #dce8f5;
+    --kind-function-border: #7ba3cc;
+    --kind-function-text: #2a5580;
+    --kind-function-badge: #7ba3cc;
+    --kind-class-bg: #daeee3;
+    --kind-class-border: #6aad84;
+    --kind-class-text: #256640;
+    --kind-class-badge: #6aad84;
+    --kind-module-bg: #ece0f5;
+    --kind-module-border: #9b78c8;
+    --kind-module-text: #4d2880;
+    --kind-module-badge: #9b78c8;
+    --kind-service-bg: #f5e8d8;
+    --kind-service-border: #c88255;
+    --kind-service-text: #7a3a12;
+    --kind-service-badge: #c88255;
+    --kind-database-bg: #f5dede;
+    --kind-database-border: #c87575;
+    --kind-database-text: #7a2020;
+    --kind-database-badge: #c87575;
+    --kind-queue-bg: #f5efd8;
+    --kind-queue-border: #c8a840;
+    --kind-queue-text: #7a5500;
+    --kind-queue-badge: #c8a840;
+    --kind-default-bg: #d8eff5;
+    --kind-default-border: #5aacc0;
+    --kind-default-text: #1a5f6e;
+    --kind-default-badge: #5aacc0;
+    --kind-fallback-0-bg: #f5d8e4;
+    --kind-fallback-0-border: #c56b8a;
+    --kind-fallback-0-text: #6a1d35;
+    --kind-fallback-0-badge: #c56b8a;
+    --kind-fallback-1-bg: #dde0f5;
+    --kind-fallback-1-border: #7577c8;
+    --kind-fallback-1-text: #2a2d80;
+    --kind-fallback-1-badge: #7577c8;
+    --kind-fallback-2-bg: #f5ebd8;
+    --kind-fallback-2-border: #c89650;
+    --kind-fallback-2-text: #7a4d00;
+    --kind-fallback-2-badge: #c89650;
+
+    /* Graph interaction tokens — light */
+    --graph-highlight-border: #6495d4;
+    --graph-highlight-shadow: rgba(100,149,212,0.4);
+    --graph-node-dimmed-bg: #ede8e0;
+    --graph-node-dimmed-border: #c8c0b5;
+    --graph-node-dimmed-text: #a09888;
+    --graph-edge-dimmed: #c8c0b5;
+    --graph-edge-label-bg: rgba(254,252,248,0.88);
+    --graph-edge-label-text: #8a7a68;
+    --graph-degree-bg: rgba(0,0,0,0.04);
+    --graph-degree-text: #8a7a68;
+    --graph-bg-dots: #d4c8b8;
+
+    --sidebar: oklch(0.958 0.016 70);
+    --sidebar-foreground: oklch(0.220 0.015 55);
+    --sidebar-primary: oklch(0.220 0.015 55);
+    --sidebar-primary-foreground: oklch(0.987 0.008 80);
+    --sidebar-accent: oklch(0.945 0.018 72);
+    --sidebar-accent-foreground: oklch(0.220 0.015 55);
+    --sidebar-border: oklch(0.878 0.016 70);
+    --sidebar-ring: oklch(0.650 0.020 65);
 }
 
 .dark {
@@ -72,6 +128,61 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+
+    /* Graph node kind colors — dark (moved from JS KIND_STYLES) */
+    --kind-function-bg: #1e3a5f;
+    --kind-function-border: #3b82f6;
+    --kind-function-text: #93c5fd;
+    --kind-function-badge: #3b82f6;
+    --kind-class-bg: #14532d;
+    --kind-class-border: #22c55e;
+    --kind-class-text: #86efac;
+    --kind-class-badge: #22c55e;
+    --kind-module-bg: #3b0764;
+    --kind-module-border: #a855f7;
+    --kind-module-text: #d8b4fe;
+    --kind-module-badge: #a855f7;
+    --kind-service-bg: #431407;
+    --kind-service-border: #f97316;
+    --kind-service-text: #fdba74;
+    --kind-service-badge: #f97316;
+    --kind-database-bg: #450a0a;
+    --kind-database-border: #ef4444;
+    --kind-database-text: #fca5a5;
+    --kind-database-badge: #ef4444;
+    --kind-queue-bg: #422006;
+    --kind-queue-border: #eab308;
+    --kind-queue-text: #fde047;
+    --kind-queue-badge: #eab308;
+    --kind-default-bg: #164e63;
+    --kind-default-border: #06b6d4;
+    --kind-default-text: #67e8f9;
+    --kind-default-badge: #06b6d4;
+    --kind-fallback-0-bg: #4a0a1a;
+    --kind-fallback-0-border: #f43f5e;
+    --kind-fallback-0-text: #fda4af;
+    --kind-fallback-0-badge: #f43f5e;
+    --kind-fallback-1-bg: #4a044e;
+    --kind-fallback-1-border: #d946ef;
+    --kind-fallback-1-text: #f0abfc;
+    --kind-fallback-1-badge: #d946ef;
+    --kind-fallback-2-bg: #1e1b4b;
+    --kind-fallback-2-border: #6366f1;
+    --kind-fallback-2-text: #a5b4fc;
+    --kind-fallback-2-badge: #6366f1;
+
+    /* Graph interaction tokens — dark */
+    --graph-highlight-border: #60a5fa;
+    --graph-highlight-shadow: rgba(96,165,250,0.5);
+    --graph-node-dimmed-bg: #1a1a1a;
+    --graph-node-dimmed-border: #333333;
+    --graph-node-dimmed-text: #555555;
+    --graph-edge-dimmed: #d4d4d8;
+    --graph-edge-label-bg: rgba(14,14,14,0.88);
+    --graph-edge-label-text: #a1a1aa;
+    --graph-degree-bg: rgba(255,255,255,0.07);
+    --graph-degree-text: #888888;
+    --graph-bg-dots: #3f3f46;
 }
 
 @theme inline {
