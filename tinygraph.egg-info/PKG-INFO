@@ -1,18 +1,49 @@
+Metadata-Version: 2.4
+Name: tinygraph
+Version: 0.1.0
+Summary: In-memory typed graph database with a human-readable DSL
+Author-email: Kailash Mahavarkar <kailashmahavarkar5@gmail.com>
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/orkait/tinygraph
+Project-URL: Repository, https://github.com/orkait/tinygraph
+Project-URL: Issues, https://github.com/orkait/tinygraph/issues
+Keywords: graph,database,in-memory,dsl,sparse-matrix
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Database
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Typing :: Typed
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: scipy>=1.10
+Requires-Dist: lark>=1.1
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-benchmark>=4.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0; extra == "dev"
+Dynamic: license-file
+
 <p align="center">
-  <h1 align="center">graphstore</h1>
+  <h1 align="center">tinygraph</h1>
   <p align="center">In-memory typed graph database with a human-readable DSL</p>
 </p>
 
 <p align="center">
-  <a href="https://github.com/orkait/graphstore/actions/workflows/ci.yml"><img src="https://github.com/orkait/graphstore/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/orkait/tinygraph/actions/workflows/ci.yml"><img src="https://github.com/orkait/tinygraph/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue" alt="Python versions">
-  <a href="https://github.com/orkait/graphstore/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+  <a href="https://github.com/orkait/tinygraph/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
   <img src="https://img.shields.io/badge/version-0.1.0-orange" alt="Version">
 </p>
 
 ---
 
-**graphstore** is a lightweight, in-memory typed graph database built on scipy sparse matrices and numpy arrays. It ships with a custom DSL designed for readability — no Cypher, no SPARQL, just plain English-like queries.
+**tinygraph** is a lightweight, in-memory graph database built on scipy sparse matrices and numpy arrays. It ships with a custom DSL designed for readability — no Cypher, no SPARQL, just plain English-like queries.
 
 ## Features
 
@@ -29,7 +60,7 @@
 ## Install
 
 ```bash
-pip install graphstore
+pip install tinygraph
 ```
 
 ## Quick Start
@@ -251,8 +282,8 @@ graphstore/
 ## Development
 
 ```bash
-git clone https://github.com/orkait/graphstore.git
-cd graphstore
+git clone https://github.com/orkait/tinygraph.git
+cd tinygraph
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
