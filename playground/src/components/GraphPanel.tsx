@@ -4,8 +4,6 @@ import {
   MiniMap,
   Background,
   BackgroundVariant,
-  useNodesState,
-  useEdgesState,
   type Node,
   type Edge,
   type NodeMouseHandler,
@@ -14,6 +12,7 @@ import '@xyflow/react/dist/style.css'
 import { CustomNode } from '@/components/graph/CustomNode'
 import { CustomEdge } from '@/components/graph/CustomEdge'
 import { useGraphStore } from '@/hooks/useGraphStore'
+import { useFlowStore } from '@/hooks/useFlowStore'
 import { applyDagreLayout } from '@/components/graph/layout'
 import { useMemo, useEffect, useRef, useState, useCallback } from 'react'
 import { Search } from 'lucide-react'
@@ -41,16 +40,15 @@ function computeDegrees(edges: { source: string; target: string }[]) {
   return deg
 }
 
-const EDGE_COLORS: Record<string, string> = {
-  calls: '#3b82f6', extends: '#22c55e', implements: '#a855f7',
-  imports: '#f59e0b', contains: '#06b6d4', uses: '#ec4899',
-  calls_api: '#3b82f6', reads_from: '#ef4444',
-  publishes_to: '#f59e0b', subscribes_to: '#8b5cf6',
-}
-
 function getEdgeColor(kind: string): string {
-  if (EDGE_COLORS[kind]) return EDGE_COLORS[kind]
-  const colors = Object.values(EDGE_COLORS)
+  const map: Record<string, string> = {
+    calls: '#3b82f6', extends: '#22c55e', implements: '#a855f7',
+    imports: '#f59e0b', contains: '#06b6d4', uses: '#ec4899',
+    calls_api: '#3b82f6', reads_from: '#ef4444',
+    publishes_to: '#f59e0b', subscribes_to: '#8b5cf6',
+  }
+  if (map[kind]) return map[kind]
+  const colors = Object.values(map)
   let hash = 0
   for (let i = 0; i < kind.length; i++) hash = kind.charCodeAt(i) + ((hash << 5) - hash)
   return colors[Math.abs(hash) % colors.length]
@@ -59,8 +57,17 @@ function getEdgeColor(kind: string): string {
 export function GraphPanel() {
   const { graph, config, highlightedNodeIds, highlightedEdges } = useGraphStore()
   const { viewMode, showEdgeLabels, showMinimap } = config
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+
+  // Flow store — owns nodes/edges, handles drag via applyNodeChanges
+  const nodes = useFlowStore((s) => s.nodes)
+  const edges = useFlowStore((s) => s.edges)
+  const onNodesChange = useFlowStore((s) => s.onNodesChange)
+  const onEdgesChange = useFlowStore((s) => s.onEdgesChange)
+  const setFlowNodes = useFlowStore((s) => s.setNodes)
+  const setFlowEdges = useFlowStore((s) => s.setEdges)
+  const updateAllNodeData = useFlowStore((s) => s.updateAllNodeData)
+  const updateAllEdgeData = useFlowStore((s) => s.updateAllEdgeData)
+
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
   const [searchFilter, setSearchFilter] = useState('')
   const prevStructureRef = useRef('')
@@ -69,12 +76,12 @@ export function GraphPanel() {
   const adjacency = useMemo(() => buildAdjacency(graph.edges), [graph.edges])
   const degrees = useMemo(() => computeDegrees(graph.edges), [graph.edges])
 
-  // Effect 1: Re-layout ONLY when graph structure changes
+  // Effect 1: Layout — only when graph structure or search changes
   useEffect(() => {
     const structureKey = JSON.stringify({
-      nodes: graph.nodes.map(n => n.id).sort(),
-      edges: graph.edges.map(e => `${e.source}->${e.target}`).sort(),
-      filter: searchFilter,
+      n: graph.nodes.map(n => n.id).sort(),
+      e: graph.edges.map(e => `${e.source}->${e.target}`).sort(),
+      f: searchFilter,
     })
 
     if (structureKey === prevStructureRef.current) return
@@ -121,52 +128,42 @@ export function GraphPanel() {
     if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
       const filtered = rfNodes.filter(n => highlightedNodeIds.has(n.id))
       const filtEdges = rfEdges.filter(e => highlightedEdges.has(`${e.source}->${e.target}`))
-      setNodes(applyDagreLayout(filtered, filtEdges))
-      setEdges(filtEdges)
+      setFlowNodes(applyDagreLayout(filtered, filtEdges))
+      setFlowEdges(filtEdges)
     } else {
-      setNodes(applyDagreLayout(rfNodes, rfEdges))
-      setEdges(rfEdges)
+      setFlowNodes(applyDagreLayout(rfNodes, rfEdges))
+      setFlowEdges(rfEdges)
     }
   }, [graph, searchFilter, degrees])
 
-  // Effect 2: Update node/edge DATA (highlight, dim) without changing positions
+  // Effect 2: Update styling (highlight/dim) without touching positions
   useEffect(() => {
-    setNodes(prev => prev.map(node => {
+    updateAllNodeData((node) => {
       const isHoverTarget = hoveredNodeId === node.id
       const isHoverNeighbor = hoveredNodeId != null && adjacency[hoveredNodeId]?.has(node.id)
       const isHoverDimmed = hoveredNodeId != null && !isHoverTarget && !isHoverNeighbor
       const isQueryHighlighted = highlightedNodeIds.has(node.id)
       const isQueryDimmed = viewMode === 'highlight' && highlightedNodeIds.size > 0 && !isQueryHighlighted
-
       return {
-        ...node,
-        data: {
-          ...node.data,
-          highlighted: isHoverTarget || isQueryHighlighted,
-          dimmed: isHoverDimmed || isQueryDimmed,
-        },
+        highlighted: isHoverTarget || isQueryHighlighted,
+        dimmed: isHoverDimmed || isQueryDimmed,
       }
-    }))
+    })
 
-    setEdges(prev => prev.map(edge => {
+    updateAllEdgeData((edge) => {
       const key = `${edge.source}->${edge.target}`
       const isHoverEdge = hoveredNodeId != null && (edge.source === hoveredNodeId || edge.target === hoveredNodeId)
       const isHoverDimmed = hoveredNodeId != null && !isHoverEdge
       const isQueryHighlighted = highlightedEdges.has(key)
       const isQueryDimmed = viewMode === 'highlight' && highlightedEdges.size > 0 && !isQueryHighlighted
-
       return {
-        ...edge,
+        highlighted: isHoverEdge || isQueryHighlighted,
+        dimmed: isHoverDimmed || isQueryDimmed,
+        showLabel: showEdgeLabels,
         animated: isHoverEdge,
-        data: {
-          ...edge.data,
-          highlighted: isHoverEdge || isQueryHighlighted,
-          dimmed: isHoverDimmed || isQueryDimmed,
-          showLabel: showEdgeLabels,
-        },
       }
-    }))
-  }, [hoveredNodeId, highlightedNodeIds, highlightedEdges, viewMode, showEdgeLabels])
+    })
+  }, [hoveredNodeId, highlightedNodeIds, highlightedEdges, viewMode, showEdgeLabels, adjacency])
 
   const onNodeMouseEnter: NodeMouseHandler = useCallback((_event, node) => {
     setHoveredNodeId(node.id)
