@@ -27,113 +27,84 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
   const updateConfig = useGraphStore((s) => s.updateConfig)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-card border-border text-foreground max-w-md">
+      <DialogContent className="bg-card border-border text-foreground max-w-lg w-full p-6">
         <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
+          <DialogTitle className="text-lg">Settings</DialogTitle>
         </DialogHeader>
-        <Tabs defaultValue="graph">
+        <Tabs defaultValue="graph" className="mt-2">
           <TabsList className="w-full">
-            <TabsTrigger value="graph" className="flex-1">
-              Graph
-            </TabsTrigger>
-            <TabsTrigger value="store" className="flex-1">
-              Store
-            </TabsTrigger>
-            <TabsTrigger value="query" className="flex-1">
-              Query
-            </TabsTrigger>
+            <TabsTrigger value="graph" className="flex-1">Graph</TabsTrigger>
+            <TabsTrigger value="store" className="flex-1">Store</TabsTrigger>
+            <TabsTrigger value="query" className="flex-1">Query</TabsTrigger>
           </TabsList>
-          <TabsContent value="graph" className="space-y-4 mt-4">
+
+          <TabsContent value="graph" className="space-y-5 mt-5">
             <div className="space-y-2">
-              <Label>View Mode</Label>
-              <Select
-                value={config.viewMode}
-                onValueChange={(v) =>
-                  updateConfig({ viewMode: v as ViewMode })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
+              <Label className="text-sm">View Mode</Label>
+              <Select value={config.viewMode} onValueChange={(v) => updateConfig({ viewMode: v as ViewMode })}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="live">Live</SelectItem>
-                  <SelectItem value="query-result">Query Result</SelectItem>
-                  <SelectItem value="highlight">Highlight</SelectItem>
+                  <SelectItem value="live">Live — always shows full graph</SelectItem>
+                  <SelectItem value="query-result">Query Result — shows only results</SelectItem>
+                  <SelectItem value="highlight">Highlight — dims non-results</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Layout</Label>
-              <Select
-                value={config.layoutMode}
-                onValueChange={(v) =>
-                  updateConfig({ layoutMode: v as LayoutMode })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
+              <Label className="text-sm">Layout Algorithm</Label>
+              <Select value={config.layoutMode} onValueChange={(v) => updateConfig({ layoutMode: v as LayoutMode })}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="dagre">Dagre (hierarchical)</SelectItem>
                   <SelectItem value="force">Force-directed</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-center justify-between">
-              <Label>Edge Labels</Label>
-              <Switch
-                checked={config.showEdgeLabels}
-                onCheckedChange={(v) => updateConfig({ showEdgeLabels: v })}
-              />
+            <div className="flex items-center justify-between py-1">
+              <Label className="text-sm">Show Edge Labels</Label>
+              <Switch checked={config.showEdgeLabels} onCheckedChange={(v) => updateConfig({ showEdgeLabels: v })} />
             </div>
-            <div className="flex items-center justify-between">
-              <Label>Minimap</Label>
-              <Switch
-                checked={config.showMinimap}
-                onCheckedChange={(v) => updateConfig({ showMinimap: v })}
-              />
+            <div className="flex items-center justify-between py-1">
+              <Label className="text-sm">Show Minimap</Label>
+              <Switch checked={config.showMinimap} onCheckedChange={(v) => updateConfig({ showMinimap: v })} />
             </div>
           </TabsContent>
-          <TabsContent value="store" className="space-y-4 mt-4">
-            <div className="space-y-2">
-              <Label>Memory Ceiling: {config.ceilingMb} MB</Label>
+
+          <TabsContent value="store" className="space-y-5 mt-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">Memory Ceiling</Label>
+                <span className="text-sm font-mono text-muted-foreground">{config.ceilingMb} MB</span>
+              </div>
               <Slider
                 value={[config.ceilingMb]}
-                min={64}
-                max={1024}
-                step={64}
+                min={64} max={1024} step={64}
                 onValueChange={(v) => updateConfig({ ceilingMb: Array.isArray(v) ? v[0] : v })}
               />
+              <p className="text-xs text-muted-foreground">Operations exceeding this limit will be rejected.</p>
             </div>
           </TabsContent>
-          <TabsContent value="query" className="space-y-4 mt-4">
-            <div className="space-y-2">
-              <Label>
-                Cost Threshold: {config.costThreshold.toLocaleString()}
-              </Label>
+
+          <TabsContent value="query" className="space-y-5 mt-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">Cost Threshold</Label>
+                <span className="text-sm font-mono text-muted-foreground">{config.costThreshold.toLocaleString()}</span>
+              </div>
               <Slider
                 value={[config.costThreshold]}
-                min={1000}
-                max={1_000_000}
-                step={1000}
+                min={1000} max={1_000_000} step={1000}
                 onValueChange={(v) => updateConfig({ costThreshold: Array.isArray(v) ? v[0] : v })}
               />
+              <p className="text-xs text-muted-foreground">Maximum estimated frontier size before query rejection.</p>
             </div>
-            <div className="flex items-center justify-between">
-              <Label>Explain before execute</Label>
-              <Switch
-                checked={config.explainBeforeExecute}
-                onCheckedChange={(v) =>
-                  updateConfig({ explainBeforeExecute: v })
-                }
-              />
+            <div className="flex items-center justify-between py-1">
+              <Label className="text-sm">Explain Before Execute</Label>
+              <Switch checked={config.explainBeforeExecute} onCheckedChange={(v) => updateConfig({ explainBeforeExecute: v })} />
             </div>
-            <div className="flex items-center justify-between">
-              <Label>Show elapsed time</Label>
-              <Switch
-                checked={config.showElapsed}
-                onCheckedChange={(v) => updateConfig({ showElapsed: v })}
-              />
+            <div className="flex items-center justify-between py-1">
+              <Label className="text-sm">Show Elapsed Time</Label>
+              <Switch checked={config.showElapsed} onCheckedChange={(v) => updateConfig({ showElapsed: v })} />
             </div>
           </TabsContent>
         </Tabs>

@@ -8,8 +8,13 @@ import { ResultsPanel } from '@/components/ResultsPanel'
 import { GraphPanel } from '@/components/GraphPanel'
 import { Toolbar } from '@/components/Toolbar'
 import { StatsBar } from '@/components/StatsBar'
+import { useGraphStore } from '@/hooks/useGraphStore'
+import { useEffect } from 'react'
 
 export default function App() {
+  const refreshGraph = useGraphStore((s) => s.refreshGraph)
+  useEffect(() => { refreshGraph() }, [refreshGraph])
+
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
       <Toolbar />

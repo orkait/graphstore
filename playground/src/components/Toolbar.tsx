@@ -6,17 +6,22 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
-import { Play, RotateCcw, Settings, BookOpen } from 'lucide-react'
+import { Play, RotateCcw, Settings, BookOpen, Sun, Moon } from 'lucide-react'
 import { useGraphStore } from '@/hooks/useGraphStore'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { examples } from '@/examples'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 export function Toolbar() {
   const executeAll = useGraphStore((s) => s.executeAll)
   const resetGraph = useGraphStore((s) => s.resetGraph)
   const setEditorContent = useGraphStore((s) => s.setEditorContent)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [isDark, setIsDark] = useState(true)
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', isDark)
+  }, [isDark])
 
   const loadExample = async (example: (typeof examples)[0]) => {
     await resetGraph()
@@ -45,13 +50,15 @@ export function Toolbar() {
           <DropdownMenuTrigger className="inline-flex items-center gap-1.5 h-7 px-3 text-xs rounded-md hover:bg-accent text-foreground">
             <BookOpen className="w-3.5 h-3.5" /> Examples
           </DropdownMenuTrigger>
-          <DropdownMenuContent>
+          <DropdownMenuContent className="w-72 p-2">
             {examples.map((ex) => (
-              <DropdownMenuItem key={ex.name} onClick={() => loadExample(ex)}>
-                <div>
-                  <div className="text-sm">{ex.name}</div>
-                  <div className="text-xs text-muted-foreground">{ex.description}</div>
-                </div>
+              <DropdownMenuItem
+                key={ex.name}
+                onClick={() => loadExample(ex)}
+                className="flex flex-col items-start gap-1 px-3 py-2.5 cursor-pointer"
+              >
+                <span className="text-sm font-medium">{ex.name}</span>
+                <span className="text-xs text-muted-foreground">{ex.description}</span>
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
@@ -65,7 +72,10 @@ export function Toolbar() {
           <RotateCcw className="w-3.5 h-3.5" /> Reset
         </Button>
         <div className="flex-1" />
-        <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setSettingsOpen(true)}>
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setIsDark(!isDark)}>
+          {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+        </Button>
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setSettingsOpen(true)}>
           <Settings className="w-3.5 h-3.5" />
         </Button>
       </div>
