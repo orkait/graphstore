@@ -3,19 +3,63 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "graphstore"
+name = "tinygraph"
 version = "0.1.0"
+description = "In-memory typed graph database with a human-readable DSL"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
+authors = [
+    { name = "Kailash Mahavarkar", email = "kailashmahavarkar5@gmail.com" },
+]
+keywords = ["graph", "database", "in-memory", "dsl", "sparse-matrix"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
 dependencies = [
     "scipy>=1.10",
     "lark>=1.1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/orkait/tinygraph"
+Repository = "https://github.com/orkait/tinygraph"
+Issues = "https://github.com/orkait/tinygraph/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-benchmark>=4.0",
+    "pytest-cov>=4.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["graphstore*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.bumpversion]
+current_version = "0.1.0"
+commit = true
+tag = true
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "graphstore/__init__.py"
+search = '__version__ = "{current_version}"'
+replace = '__version__ = "{new_version}"'

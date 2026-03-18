@@ -9,6 +9,8 @@ Public API:
     CostThresholdExceeded, BatchRollback — error hierarchy
 """
 
+__version__ = "0.1.0"
+
 import time
 import sqlite3
 from pathlib import Path
