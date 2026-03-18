@@ -30,25 +30,19 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
   const degree = (data.degree as number) || 0
   const s = getKindStyle(kind)
 
-  // Read hover/highlight state from stores — component re-renders only when these change
-  const hoveredNodeId = useFlowStore((st) => st.hoveredNodeId)
-  const adjacencySet = useFlowStore((st) => {
-    if (hoveredNodeId == null) return null
-    const neighbors = new Set<string>()
-    for (const e of st.edges) {
-      if (e.source === hoveredNodeId) neighbors.add(e.target)
-      if (e.target === hoveredNodeId) neighbors.add(e.source)
-    }
-    return neighbors
+  // Read hover state — returns a primitive boolean, no new objects
+  const isHoverTarget = useFlowStore((st) => st.hoveredNodeId === id)
+  const isHoverNeighbor = useFlowStore((st) => {
+    const hid = st.hoveredNodeId
+    if (hid == null || hid === id) return false
+    return st.edges.some(e => (e.source === hid && e.target === id) || (e.target === hid && e.source === id))
   })
+  const isHoverActive = useFlowStore((st) => st.hoveredNodeId != null)
 
   const highlightedNodeIds = useGraphStore((st) => st.highlightedNodeIds)
   const viewMode = useGraphStore((st) => st.config.viewMode)
 
-  // Compute highlight/dim locally
-  const isHoverTarget = hoveredNodeId === id
-  const isHoverNeighbor = hoveredNodeId != null && adjacencySet?.has(id)
-  const isHoverDimmed = hoveredNodeId != null && !isHoverTarget && !isHoverNeighbor
+  const isHoverDimmed = isHoverActive && !isHoverTarget && !isHoverNeighbor
   const isQueryHighlighted = highlightedNodeIds.has(id)
   const isQueryDimmed = viewMode === 'highlight' && highlightedNodeIds.size > 0 && !isQueryHighlighted
 
