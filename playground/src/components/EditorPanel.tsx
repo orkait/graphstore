@@ -42,6 +42,7 @@ export function EditorPanel() {
   const setEditorSelection = useGraphStore((s) => s.setEditorSelection)
   const executeQuery = useGraphStore((s) => s.executeQuery)
   const executeAll = useGraphStore((s) => s.executeAll)
+  const isDark = useGraphStore((s) => s.config.isDark)
 
   const getFullLines = useCallback((view: EditorView) => {
     const { from, to } = view.state.selection.main
@@ -94,7 +95,7 @@ export function EditorPanel() {
         onChange={setEditorContent}
         onUpdate={onUpdate}
         extensions={extensions}
-        theme="dark"
+        theme={isDark ? 'dark' : 'light'}
         height="100%"
         className="flex-1 overflow-auto text-sm [&_.cm-editor]:!h-full [&_.cm-scroller]:!overflow-auto"
         basicSetup={{

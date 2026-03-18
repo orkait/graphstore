@@ -47,6 +47,7 @@ export function GraphPanel() {
   const graph = useGraphStore((s) => s.graph)
   const viewMode = useGraphStore((s) => s.config.viewMode)
   const showMinimap = useGraphStore((s) => s.config.showMinimap)
+  const isDark = useGraphStore((s) => s.config.isDark)
   const highlightedNodeIds = useGraphStore((s) => s.highlightedNodeIds)
   const highlightedEdges = useGraphStore((s) => s.highlightedEdges)
 
@@ -161,13 +162,13 @@ export function GraphPanel() {
           nodesDraggable
           className="bg-background"
         >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="!text-border" />
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--graph-bg-dots)" />
           <Controls className="!bg-card !border-border !text-foreground [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground [&>button:hover]:!bg-accent" />
           {showMinimap && (
             <MiniMap
               className="!bg-card !border-border"
               nodeColor={(n) => getEdgeColor((n.data?.kind as string) || '')}
-              maskColor="rgba(0,0,0,0.7)"
+              maskColor={isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)'}
             />
           )}
         </ReactFlow>
