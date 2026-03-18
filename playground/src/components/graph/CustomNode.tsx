@@ -1,4 +1,7 @@
+import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { useFlowStore } from '@/hooks/useFlowStore'
+import { useGraphStore } from '@/hooks/useGraphStore'
 
 const KIND_STYLES: Record<string, { bg: string; border: string; text: string; badge: string }> = {
   function: { bg: '#1e3a5f', border: '#3b82f6', text: '#93c5fd', badge: '#3b82f6' },
@@ -22,15 +25,37 @@ function getKindStyle(kind: string) {
   return FALLBACK_STYLES[Math.abs(hash) % FALLBACK_STYLES.length]
 }
 
-export function CustomNode({ data }: NodeProps) {
-  const highlighted = data.highlighted as boolean
-  const dimmed = data.dimmed as boolean
+export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
   const kind = (data.kind as string) || 'default'
   const degree = (data.degree as number) || 0
   const s = getKindStyle(kind)
 
-  // Scale node size by degree (Obsidian-like)
-  const scale = 1 + Math.min(degree * 0.08, 0.4) // 1.0 to 1.4x
+  // Read hover/highlight state from stores — component re-renders only when these change
+  const hoveredNodeId = useFlowStore((st) => st.hoveredNodeId)
+  const adjacencySet = useFlowStore((st) => {
+    if (hoveredNodeId == null) return null
+    const neighbors = new Set<string>()
+    for (const e of st.edges) {
+      if (e.source === hoveredNodeId) neighbors.add(e.target)
+      if (e.target === hoveredNodeId) neighbors.add(e.source)
+    }
+    return neighbors
+  })
+
+  const highlightedNodeIds = useGraphStore((st) => st.highlightedNodeIds)
+  const viewMode = useGraphStore((st) => st.config.viewMode)
+
+  // Compute highlight/dim locally
+  const isHoverTarget = hoveredNodeId === id
+  const isHoverNeighbor = hoveredNodeId != null && adjacencySet?.has(id)
+  const isHoverDimmed = hoveredNodeId != null && !isHoverTarget && !isHoverNeighbor
+  const isQueryHighlighted = highlightedNodeIds.has(id)
+  const isQueryDimmed = viewMode === 'highlight' && highlightedNodeIds.size > 0 && !isQueryHighlighted
+
+  const highlighted = isHoverTarget || isQueryHighlighted
+  const dimmed = isHoverDimmed || isQueryDimmed
+
+  const scale = 1 + Math.min(degree * 0.08, 0.4)
   const minWidth = 140 + Math.min(degree * 8, 40)
 
   return (
@@ -41,11 +66,9 @@ export function CustomNode({ data }: NodeProps) {
         borderWidth: highlighted ? '2px' : '1px',
         boxShadow: highlighted
           ? '0 0 16px rgba(96,165,250,0.5)'
-          : dimmed
-            ? 'none'
-            : `0 0 ${6 + degree * 2}px ${s.border}44`,
+          : dimmed ? 'none' : `0 0 ${6 + degree * 2}px ${s.border}44`,
         opacity: dimmed ? 0.2 : 1,
-        transition: 'all 0.25s ease',
+        transition: 'opacity 0.2s, background-color 0.2s, border-color 0.2s, box-shadow 0.2s',
         transform: `scale(${dimmed ? 0.95 : scale})`,
         minWidth: `${minWidth}px`,
       }}
@@ -70,10 +93,7 @@ export function CustomNode({ data }: NodeProps) {
           {kind}
         </div>
         {degree > 0 && !dimmed && (
-          <div
-            className="text-[8px] px-1 py-0.5 rounded"
-            style={{ color: '#888', backgroundColor: '#ffffff11' }}
-          >
+          <div className="text-[8px] px-1 py-0.5 rounded" style={{ color: '#888', backgroundColor: '#ffffff11' }}>
             {degree}
           </div>
         )}
@@ -81,4 +101,4 @@ export function CustomNode({ data }: NodeProps) {
       <Handle type="source" position={Position.Bottom} className="!w-2 !h-2" style={{ background: s.border }} />
     </div>
   )
-}
+})

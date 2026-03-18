@@ -20,17 +20,6 @@ import { Search } from 'lucide-react'
 const nodeTypes = { custom: CustomNode }
 const edgeTypes = { custom: CustomEdge }
 
-function buildAdjacency(edges: { source: string; target: string }[]) {
-  const adj: Record<string, Set<string>> = {}
-  for (const e of edges) {
-    if (!adj[e.source]) adj[e.source] = new Set()
-    if (!adj[e.target]) adj[e.target] = new Set()
-    adj[e.source].add(e.target)
-    adj[e.target].add(e.source)
-  }
-  return adj
-}
-
 function computeDegrees(edges: { source: string; target: string }[]) {
   const deg: Record<string, number> = {}
   for (const e of edges) {
@@ -55,33 +44,35 @@ function getEdgeColor(kind: string): string {
 }
 
 export function GraphPanel() {
-  const { graph, config, highlightedNodeIds, highlightedEdges } = useGraphStore()
-  const { viewMode, showEdgeLabels, showMinimap } = config
+  const graph = useGraphStore((s) => s.graph)
+  const viewMode = useGraphStore((s) => s.config.viewMode)
+  const showMinimap = useGraphStore((s) => s.config.showMinimap)
+  const highlightedNodeIds = useGraphStore((s) => s.highlightedNodeIds)
+  const highlightedEdges = useGraphStore((s) => s.highlightedEdges)
 
-  // Flow store — owns nodes/edges, handles drag via applyNodeChanges
   const nodes = useFlowStore((s) => s.nodes)
   const edges = useFlowStore((s) => s.edges)
   const onNodesChange = useFlowStore((s) => s.onNodesChange)
   const onEdgesChange = useFlowStore((s) => s.onEdgesChange)
   const setFlowNodes = useFlowStore((s) => s.setNodes)
   const setFlowEdges = useFlowStore((s) => s.setEdges)
-  const updateAllNodeData = useFlowStore((s) => s.updateAllNodeData)
-  const updateAllEdgeData = useFlowStore((s) => s.updateAllEdgeData)
+  const setHoveredNodeId = useFlowStore((s) => s.setHoveredNodeId)
 
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
   const [searchFilter, setSearchFilter] = useState('')
   const prevStructureRef = useRef('')
   const proOptions = useMemo(() => ({ hideAttribution: true }), [])
 
-  const adjacency = useMemo(() => buildAdjacency(graph.edges), [graph.edges])
   const degrees = useMemo(() => computeDegrees(graph.edges), [graph.edges])
 
-  // Effect 1: Layout — only when graph structure or search changes
+  // Single effect: layout ONLY when graph structure or search changes
+  // Highlight/dim is computed inside CustomNode/CustomEdge directly
   useEffect(() => {
     const structureKey = JSON.stringify({
       n: graph.nodes.map(n => n.id).sort(),
       e: graph.edges.map(e => `${e.source}->${e.target}`).sort(),
       f: searchFilter,
+      v: viewMode,
+      h: [...highlightedNodeIds].sort(),
     })
 
     if (structureKey === prevStructureRef.current) return
@@ -104,8 +95,6 @@ export function GraphPanel() {
         label: n.id,
         kind: n.kind,
         degree: degrees[n.id] || 0,
-        highlighted: false,
-        dimmed: false,
         fields: n,
       },
     }))
@@ -117,12 +106,7 @@ export function GraphPanel() {
         source: e.source,
         target: e.target,
         type: 'custom',
-        data: {
-          kind: e.kind,
-          highlighted: false,
-          dimmed: false,
-          showLabel: showEdgeLabels,
-        },
+        data: { kind: e.kind },
       }))
 
     if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
@@ -134,44 +118,15 @@ export function GraphPanel() {
       setFlowNodes(applyDagreLayout(rfNodes, rfEdges))
       setFlowEdges(rfEdges)
     }
-  }, [graph, searchFilter, degrees])
-
-  // Effect 2: Update styling (highlight/dim) without touching positions
-  useEffect(() => {
-    updateAllNodeData((node) => {
-      const isHoverTarget = hoveredNodeId === node.id
-      const isHoverNeighbor = hoveredNodeId != null && adjacency[hoveredNodeId]?.has(node.id)
-      const isHoverDimmed = hoveredNodeId != null && !isHoverTarget && !isHoverNeighbor
-      const isQueryHighlighted = highlightedNodeIds.has(node.id)
-      const isQueryDimmed = viewMode === 'highlight' && highlightedNodeIds.size > 0 && !isQueryHighlighted
-      return {
-        highlighted: isHoverTarget || isQueryHighlighted,
-        dimmed: isHoverDimmed || isQueryDimmed,
-      }
-    })
-
-    updateAllEdgeData((edge) => {
-      const key = `${edge.source}->${edge.target}`
-      const isHoverEdge = hoveredNodeId != null && (edge.source === hoveredNodeId || edge.target === hoveredNodeId)
-      const isHoverDimmed = hoveredNodeId != null && !isHoverEdge
-      const isQueryHighlighted = highlightedEdges.has(key)
-      const isQueryDimmed = viewMode === 'highlight' && highlightedEdges.size > 0 && !isQueryHighlighted
-      return {
-        highlighted: isHoverEdge || isQueryHighlighted,
-        dimmed: isHoverDimmed || isQueryDimmed,
-        showLabel: showEdgeLabels,
-        animated: isHoverEdge,
-      }
-    })
-  }, [hoveredNodeId, highlightedNodeIds, highlightedEdges, viewMode, showEdgeLabels, adjacency])
+  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges])
 
   const onNodeMouseEnter: NodeMouseHandler = useCallback((_event, node) => {
     setHoveredNodeId(node.id)
-  }, [])
+  }, [setHoveredNodeId])
 
   const onNodeMouseLeave: NodeMouseHandler = useCallback(() => {
     setHoveredNodeId(null)
-  }, [])
+  }, [setHoveredNodeId])
 
   return (
     <div className="h-full w-full flex flex-col">
