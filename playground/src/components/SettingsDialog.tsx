@@ -102,7 +102,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                 min={64}
                 max={1024}
                 step={64}
-                onValueChange={([v]) => updateConfig({ ceilingMb: v })}
+                onValueChange={(v) => updateConfig({ ceilingMb: Array.isArray(v) ? v[0] : v })}
               />
             </div>
           </TabsContent>
@@ -116,7 +116,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                 min={1000}
                 max={1_000_000}
                 step={1000}
-                onValueChange={([v]) => updateConfig({ costThreshold: v })}
+                onValueChange={(v) => updateConfig({ costThreshold: Array.isArray(v) ? v[0] : v })}
               />
             </div>
             <div className="flex items-center justify-between">

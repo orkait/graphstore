@@ -13,9 +13,9 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100">
       <Toolbar />
-      <ResizablePanelGroup direction="horizontal" className="flex-1">
+      <ResizablePanelGroup orientation="horizontal" className="flex-1">
         <ResizablePanel defaultSize={40} minSize={20}>
-          <ResizablePanelGroup direction="vertical">
+          <ResizablePanelGroup orientation="vertical">
             <ResizablePanel defaultSize={65} minSize={20}>
               <EditorPanel />
             </ResizablePanel>

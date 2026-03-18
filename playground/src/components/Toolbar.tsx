@@ -63,10 +63,10 @@ export function Toolbar() {
         </span>
         <Separator orientation="vertical" className="h-5" />
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5">
-              <BookOpen className="w-3.5 h-3.5" /> Examples
-            </Button>
+          <DropdownMenuTrigger
+            className="inline-flex items-center gap-1.5 h-7 px-3 text-xs rounded-md hover:bg-zinc-800 text-zinc-300"
+          >
+            <BookOpen className="w-3.5 h-3.5" /> Examples
           </DropdownMenuTrigger>
           <DropdownMenuContent>
             {examples.map((ex) => (
