@@ -23,6 +23,7 @@ interface Config {
   costThreshold: number
   explainBeforeExecute: boolean
   showElapsed: boolean
+  isDark: boolean
 }
 
 interface GraphStoreState {
@@ -139,6 +140,7 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
     costThreshold: 100_000,
     explainBeforeExecute: false,
     showElapsed: true,
+    isDark: true,
   },
   editorContent: '',
   editorSelection: '',

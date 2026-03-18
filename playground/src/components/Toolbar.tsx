@@ -18,8 +18,9 @@ export function Toolbar() {
   const editorSelection = useGraphStore((s) => s.editorSelection)
   const resetGraph = useGraphStore((s) => s.resetGraph)
   const setEditorContent = useGraphStore((s) => s.setEditorContent)
+  const isDark = useGraphStore((s) => s.config.isDark)
+  const updateConfig = useGraphStore((s) => s.updateConfig)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [isDark, setIsDark] = useState(true)
 
   const hasSelection = editorSelection.trim().length > 0
 
@@ -85,7 +86,7 @@ export function Toolbar() {
           <RotateCcw className="w-3.5 h-3.5" /> Reset
         </Button>
         <div className="flex-1" />
-        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setIsDark(!isDark)}>
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => updateConfig({ isDark: !isDark })}>
           {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
         </Button>
         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setSettingsOpen(true)}>
