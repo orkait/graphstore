@@ -45,7 +45,7 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
         path={edgePath}
         style={{
           ...style,
-          stroke: highlighted ? '#60a5fa' : dimmed ? '#333' : color,
+          stroke: highlighted ? 'var(--graph-highlight-border)' : dimmed ? 'var(--graph-edge-dimmed)' : color,
           strokeWidth: highlighted ? 3 : 2,
           opacity: dimmed ? 0.15 : 0.8,
           transition: 'opacity 0.2s, stroke 0.2s',
@@ -60,8 +60,8 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               pointerEvents: 'none',
               fontSize: '10px',
-              color: dimmed ? '#444' : '#aaa',
-              backgroundColor: 'rgba(0,0,0,0.6)',
+              color: dimmed ? 'var(--graph-node-dimmed-text)' : 'var(--graph-edge-label-text)',
+              backgroundColor: 'var(--graph-edge-label-bg)',
               padding: '1px 4px',
               borderRadius: '3px',
               opacity: dimmed ? 0.15 : 1,
