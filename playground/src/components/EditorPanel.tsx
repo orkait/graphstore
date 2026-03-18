@@ -2,8 +2,39 @@ import CodeMirror from '@uiw/react-codemirror'
 import { graphstoreLang } from '@/lang/graphstore'
 import { useGraphStore } from '@/hooks/useGraphStore'
 import { keymap, type ViewUpdate } from '@codemirror/view'
-import { useCallback, useMemo } from 'react'
 import type { EditorView } from '@codemirror/view'
+import { useCallback, useMemo } from 'react'
+
+function toggleComment(view: EditorView): boolean {
+  const { state } = view
+  const { from, to } = state.selection.main
+  const fromLine = state.doc.lineAt(from).number
+  const toLine = state.doc.lineAt(to).number
+
+  const lines: { line: number; text: string }[] = []
+  for (let i = fromLine; i <= toLine; i++) {
+    const line = state.doc.line(i)
+    lines.push({ line: i, text: line.text })
+  }
+
+  const allCommented = lines.every(l => l.text.trimStart().startsWith('//'))
+
+  const changes = lines.map(l => {
+    const line = state.doc.line(l.line)
+    if (allCommented) {
+      // Uncomment: remove first occurrence of "// " or "//"
+      const idx = line.text.indexOf('//')
+      const len = line.text[idx + 2] === ' ' ? 3 : 2
+      return { from: line.from + idx, to: line.from + idx + len, insert: '' }
+    } else {
+      // Comment: prepend "// "
+      return { from: line.from, to: line.from, insert: '// ' }
+    }
+  })
+
+  view.dispatch({ changes })
+  return true
+}
 
 export function EditorPanel() {
   const editorContent = useGraphStore((s) => s.editorContent)
@@ -42,6 +73,7 @@ export function EditorPanel() {
       keymap.of([
         { key: 'Ctrl-Enter', run: handleRunSelected },
         { key: 'Ctrl-Shift-Enter', run: () => { executeAll(); return true } },
+        { key: 'Ctrl-/', run: toggleComment },
       ]),
     ],
     [handleRunSelected, executeAll],
