@@ -26,7 +26,12 @@ export function CustomNode({ data }: NodeProps) {
   const highlighted = data.highlighted as boolean
   const dimmed = data.dimmed as boolean
   const kind = (data.kind as string) || 'default'
+  const degree = (data.degree as number) || 0
   const s = getKindStyle(kind)
+
+  // Scale node size by degree (Obsidian-like)
+  const scale = 1 + Math.min(degree * 0.08, 0.4) // 1.0 to 1.4x
+  const minWidth = 140 + Math.min(degree * 8, 40)
 
   return (
     <div
@@ -34,25 +39,44 @@ export function CustomNode({ data }: NodeProps) {
         backgroundColor: dimmed ? '#1a1a1a' : s.bg,
         borderColor: highlighted ? '#60a5fa' : dimmed ? '#333' : s.border,
         borderWidth: highlighted ? '2px' : '1px',
-        boxShadow: highlighted ? '0 0 12px rgba(96,165,250,0.4)' : `0 0 8px ${s.border}33`,
-        opacity: dimmed ? 0.3 : 1,
-        transition: 'all 0.3s',
+        boxShadow: highlighted
+          ? '0 0 16px rgba(96,165,250,0.5)'
+          : dimmed
+            ? 'none'
+            : `0 0 ${6 + degree * 2}px ${s.border}44`,
+        opacity: dimmed ? 0.2 : 1,
+        transition: 'all 0.25s ease',
+        transform: `scale(${dimmed ? 0.95 : scale})`,
+        minWidth: `${minWidth}px`,
       }}
-      className="px-3 py-2 rounded-lg border min-w-[150px]"
+      className="px-3 py-2 rounded-lg border"
     >
       <Handle type="target" position={Position.Top} className="!w-2 !h-2" style={{ background: s.border }} />
-      <div className="text-xs font-semibold truncate" style={{ color: dimmed ? '#666' : s.text }}>
+      <div
+        className="text-xs font-semibold truncate"
+        style={{ color: dimmed ? '#555' : s.text, fontSize: `${11 + Math.min(degree, 3)}px` }}
+      >
         {data.label as string}
       </div>
-      <div
-        className="text-[9px] mt-1 inline-block px-1.5 py-0.5 rounded"
-        style={{
-          backgroundColor: `${s.badge}22`,
-          color: dimmed ? '#555' : s.badge,
-          border: `1px solid ${s.badge}44`,
-        }}
-      >
-        {kind}
+      <div className="flex items-center gap-1.5 mt-1">
+        <div
+          className="text-[9px] inline-block px-1.5 py-0.5 rounded"
+          style={{
+            backgroundColor: `${s.badge}22`,
+            color: dimmed ? '#444' : s.badge,
+            border: `1px solid ${s.badge}44`,
+          }}
+        >
+          {kind}
+        </div>
+        {degree > 0 && !dimmed && (
+          <div
+            className="text-[8px] px-1 py-0.5 rounded"
+            style={{ color: '#888', backgroundColor: '#ffffff11' }}
+          >
+            {degree}
+          </div>
+        )}
       </div>
       <Handle type="source" position={Position.Bottom} className="!w-2 !h-2" style={{ background: s.border }} />
     </div>

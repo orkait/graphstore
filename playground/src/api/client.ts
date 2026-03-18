@@ -7,9 +7,22 @@ export interface Result {
   elapsed_us: number
 }
 
+export interface GraphNode {
+  id: string
+  kind: string
+  [key: string]: any
+}
+
+export interface GraphEdge {
+  source: string
+  target: string
+  kind: string
+  [key: string]: any
+}
+
 export interface GraphData {
-  nodes: Record<string, any>[]
-  edges: Record<string, any>[]
+  nodes: GraphNode[]
+  edges: GraphEdge[]
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
