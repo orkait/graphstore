@@ -266,7 +266,7 @@ export function ResultsPanel() {
       <div className="px-3 py-2 border-b flex-shrink-0 flex items-center justify-between bg-transparent">
         <div className="text-xs font-semibold text-muted-foreground">Results ({results.length})</div>
         <div>
-          <Button variant="ghost" size="sm" onMouseDown={(e) => { e.preventDefault(); clearResults(); }} className="h-6 px-2">
+          <Button variant="ghost" size="sm" onClick={clearResults} className="h-6 px-2" title="Clear all results">
             <Trash2 className="w-3 h-3" />
           </Button>
         </div>
