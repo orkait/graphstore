@@ -4,6 +4,9 @@ import { useGraphStore } from '@/hooks/useGraphStore'
 import { keymap, type ViewUpdate } from '@codemirror/view'
 import type { EditorView } from '@codemirror/view'
 import { useCallback, useMemo } from 'react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Play, PlayCircle } from 'lucide-react'
 
 function toggleComment(view: EditorView): boolean {
   const { state } = view
@@ -42,7 +45,10 @@ export function EditorPanel() {
   const setEditorSelection = useGraphStore((s) => s.setEditorSelection)
   const executeQuery = useGraphStore((s) => s.executeQuery)
   const executeAll = useGraphStore((s) => s.executeAll)
+  const executeSelected = useGraphStore((s) => s.executeSelected)
+  const editorSelection = useGraphStore((s) => s.editorSelection)
   const isDark = useGraphStore((s) => s.config.isDark)
+  const hasSelection = editorSelection.trim().length > 0
 
   const getFullLines = useCallback((view: EditorView) => {
     const { from, to } = view.state.selection.main
@@ -89,22 +95,40 @@ export function EditorPanel() {
   )
 
   return (
-    <div className="h-full flex flex-col bg-background">
-      <CodeMirror
-        value={editorContent}
-        onChange={setEditorContent}
-        onUpdate={onUpdate}
-        extensions={extensions}
-        theme={isDark ? 'dark' : 'light'}
-        height="100%"
-        className="flex-1 overflow-auto text-sm [&_.cm-editor]:!h-full [&_.cm-scroller]:!overflow-auto"
-        basicSetup={{
-          lineNumbers: true,
-          foldGutter: false,
-          highlightActiveLine: true,
-          autocompletion: false,
-        }}
-      />
-    </div>
+    <Card className="h-full gap-0 py-0 rounded-lg">
+      <CardHeader className="px-3 py-2 border-b">
+        <CardTitle className="text-xs text-muted-foreground">Editor</CardTitle>
+      </CardHeader>
+      <CardContent className="flex-1 overflow-hidden p-0">
+        <CodeMirror
+          value={editorContent}
+          onChange={setEditorContent}
+          onUpdate={onUpdate}
+          extensions={extensions}
+          theme={isDark ? 'dark' : 'light'}
+          height="100%"
+          className="h-full text-sm [&_.cm-editor]:!h-full [&_.cm-scroller]:!overflow-auto"
+          basicSetup={{
+            lineNumbers: true,
+            foldGutter: false,
+            highlightActiveLine: true,
+            autocompletion: false,
+          }}
+        />
+      </CardContent>
+      <CardFooter className="justify-end px-3 py-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs gap-1.5"
+          onMouseDown={(e) => { e.preventDefault(); hasSelection ? executeSelected() : executeAll() }}
+        >
+          {hasSelection
+            ? <><Play className="w-3.5 h-3.5" /> Run Selected</>
+            : <><PlayCircle className="w-3.5 h-3.5" /> Run All</>
+          }
+        </Button>
+      </CardFooter>
+    </Card>
   )
 }

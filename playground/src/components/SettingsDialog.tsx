@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useGraphStore, type ViewMode, type LayoutMode } from '@/hooks/useGraphStore'
+import { useGraphStore, type ViewMode, type LayoutMode, type LayoutDirection } from '@/hooks/useGraphStore'
 
 interface Props {
   open: boolean
@@ -59,6 +59,38 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                   <SelectItem value="force">Force-directed</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm">Layout Direction</Label>
+              <Select value={config.layoutDirection} onValueChange={(v) => updateConfig({ layoutDirection: v as LayoutDirection })}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="TB">Top to Bottom</SelectItem>
+                  <SelectItem value="LR">Left to Right</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">Node Separation</Label>
+                <span className="text-sm font-mono text-muted-foreground">{config.nodesep}px</span>
+              </div>
+              <Slider
+                value={[config.nodesep]}
+                min={20} max={200} step={5}
+                onValueChange={(v) => updateConfig({ nodesep: Array.isArray(v) ? v[0] : v })}
+              />
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">Rank Separation</Label>
+                <span className="text-sm font-mono text-muted-foreground">{config.ranksep}px</span>
+              </div>
+              <Slider
+                value={[config.ranksep]}
+                min={30} max={300} step={10}
+                onValueChange={(v) => updateConfig({ ranksep: Array.isArray(v) ? v[0] : v })}
+              />
             </div>
             <div className="flex items-center justify-between py-1">
               <Label className="text-sm">Show Edge Labels</Label>

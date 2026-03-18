@@ -257,7 +257,7 @@ pip install graphstore[playground]
 graphstore playground
 ```
 
-Three-panel UI with a CodeMirror editor (DSL syntax highlighting), React Flow graph visualization, and stacked query results. Includes 4 pre-loaded example scripts. See [`playground/README.md`](playground/README.md) for details.
+Three-panel UI with a CodeMirror editor (DSL syntax highlighting), React Flow graph visualization, and stacked query results. All panels are wrapped in cards with consistent design-token-based styling. Includes 4 pre-loaded example scripts (Class Hierarchy loads by default), configurable graph layout (direction, node/rank separation), persistent editor content and results across reloads, and light/dark theme support. See [`playground/README.md`](playground/README.md) for details.
 
 ## Development
 

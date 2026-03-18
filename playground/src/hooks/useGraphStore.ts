@@ -1,9 +1,11 @@
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import { api, type Result, type GraphData } from '@/api/client'
+import { classHierarchy } from '@/examples/class-hierarchy'
 
 export type ViewMode = 'live' | 'query-result' | 'highlight'
 export type LayoutMode = 'dagre' | 'force'
+export type LayoutDirection = 'TB' | 'LR'
 
 export interface ResultEntry {
   id: string
@@ -13,7 +15,7 @@ export interface ResultEntry {
   timestamp: number
 }
 
-interface Config {
+export interface Config {
   viewMode: ViewMode
   layoutMode: LayoutMode
   showEdgeLabels: boolean
@@ -24,6 +26,10 @@ interface Config {
   explainBeforeExecute: boolean
   showElapsed: boolean
   isDark: boolean  // client-only; not synced to server
+  // Layout tuning (client-only)
+  nodesep: number
+  ranksep: number
+  layoutDirection: LayoutDirection
 }
 
 interface GraphStoreState {
@@ -48,6 +54,48 @@ interface GraphStoreState {
 }
 
 let resultCounter = 0
+
+const PREFS_KEY = 'tinygraph-prefs'
+const EDITOR_KEY = 'tinygraph-editor'
+const RESULTS_KEY = 'tinygraph-results'
+
+function loadPrefs(): Partial<Config> {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+
+function savePrefs(config: Config) {
+  const { isDark, nodesep, ranksep, layoutDirection, showMinimap, showEdgeLabels, viewMode, layoutMode } = config
+  localStorage.setItem(PREFS_KEY, JSON.stringify({ isDark, nodesep, ranksep, layoutDirection, showMinimap, showEdgeLabels, viewMode, layoutMode }))
+}
+
+function loadEditorContent(): string {
+  try {
+    return localStorage.getItem(EDITOR_KEY) ?? ''
+  } catch { return '' }
+}
+
+function saveEditorContent(content: string) {
+  localStorage.setItem(EDITOR_KEY, content)
+}
+
+function loadResults(): ResultEntry[] {
+  try {
+    const raw = localStorage.getItem(RESULTS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as ResultEntry[]
+    // Keep at most 50 results to avoid bloating storage
+    return parsed.slice(0, 50)
+  } catch { return [] }
+}
+
+function saveResults(results: ResultEntry[]) {
+  try {
+    localStorage.setItem(RESULTS_KEY, JSON.stringify(results.slice(0, 50)))
+  } catch { /* storage full — silently ignore */ }
+}
 
 function splitQueries(text: string): string[] {
   const lines = text.split('\n')
@@ -129,7 +177,7 @@ function extractHighlights(result: Result): { nodeIds: Set<string>; edgeKeys: Se
 
 export const useGraphStore = create<GraphStoreState>((set, get) => ({
   graph: { nodes: [], edges: [] },
-  results: [],
+  results: loadResults(),
   config: {
     viewMode: 'live',
     layoutMode: 'dagre',
@@ -141,14 +189,18 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
     explainBeforeExecute: false,
     showElapsed: true,
     isDark: true,
+    nodesep: 50,
+    ranksep: 80,
+    layoutDirection: 'TB',
+    ...loadPrefs(),
   },
-  editorContent: '',
+  editorContent: loadEditorContent() || classHierarchy.script,
   editorSelection: '',
   highlightedNodeIds: new Set(),
   highlightedEdges: new Set(),
   loading: false,
 
-  setEditorContent: (content) => set({ editorContent: content }),
+  setEditorContent: (content) => { saveEditorContent(content); set({ editorContent: content }) },
   setEditorSelection: (selection) => set({ editorSelection: selection }),
 
   executeSelected: async () => {
@@ -166,27 +218,28 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
       const result = await api.execute(query)
       if (result.kind === 'error') {
         // Server returned a soft error (e.g. NodeExists, duplicate edge)
-        set((s) => ({
-          results: [{ id, query, result: null, error: result.data as string, timestamp: Date.now() }, ...s.results],
-          loading: false,
-        }))
+        set((s) => {
+          const results = [{ id, query, result: null, error: result.data as string, timestamp: Date.now() }, ...s.results]
+          saveResults(results)
+          return { results, loading: false }
+        })
       } else {
         const { nodeIds, edgeKeys } = extractHighlights(result)
-        set((s) => ({
-          results: [{ id, query, result, error: null, timestamp: Date.now() }, ...s.results],
-          highlightedNodeIds: nodeIds,
-          highlightedEdges: edgeKeys,
-          loading: false,
-        }))
+        set((s) => {
+          const results = [{ id, query, result, error: null, timestamp: Date.now() }, ...s.results]
+          saveResults(results)
+          return { results, highlightedNodeIds: nodeIds, highlightedEdges: edgeKeys, loading: false }
+        })
         if (result.kind === 'ok') await get().refreshGraph()
       }
     } catch (err: any) {
       const msg = err?.error || String(err)
       toast.error('Query failed', { description: msg })
-      set((s) => ({
-        results: [{ id, query, result: null, error: msg, timestamp: Date.now() }, ...s.results],
-        loading: false,
-      }))
+      set((s) => {
+        const results = [{ id, query, result: null, error: msg, timestamp: Date.now() }, ...s.results]
+        saveResults(results)
+        return { results, loading: false }
+      })
     }
   },
 
@@ -216,12 +269,17 @@ export const useGraphStore = create<GraphStoreState>((set, get) => ({
       highlightedNodeIds: new Set(),
       highlightedEdges: new Set(),
     })
+    saveResults([])
   },
 
-  clearResults: () => set({ results: [], highlightedNodeIds: new Set(), highlightedEdges: new Set() }),
+  clearResults: () => { saveResults([]); set({ results: [], highlightedNodeIds: new Set(), highlightedEdges: new Set() }) },
 
   updateConfig: (partial) => {
-    set((s) => ({ config: { ...s.config, ...partial } }))
+    set((s) => {
+      const config = { ...s.config, ...partial }
+      savePrefs(config)
+      return { config }
+    })
     // Sync server-side settings
     const serverUpdate: Record<string, number> = {}
     if (partial.ceilingMb !== undefined) serverUpdate.ceiling_mb = partial.ceilingMb

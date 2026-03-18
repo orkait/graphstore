@@ -2,9 +2,41 @@ import { useGraphStore, type ResultEntry } from '@/hooks/useGraphStore'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Trash2, ChevronDown, ChevronRight } from 'lucide-react'
 import { useState } from 'react'
+
+function renderValue(value: unknown, depth = 0): React.ReactNode {
+  if (value === null || value === undefined) return <span className="text-muted-foreground">null</span>
+  if (typeof value !== 'object') return String(value)
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="text-muted-foreground">[]</span>
+    if (typeof value[0] !== 'object') return value.join(', ')
+    return <NestedKVTable data={Object.fromEntries(value.map((v, i) => [i, v]))} depth={depth} />
+  }
+  return <NestedKVTable data={value as Record<string, unknown>} depth={depth} />
+}
+
+function NestedKVTable({ data, depth = 0 }: { data: Record<string, unknown>; depth?: number }) {
+  const keys = Object.keys(data)
+  return (
+    <table className={`w-full text-xs ${depth > 0 ? 'ml-1' : ''}`}>
+      <tbody>
+        {keys.map((k) => {
+          const val = data[k]
+          const isNested = val !== null && typeof val === 'object'
+          return (
+            <tr key={k} className="border-b border-border/50 align-top">
+              <td className="p-1 text-muted-foreground w-32 whitespace-nowrap">{k}</td>
+              <td className="p-1">{isNested ? renderValue(val, depth + 1) : String(val ?? '')}</td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )
+}
 
 function ResultCard({ entry }: { entry: ResultEntry }) {
   const [expanded, setExpanded] = useState(false)
@@ -112,20 +144,7 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
 
     // Single object (stats, node, plan, etc.)
     if (typeof result.data === 'object') {
-      const obj = result.data as Record<string, unknown>
-      const keys = Object.keys(obj)
-      return (
-        <table className="w-full text-xs">
-          <tbody>
-            {keys.map((k) => (
-              <tr key={k} className="border-b border-border/50">
-                <td className="p-1 text-muted-foreground w-32">{k}</td>
-                <td className="p-1">{JSON.stringify(obj[k])}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )
+      return <NestedKVTable data={result.data as Record<string, unknown>} />
     }
 
     return <span className="text-sm">{JSON.stringify(result.data)}</span>
@@ -185,23 +204,27 @@ export function ResultsPanel() {
   const results = useGraphStore((s) => s.results)
   const clearResults = useGraphStore((s) => s.clearResults)
   return (
-    <div className="h-full flex flex-col bg-background">
-      <div className="flex items-center justify-between px-2 py-1 border-b border-border">
-        <span className="text-xs text-muted-foreground">Results ({results.length})</span>
-        <Button variant="ghost" size="sm" onClick={clearResults} className="h-6 px-2">
-          <Trash2 className="w-3 h-3" />
-        </Button>
-      </div>
-      <ScrollArea className="flex-1 p-2">
-        {results.map((entry) => (
-          <ResultCard key={entry.id} entry={entry} />
-        ))}
-        {results.length === 0 && (
-          <div className="text-muted-foreground/50 text-xs text-center mt-8">
-            Run a query to see results
-          </div>
-        )}
-      </ScrollArea>
-    </div>
+    <Card className="h-full gap-0 py-0 rounded-lg">
+      <CardHeader className="px-3 py-2 border-b">
+        <CardTitle className="text-xs text-muted-foreground">Results ({results.length})</CardTitle>
+        <CardAction>
+          <Button variant="ghost" size="sm" onClick={clearResults} className="h-6 px-2">
+            <Trash2 className="w-3 h-3" />
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex-1 overflow-hidden p-0">
+        <ScrollArea className="h-full p-2">
+          {results.map((entry) => (
+            <ResultCard key={entry.id} entry={entry} />
+          ))}
+          {results.length === 0 && (
+            <div className="text-muted-foreground/50 text-xs text-center mt-8">
+              Run a query to see results
+            </div>
+          )}
+        </ScrollArea>
+      </CardContent>
+    </Card>
   )
 }

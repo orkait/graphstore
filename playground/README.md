@@ -53,10 +53,12 @@ Three resizable panels:
 - Custom nodes showing `id` and `kind` badge
 - Nodes colored by kind (function=blue, class=green, module=purple, etc.)
 - Edges labeled with kind
-- Auto-layout via dagre (hierarchical)
+- Auto-layout via dagre (hierarchical) with configurable direction (TB/LR)
+- Tunable node separation and rank separation
 - Drag nodes to reposition
 - Pan, zoom, fit controls
 - Optional minimap
+- Wrapped in a card with inline node filter/search
 
 ### View Modes
 - **Live** — graph updates after every mutation, always shows full graph
@@ -66,11 +68,18 @@ Three resizable panels:
 ### Results Panel
 - Stacked query results (newest on top)
 - Expandable cards with **Table** and **JSON** views
+- Nested tables for object values (e.g. `SYS STATS` output)
 - Status badges (ok/error), elapsed time, result count
 - Clear all results
 
+### Persistence
+- Editor content persists across page reloads (localStorage)
+- Query results persist across reloads (capped at 50 entries)
+- Theme (light/dark) and all layout settings persist across sessions
+- Default example (Class Hierarchy) auto-loads and executes on first visit
+
 ### Settings
-- **Graph** — view mode, layout algorithm, edge labels, minimap
+- **Graph** — view mode, layout algorithm, layout direction, node separation, rank separation, edge labels, minimap
 - **Store** — memory ceiling (64–1024 MB)
 - **Query** — cost threshold, explain-before-execute toggle
 
@@ -84,7 +93,7 @@ Four pre-loaded example scripts accessible from the toolbar dropdown:
 | Code Graph | 16 | Functions, classes, modules with calls/extends/imports/contains |
 | Microservices Map | 11 | Services, databases, queues with API calls and messaging |
 
-Loading an example resets the graph, loads the script into the editor, and auto-executes all CREATE statements.
+Loading an example resets the graph, loads the script into the editor, and auto-executes all CREATE statements. The Class Hierarchy example loads by default on first visit.
 
 ## API
 
@@ -141,8 +150,8 @@ The built frontend at `playground/dist/` is served by the FastAPI server in prod
 | Layer | Technology |
 |---|---|
 | Backend | FastAPI + uvicorn |
-| Frontend | Vite + React 18 + TypeScript |
-| Styling | Tailwind CSS + shadcn/ui |
+| Frontend | Vite + React 19 + TypeScript |
+| Styling | Tailwind CSS v4 + shadcn/ui |
 | Icons | Lucide React |
 | Graph | React Flow v12 (@xyflow/react) |
 | Editor | CodeMirror 6 (@uiw/react-codemirror) |

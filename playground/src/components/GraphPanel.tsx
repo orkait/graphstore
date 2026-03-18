@@ -14,6 +14,7 @@ import { CustomEdge } from '@/components/graph/CustomEdge'
 import { useGraphStore } from '@/hooks/useGraphStore'
 import { useFlowStore } from '@/hooks/useFlowStore'
 import { applyDagreLayout } from '@/components/graph/layout'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useMemo, useEffect, useRef, useState, useCallback } from 'react'
 import { Search } from 'lucide-react'
 
@@ -45,9 +46,8 @@ function getEdgeColor(kind: string): string {
 
 export function GraphPanel() {
   const graph = useGraphStore((s) => s.graph)
-  const viewMode = useGraphStore((s) => s.config.viewMode)
-  const showMinimap = useGraphStore((s) => s.config.showMinimap)
-  const isDark = useGraphStore((s) => s.config.isDark)
+  const config = useGraphStore((s) => s.config)
+  const { viewMode, showMinimap, isDark, nodesep, ranksep, layoutDirection } = config
   const highlightedNodeIds = useGraphStore((s) => s.highlightedNodeIds)
   const highlightedEdges = useGraphStore((s) => s.highlightedEdges)
 
@@ -75,6 +75,7 @@ export function GraphPanel() {
       v: viewMode,
       h: [...highlightedNodeIds].sort(),
       he: [...highlightedEdges].sort(),
+      ns: nodesep, rs: ranksep, ld: layoutDirection,
     })
 
     if (structureKey === prevStructureRef.current) return
@@ -111,16 +112,17 @@ export function GraphPanel() {
         data: { kind: e.kind },
       }))
 
+    const layoutOpts = { direction: layoutDirection, nodesep, ranksep }
     if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
       const filtered = rfNodes.filter(n => highlightedNodeIds.has(n.id))
       const filtEdges = rfEdges.filter(e => highlightedEdges.has(`${e.source}->${e.target}`))
-      setFlowNodes(applyDagreLayout(filtered, filtEdges))
+      setFlowNodes(applyDagreLayout(filtered, filtEdges, layoutOpts))
       setFlowEdges(filtEdges)
     } else {
-      setFlowNodes(applyDagreLayout(rfNodes, rfEdges))
+      setFlowNodes(applyDagreLayout(rfNodes, rfEdges, layoutOpts))
       setFlowEdges(rfEdges)
     }
-  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges])
+  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection])
 
   const onNodeMouseEnter: NodeMouseHandler = useCallback((_event, node) => {
     setHoveredNodeId(node.id)
@@ -131,23 +133,25 @@ export function GraphPanel() {
   }, [setHoveredNodeId])
 
   return (
-    <div className="h-full w-full flex flex-col">
-      <div className="h-8 border-b border-border flex items-center px-2 gap-2 bg-card/30">
-        <Search className="w-3 h-3 text-muted-foreground" />
-        <input
-          type="text"
-          placeholder="Filter nodes..."
-          value={searchFilter}
-          onChange={(e) => setSearchFilter(e.target.value)}
-          className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none"
-        />
-        {searchFilter && (
-          <button onClick={() => setSearchFilter('')} className="text-[10px] text-muted-foreground hover:text-foreground">
-            Clear
-          </button>
-        )}
-      </div>
-      <div className="flex-1">
+    <Card className="h-full gap-0 py-0 rounded-lg">
+      <CardHeader className="px-3 py-2 border-b">
+        <CardTitle className="text-xs text-muted-foreground flex items-center gap-2">
+          <Search className="w-3 h-3" />
+          <input
+            type="text"
+            placeholder="Filter nodes..."
+            value={searchFilter}
+            onChange={(e) => setSearchFilter(e.target.value)}
+            className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground outline-none font-normal"
+          />
+          {searchFilter && (
+            <button onClick={() => setSearchFilter('')} className="text-[10px] text-muted-foreground hover:text-foreground">
+              Clear
+            </button>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex-1 overflow-hidden p-0">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -172,7 +176,7 @@ export function GraphPanel() {
             />
           )}
         </ReactFlow>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }

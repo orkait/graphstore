@@ -6,27 +6,18 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
-import { Play, PlayCircle, RotateCcw, Settings, BookOpen, Sun, Moon } from 'lucide-react'
+import { RotateCcw, Settings, BookOpen, Sun, Moon } from 'lucide-react'
 import { useGraphStore } from '@/hooks/useGraphStore'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { examples } from '@/examples'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 
 export function Toolbar() {
-  const executeAll = useGraphStore((s) => s.executeAll)
-  const executeSelected = useGraphStore((s) => s.executeSelected)
-  const editorSelection = useGraphStore((s) => s.editorSelection)
   const resetGraph = useGraphStore((s) => s.resetGraph)
   const setEditorContent = useGraphStore((s) => s.setEditorContent)
   const isDark = useGraphStore((s) => s.config.isDark)
   const updateConfig = useGraphStore((s) => s.updateConfig)
   const [settingsOpen, setSettingsOpen] = useState(false)
-
-  const hasSelection = editorSelection.trim().length > 0
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDark)
-  }, [isDark])
 
   const loadExample = async (example: (typeof examples)[0]) => {
     await resetGraph()
@@ -68,19 +59,6 @@ export function Toolbar() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Separator orientation="vertical" className="h-5" />
-        {hasSelection ? (
-          <Button
-            variant="ghost" size="sm" className="h-7 text-xs gap-1.5"
-            onMouseDown={(e) => { e.preventDefault(); executeSelected() }}
-          >
-            <Play className="w-3.5 h-3.5" /> Run Selected
-          </Button>
-        ) : (
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={executeAll}>
-            <PlayCircle className="w-3.5 h-3.5" /> Run All
-          </Button>
-        )}
         <Separator orientation="vertical" className="h-5" />
         <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={resetGraph}>
           <RotateCcw className="w-3.5 h-3.5" /> Reset
