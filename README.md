@@ -248,6 +248,17 @@ graphstore/
     └── deserializer.py  # sqlite blobs → graph
 ```
 
+## Playground
+
+An interactive browser-based workbench for exploring the DSL:
+
+```bash
+pip install graphstore[playground]
+graphstore playground
+```
+
+Three-panel UI with a CodeMirror editor (DSL syntax highlighting), React Flow graph visualization, and stacked query results. Includes 4 pre-loaded example scripts. See [`playground/README.md`](playground/README.md) for details.
+
 ## Development
 
 ```bash
