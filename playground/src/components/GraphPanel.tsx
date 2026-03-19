@@ -57,6 +57,9 @@ export function GraphPanel() {
   const expandedGroups = useGraphStore((s) => s.expandedGroups)
   const highlightedNodeIds = useGraphStore((s) => s.highlightedNodeIds)
   const highlightedEdges = useGraphStore((s) => s.highlightedEdges)
+  const results = useGraphStore((s) => s.results)
+  const lastResultKind = results.length > 0 ? results[0]?.result?.kind : undefined
+  const isPathResult = lastResultKind === 'path' || lastResultKind === 'paths'
   const updateConfig = useGraphStore((s) => s.updateConfig)
 
   const nodes = useFlowStore((s) => s.nodes)
@@ -104,6 +107,33 @@ export function GraphPanel() {
       : graph.nodes
     const filteredIds = new Set(filteredGraphNodes.map(n => n.id))
 
+    // For path results, force-expand all groups along the path
+    let effectiveExpanded = expandedGroups
+    if (isPathResult && highlightedNodeIds.size > 0 && config.layoutMode === 'dagre') {
+      effectiveExpanded = { ...expandedGroups }
+      const childrenMap = new Map<string, string[]>()
+      for (const e of graph.edges) {
+        if (!filteredIds.has(e.source) || !filteredIds.has(e.target)) continue
+        const list = childrenMap.get(e.source) || []
+        list.push(e.target)
+        childrenMap.set(e.source, list)
+      }
+      const nodeMap = new Map(filteredGraphNodes.map(n => [n.id, n]))
+      for (const [parentId, children] of childrenMap) {
+        if (children.length <= collapseThreshold) continue
+        for (const childId of children) {
+          if (highlightedNodeIds.has(childId)) {
+            const childNode = nodeMap.get(childId)
+            const kind = childNode?.kind || 'default'
+            const list = effectiveExpanded[parentId] || []
+            if (!list.includes(kind)) {
+              effectiveExpanded[parentId] = [...list, kind]
+            }
+          }
+        }
+      }
+    }
+
     // Apply collapse transform for dagre mode
     const { nodes: collapsedNodes, edges: collapsedEdges, groupMeta } =
       config.layoutMode === 'dagre'
@@ -111,7 +141,8 @@ export function GraphPanel() {
             filteredGraphNodes,
             graph.edges.filter(e => filteredIds.has(e.source) && filteredIds.has(e.target)),
             collapseThreshold,
-            expandedGroups
+            effectiveExpanded,
+            highlightedNodeIds.size > 0 ? highlightedNodeIds : undefined
           )
         : { nodes: filteredGraphNodes, edges: graph.edges.filter(e => filteredIds.has(e.source) && filteredIds.has(e.target)), groupMeta: new Map<string, GroupNodeData>() }
     const collapsedIds = new Set(collapsedNodes.map(n => n.id))
@@ -132,12 +163,15 @@ export function GraphPanel() {
               childCount: meta.childCount,
               groupParentId: meta.parentId,
               groupKind: meta.kind,
+              matchCount: meta.matchCount,
+              highlighted: meta.matchCount > 0,
             }
           : {
               label: n.id,
               kind: n.kind,
               degree: degrees[n.id] || 0,
               fields: n,
+              highlighted: highlightedNodeIds.has(n.id),
             },
       }
     })
@@ -199,7 +233,7 @@ export function GraphPanel() {
         setFlowEdges(rfEdges)
       }
     }
-  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, expandedGroups, collapseThreshold, config.layoutMode, config.clusterStrength, config.repelStrength, setFlowNodes, setFlowEdges])
+  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, expandedGroups, collapseThreshold, config.layoutMode, config.clusterStrength, config.repelStrength, setFlowNodes, setFlowEdges, results, isPathResult])
 
   // Cleanup simulation when layout mode changes
   useEffect(() => {

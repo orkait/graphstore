@@ -31,7 +31,7 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
   const viewMode = useGraphStore((st) => st.config.viewMode)
 
   const isHoverDimmed = isHoverActive && !isHoverTarget && !isHoverNeighbor
-  const isQueryHighlighted = highlightedNodeIds.has(id)
+  const isQueryHighlighted = highlightedNodeIds.has(id) || Boolean(data.highlighted)
   const isQueryDimmed = viewMode === 'highlight' && highlightedNodeIds.size > 0 && !isQueryHighlighted
 
   const highlighted = isHoverTarget || isQueryHighlighted
