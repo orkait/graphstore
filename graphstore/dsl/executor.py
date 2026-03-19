@@ -284,7 +284,7 @@ class Executor:
             return Result(kind="subgraph", data={"nodes": [], "edges": []}, count=0)
 
         edge_type = self._extract_kind_from_where(q.where)
-        # Ancestors = BFS on TRANSPOSED matrix (follow incoming edges)
+        # Ancestors = BFS on transposed matrix (follow incoming edges)
         if edge_type:
             matrix = self.store.edge_matrices.get_transpose(edge_type)
         else:
@@ -333,6 +333,7 @@ class Executor:
             return Result(kind="subgraph", data={"nodes": [], "edges": []}, count=0)
 
         edge_type = self._extract_kind_from_where(q.where)
+        # Descendants = BFS on forward matrix (follow outgoing edges)
         matrix = self.store.edge_matrices.get({edge_type} if edge_type else None)
         if matrix is None:
             node_data = self.store.get_node(q.node_id)
