@@ -26,6 +26,7 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
   // Primitive selectors — stable, no unnecessary re-renders
   const hoveredNodeId = useFlowStore((st) => st.hoveredNodeId)
   const highlightedEdges = useGraphStore((st) => st.highlightedEdges)
+  const highlightedNodeIds = useGraphStore((st) => st.highlightedNodeIds)
   const showEdgeLabels = useGraphStore((st) => st.config.showEdgeLabels)
   const layoutMode = useGraphStore((st) => st.config.layoutMode)
 
@@ -38,7 +39,11 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
   const isHoverEdge = hoveredNodeId != null && (source === hoveredNodeId || target === hoveredNodeId)
   const isHoverDimmed = hoveredNodeId != null && !isHoverEdge
   const isQueryHighlighted = highlightedEdges.has(key)
-  const isQueryDimmed = highlightedEdges.size > 0 && !isQueryHighlighted
+  // Dim edge if: (1) edge-level highlights exist and this edge isn't one, OR
+  //              (2) node-level highlights exist and neither endpoint is highlighted
+  const hasAnyHighlights = highlightedEdges.size > 0 || highlightedNodeIds.size > 0
+  const endpointHighlighted = highlightedNodeIds.has(source) && highlightedNodeIds.has(target)
+  const isQueryDimmed = hasAnyHighlights && !isQueryHighlighted && !endpointHighlighted
 
   const highlighted = isHoverEdge || isQueryHighlighted
   const dimmed = isHoverDimmed || isQueryDimmed

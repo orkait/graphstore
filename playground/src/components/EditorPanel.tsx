@@ -49,9 +49,11 @@ export function EditorPanel() {
   const fontSize = useGraphStore((s) => s.config.fontSize)
   const updateConfig = useGraphStore((s) => s.updateConfig)
   const loading = useGraphStore((s) => s.loading)
+  const activeResultId = useGraphStore((s) => s.activeResultId)
   const clearHighlights = useGraphStore((s) => s.clearHighlights)
   const clearResults = useGraphStore((s) => s.clearResults)
   const resetGraph = useGraphStore((s) => s.resetGraph)
+  const results = useGraphStore((s) => s.results)
   const hasSelection = editorSelection.trim().length > 0
 
   const getFullLines = useCallback((view: EditorView) => {
@@ -143,18 +145,20 @@ export function EditorPanel() {
           }}
         />
       </div>
-      <div className="px-3 py-1.5 flex items-center border-t bg-transparent flex-shrink-0">
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" className="h-7 px-2" title="Clear highlights" onMouseDown={(e) => { e.preventDefault(); clearHighlights() }}>
-            <XCircle className="w-3.5 h-3.5" />
+      <div className="px-3 py-1.5 flex items-center border-t bg-transparent flex-shrink-0 gap-1">
+        {activeResultId && (
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onMouseDown={(e) => { e.preventDefault(); clearHighlights() }}>
+            <XCircle className="w-3.5 h-3.5" /> Clear Highlight
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 px-2" title="Clear results" onMouseDown={(e) => { e.preventDefault(); clearResults() }}>
-            <Trash2 className="w-3.5 h-3.5" />
+        )}
+        {results.length > 0 && (
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onMouseDown={(e) => { e.preventDefault(); clearResults() }}>
+            <Trash2 className="w-3.5 h-3.5" /> Clear Results
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 px-2" title="Reset database" onMouseDown={(e) => { e.preventDefault(); resetGraph() }}>
-            <RotateCcw className="w-3.5 h-3.5" />
-          </Button>
-        </div>
+        )}
+        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onMouseDown={(e) => { e.preventDefault(); resetGraph() }}>
+          <RotateCcw className="w-3.5 h-3.5" /> Reset DB
+        </Button>
         <div className="flex-1" />
         <Button
           variant="ghost"
