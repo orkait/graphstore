@@ -25,6 +25,7 @@ from graphstore.dsl.ast_nodes import (
     MatchQuery,
     FieldPair,
     CreateNode,
+    VarAssign,
     UpdateNode,
     UpsertNode,
     DeleteNode,
@@ -218,6 +219,29 @@ class DSLTransformer(Transformer):
             fields=args[1] if isinstance(args[1], list) else [],
         )
 
+    def create_node_auto(self, args):
+        return CreateNode(
+            id=None,
+            fields=args[0] if isinstance(args[0], list) else [],
+            auto_id=True,
+        )
+
+    def var_assign(self, args):
+        var_name = str(args[0])
+        stmt = args[1]
+        return VarAssign(variable=var_name, statement=stmt)
+
+    def node_ref(self, args):
+        """Return either a literal string or a $variable reference."""
+        token = args[0]
+        s = str(token)
+        if s.startswith('$'):
+            return s  # variable reference, kept as-is
+        # Strip quotes from string literal
+        if s.startswith('"') and s.endswith('"'):
+            return s[1:-1].replace('\\"', '"').replace('\\\\', '\\')
+        return s
+
     def update_node(self, args):
         return UpdateNode(
             id=self._str(args[0]),
@@ -238,8 +262,8 @@ class DSLTransformer(Transformer):
 
     def create_edge(self, args):
         return CreateEdge(
-            source=self._str(args[0]),
-            target=self._str(args[1]),
+            source=args[0],  # node_ref returns str directly
+            target=args[1],
             fields=args[2] if len(args) > 2 and isinstance(args[2], list) else [],
         )
 

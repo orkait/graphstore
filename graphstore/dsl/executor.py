@@ -17,6 +17,7 @@ from graphstore.dsl.ast_nodes import (
     CreateNode,
     DegreeCondition,
     DeleteEdge,
+    VarAssign,
     DeleteEdges,
     DeleteNode,
     DeleteNodes,
@@ -523,10 +524,25 @@ class Executor:
 
     # --- Write handlers ---
 
+    def _generate_auto_id(self, kind: str, data: dict) -> str:
+        """Generate a deterministic content-hash ID from kind + sorted fields."""
+        import hashlib
+        parts = [f"kind={kind}"]
+        for k in sorted(data.keys()):
+            parts.append(f"{k}={data[k]}")
+        content = "|".join(parts)
+        return hashlib.sha256(content.encode()).hexdigest()[:12]
+
     def _create_node(self, q: CreateNode) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
         kind = data.pop("kind", "default")
-        self.store.put_node(q.id, kind, data)
+        if q.auto_id:
+            node_id = self._generate_auto_id(kind, data)
+        else:
+            node_id = q.id
+        self.store.put_node(node_id, kind, data)
+        if q.auto_id:
+            return Result(kind="node", data={"id": node_id}, count=1)
         return Result(kind="ok", data=None, count=0)
 
     def _update_node(self, q: UpdateNode) -> Result:
@@ -605,8 +621,30 @@ class Executor:
         saved_node_kinds = self.store.node_kinds[: self.store._next_slot].copy()
 
         try:
+            variables: dict[str, str] = {}  # $var -> resolved node ID
             for stmt in q.statements:
-                self._dispatch(stmt)
+                if isinstance(stmt, VarAssign):
+                    result = self._dispatch(stmt.statement)
+                    # Extract the generated ID from the result
+                    if result.data and isinstance(result.data, dict) and "id" in result.data:
+                        variables[stmt.variable] = result.data["id"]
+                    else:
+                        raise GraphStoreError(
+                            f"Variable {stmt.variable}: statement did not return an ID"
+                        )
+                else:
+                    # Resolve $variables in CreateEdge source/target
+                    if isinstance(stmt, CreateEdge):
+                        src = variables.get(stmt.source, stmt.source) if stmt.source.startswith("$") else stmt.source
+                        tgt = variables.get(stmt.target, stmt.target) if stmt.target.startswith("$") else stmt.target
+                        if src.startswith("$"):
+                            raise GraphStoreError(f"Unresolved variable: {src}")
+                        if tgt.startswith("$"):
+                            raise GraphStoreError(f"Unresolved variable: {tgt}")
+                        resolved = CreateEdge(source=src, target=tgt, fields=stmt.fields)
+                        self._dispatch(resolved)
+                    else:
+                        self._dispatch(stmt)
             # Flush any deferred edge rebuilds after successful batch
             self.store._ensure_edges_built()
             return Result(kind="ok", data=None, count=0)

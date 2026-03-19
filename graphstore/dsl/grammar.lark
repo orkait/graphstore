@@ -43,22 +43,27 @@ arrow: "-[" expr "]->"
             | increment
 
 create_node:  "CREATE" "NODE" STRING field_pairs
+            | "CREATE" "NODE" "AUTO" field_pairs -> create_node_auto
 update_node:  "UPDATE" "NODE" STRING "SET" field_pairs
 upsert_node:  "UPSERT" "NODE" STRING field_pairs
 delete_node:  "DELETE" "NODE" STRING
 delete_nodes: "DELETE" "NODES" where_clause
 
-create_edge:  "CREATE" "EDGE" STRING "->" STRING field_pairs
+create_edge:  "CREATE" "EDGE" node_ref "->" node_ref field_pairs
+node_ref: STRING | VARIABLE
 delete_edge:  "DELETE" "EDGE" STRING "->" STRING where_clause?
 delete_edges: "DELETE" "EDGES" direction STRING where_clause?
 
 increment:    "INCREMENT" "NODE" STRING IDENTIFIER "BY" NUMBER
 
 batch: "BEGIN" _NL (_batch_stmt _NL)* "COMMIT"
-_batch_stmt: create_node | update_node | upsert_node
+_batch_stmt: var_assign
+           | create_node | update_node | upsert_node
            | delete_node | delete_nodes
            | create_edge | delete_edge | delete_edges
            | increment
+
+var_assign: VARIABLE "=" write_query
 
 field_pairs: (IDENTIFIER "=" value)*
 
@@ -132,6 +137,7 @@ string_list: STRING ("," STRING)*
 STRING: "\"" /[^"\\]*(\\.[^"\\]*)*/ "\""
 NUMBER: /-?[0-9]+(\.[0-9]+)?/
 IDENTIFIER: /[a-zA-Z_][a-zA-Z0-9_]*/
+VARIABLE: /\$[a-zA-Z_][a-zA-Z0-9_]*/
 _NL: /\n/+
 
 %import common.WS_INLINE

@@ -139,8 +139,14 @@ class FieldPair:
 
 @dataclass
 class CreateNode:
-    id: str
+    id: str | None  # None for AUTO ID
     fields: list[FieldPair]
+    auto_id: bool = False
+
+@dataclass
+class VarAssign:
+    variable: str  # e.g. "$fn1"
+    statement: Any  # the write query that produces an ID
 
 @dataclass
 class UpdateNode:
@@ -162,8 +168,8 @@ class DeleteNodes:
 
 @dataclass
 class CreateEdge:
-    source: str
-    target: str
+    source: str  # literal ID or "$variable"
+    target: str  # literal ID or "$variable"
     fields: list[FieldPair]
 
 @dataclass
