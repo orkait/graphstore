@@ -57,22 +57,24 @@ export function createLiveSimulation(
   rfNodes: Node[],
   rfEdges: Edge[],
   opts: ForceLayoutOptions,
-  onTick: (nodes: Node[]) => void
+  onTick: (nodes: Node[]) => void,
+  existingPositions?: Map<string, { x: number; y: number }>
 ): { simulation: Simulation<ForceNode, ForceLink>; nodeMap: Map<string, ForceNode> } {
   const { width, height } = opts
   const f = mapForces(opts)
   const cx = width / 2
   const cy = height / 2
 
-  // Scatter in circle — wide enough so fitView doesn't over-zoom
+  // Use existing positions if available (highlight changes), scatter otherwise
   const startRadius = Math.min(width, height) * 0.35
   const forceNodes: ForceNode[] = rfNodes.map((n, i) => {
+    const existing = existingPositions?.get(n.id)
     const angle = (i / rfNodes.length) * 2 * Math.PI
     return {
       id: n.id,
       kind: (n.data?.kind as string) || 'default',
-      x: cx + Math.cos(angle) * startRadius + (Math.random() - 0.5) * 10,
-      y: cy + Math.sin(angle) * startRadius + (Math.random() - 0.5) * 10,
+      x: existing?.x ?? (cx + Math.cos(angle) * startRadius + (Math.random() - 0.5) * 10),
+      y: existing?.y ?? (cy + Math.sin(angle) * startRadius + (Math.random() - 0.5) * 10),
       rfNode: n,
     }
   })
@@ -99,9 +101,9 @@ export function createLiveSimulation(
       .id(d => d.id).distance(f.distance).strength(f.link))
     .force('collide', forceCollide<ForceNode>(55).strength(0.7).iterations(2))
     .force('cluster', forceCluster(f.cluster))
-    .alpha(1)
+    .alpha(existingPositions ? 0.1 : 1)
     .alphaMin(0.0001)
-    .alphaDecay(0.005)
+    .alphaDecay(existingPositions ? 0.02 : 0.005)
     .alphaTarget(0.02)
     .velocityDecay(0.15)
     .on('tick', () => {

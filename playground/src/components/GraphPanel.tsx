@@ -86,10 +86,10 @@ export function GraphPanel() {
       e: graph.edges.map(e => `${e.source}->${e.target}`).sort(),
       f: searchFilter,
       lm: config.layoutMode,
-      // Dagre needs highlights in key (for collapse auto-expand)
+      h: [...highlightedNodeIds].sort(),
+      he: [...highlightedEdges].sort(),
+      // Dagre-specific layout params
       ...(config.layoutMode === 'dagre' ? {
-        h: [...highlightedNodeIds].sort(),
-        he: [...highlightedEdges].sort(),
         ns: nodesep, rs: ranksep, ld: layoutDirection, ct: collapseThreshold, eg: expandedGroups,
       } : {}),
     })
@@ -190,6 +190,16 @@ export function GraphPanel() {
       }))
 
     if (config.layoutMode === 'cluster') {
+      // Capture existing positions before stopping simulation (for smooth highlight transitions)
+      const existingPositions = new Map<string, { x: number; y: number }>()
+      if (simulationRef.current) {
+        for (const [id, fn] of simulationRef.current.nodeMap) {
+          if (fn.x != null && fn.y != null) {
+            existingPositions.set(id, { x: fn.x, y: fn.y })
+          }
+        }
+      }
+
       // Stop any previous simulation
       simulationRef.current?.simulation.stop()
       simulationRef.current = null
@@ -204,7 +214,7 @@ export function GraphPanel() {
       // Set edges immediately
       setFlowEdges(layoutEdges)
 
-      // Create a LIVE simulation — nodes animate into place (Obsidian-style)
+      // Create a LIVE simulation — preserve positions if available
       const live = createLiveSimulation(layoutNodes, layoutEdges, {
         clusterStrength: config.clusterStrength,
         repelStrength: config.repelStrength,
@@ -215,7 +225,7 @@ export function GraphPanel() {
         height,
       }, (updatedNodes) => {
         setFlowNodes(updatedNodes)
-      })
+      }, existingPositions.size > 0 ? existingPositions : undefined)
       simulationRef.current = live
     } else {
       // Dagre layout
