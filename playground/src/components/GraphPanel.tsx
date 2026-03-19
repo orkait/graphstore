@@ -16,6 +16,7 @@ import { CanvasControls } from '@/components/graph/CanvasControls'
 import { useGraphStore, type ViewMode } from '@/hooks/useGraphStore'
 import { useFlowStore } from '@/hooks/useFlowStore'
 import { applyDagreLayout } from '@/components/graph/layout'
+import { collapseTransform, type GroupNodeData } from '@/components/graph/collapseTransform'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { useMemo, useEffect, useRef, useState, useCallback } from 'react'
 import { Search } from 'lucide-react'
@@ -50,6 +51,8 @@ export function GraphPanel() {
   const graph = useGraphStore((s) => s.graph)
   const config = useGraphStore((s) => s.config)
   const { viewMode, showMinimap, isDark, nodesep, ranksep, layoutDirection } = config
+  const { collapseThreshold } = config
+  const expandedGroups = useGraphStore((s) => s.expandedGroups)
   const highlightedNodeIds = useGraphStore((s) => s.highlightedNodeIds)
   const highlightedEdges = useGraphStore((s) => s.highlightedEdges)
   const updateConfig = useGraphStore((s) => s.updateConfig)
@@ -79,6 +82,8 @@ export function GraphPanel() {
       h: [...highlightedNodeIds].sort(),
       he: [...highlightedEdges].sort(),
       ns: nodesep, rs: ranksep, ld: layoutDirection,
+      ct: collapseThreshold,
+      eg: expandedGroups,
     })
 
     if (structureKey === prevStructureRef.current) return
@@ -93,26 +98,56 @@ export function GraphPanel() {
       : graph.nodes
     const filteredIds = new Set(filteredGraphNodes.map(n => n.id))
 
-    const rfNodes: Node[] = filteredGraphNodes.map((n) => ({
-      id: n.id,
-      type: 'custom',
-      position: { x: 0, y: 0 },
-      data: {
-        label: n.id,
-        kind: n.kind,
-        degree: degrees[n.id] || 0,
-        fields: n,
-      },
-    }))
+    // Apply collapse transform for dagre mode
+    const { nodes: collapsedNodes, edges: collapsedEdges, groupMeta } =
+      config.layoutMode === 'dagre'
+        ? collapseTransform(
+            filteredGraphNodes,
+            graph.edges.filter(e => filteredIds.has(e.source) && filteredIds.has(e.target)),
+            collapseThreshold,
+            expandedGroups
+          )
+        : { nodes: filteredGraphNodes, edges: graph.edges.filter(e => filteredIds.has(e.source) && filteredIds.has(e.target)), groupMeta: new Map<string, GroupNodeData>() }
+    const collapsedIds = new Set(collapsedNodes.map(n => n.id))
 
-    const rfEdges: Edge[] = graph.edges
-      .filter(e => filteredIds.has(e.source) && filteredIds.has(e.target))
+    const rfNodes: Node[] = collapsedNodes.map((n) => {
+      const meta = groupMeta.get(n.id)
+      return {
+        id: n.id,
+        type: 'custom',
+        position: { x: 0, y: 0 },
+        data: meta
+          ? {
+              label: n.id,
+              kind: meta.kind,
+              degree: meta.childCount,
+              fields: n,
+              isGroup: true,
+              childCount: meta.childCount,
+              groupParentId: meta.parentId,
+              groupKind: meta.kind,
+            }
+          : {
+              label: n.id,
+              kind: n.kind,
+              degree: degrees[n.id] || 0,
+              fields: n,
+            },
+      }
+    })
+
+    const rfEdges: Edge[] = collapsedEdges
+      .filter(e => collapsedIds.has(e.source) && collapsedIds.has(e.target))
       .map((e, i) => ({
         id: `e-${i}-${e.source}-${e.target}-${e.kind}`,
         source: e.source,
         target: e.target,
         type: 'custom',
-        data: { kind: e.kind },
+        data: {
+          kind: e.kind,
+          crossGroupCount: e.crossGroupCount,
+          groupChildCount: e.groupChildCount,
+        },
       }))
 
     const layoutOpts = { direction: layoutDirection, nodesep, ranksep }
@@ -125,7 +160,7 @@ export function GraphPanel() {
       setFlowNodes(applyDagreLayout(rfNodes, rfEdges, layoutOpts))
       setFlowEdges(rfEdges)
     }
-  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, setFlowNodes, setFlowEdges])
+  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, expandedGroups, collapseThreshold, config.layoutMode, setFlowNodes, setFlowEdges])
 
   const onNodeMouseEnter: NodeMouseHandler = useCallback((_event, node) => {
     setHoveredNodeId(node.id)
