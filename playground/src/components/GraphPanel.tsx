@@ -17,6 +17,8 @@ import { useGraphStore, type ViewMode } from '@/hooks/useGraphStore'
 import { useFlowStore } from '@/hooks/useFlowStore'
 import { applyDagreLayout } from '@/components/graph/layout'
 import { collapseTransform, type GroupNodeData } from '@/components/graph/collapseTransform'
+import { applyForceLayout, createForceSimulation } from '@/components/graph/forceLayout'
+import type { Simulation } from 'd3-force'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { useMemo, useEffect, useRef, useState, useCallback } from 'react'
 import { Search } from 'lucide-react'
@@ -68,6 +70,9 @@ export function GraphPanel() {
   const [searchFilter, setSearchFilter] = useState('')
   const prevStructureRef = useRef('')
   const proOptions = useMemo(() => ({ hideAttribution: true }), [])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const simulationRef = useRef<{ simulation: Simulation<any, any>; nodeMap: Map<string, any> } | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   const degrees = useMemo(() => computeDegrees(graph.edges), [graph.edges])
 
@@ -84,6 +89,7 @@ export function GraphPanel() {
       ns: nodesep, rs: ranksep, ld: layoutDirection,
       ct: collapseThreshold,
       eg: expandedGroups,
+      cs: config.clusterStrength, rs2: config.repelStrength,
     })
 
     if (structureKey === prevStructureRef.current) return
@@ -150,17 +156,80 @@ export function GraphPanel() {
         },
       }))
 
-    const layoutOpts = { direction: layoutDirection, nodesep, ranksep }
-    if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
-      const filtered = rfNodes.filter(n => highlightedNodeIds.has(n.id))
-      const filtEdges = rfEdges.filter(e => highlightedEdges.has(`${e.source}->${e.target}`))
-      setFlowNodes(applyDagreLayout(filtered, filtEdges, layoutOpts))
-      setFlowEdges(filtEdges)
-    } else {
-      setFlowNodes(applyDagreLayout(rfNodes, rfEdges, layoutOpts))
+    if (config.layoutMode === 'cluster') {
+      // Stop any previous simulation
+      simulationRef.current?.simulation.stop()
+
+      const container = containerRef.current
+      const width = container?.clientWidth || 800
+      const height = container?.clientHeight || 600
+
+      // Initial synchronous layout for instant positioning
+      const positioned = applyForceLayout(rfNodes, rfEdges, {
+        clusterStrength: config.clusterStrength,
+        repelStrength: config.repelStrength,
+        width,
+        height,
+      })
+      setFlowNodes(positioned)
       setFlowEdges(rfEdges)
+
+      // Create a live simulation for drag interactions (starts stopped/cooled)
+      const live = createForceSimulation(positioned, rfEdges, {
+        clusterStrength: config.clusterStrength,
+        repelStrength: config.repelStrength,
+        width,
+        height,
+      }, (updatedNodes) => {
+        setFlowNodes(updatedNodes)
+      })
+      // Stop immediately — we only restart on drag
+      live.simulation.stop()
+      simulationRef.current = live
+    } else {
+      // Dagre layout (existing code)
+      const layoutOpts = { direction: layoutDirection, nodesep, ranksep }
+      if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
+        const filtered = rfNodes.filter(n => highlightedNodeIds.has(n.id))
+        const filtEdges = rfEdges.filter(e => highlightedEdges.has(`${e.source}->${e.target}`))
+        setFlowNodes(applyDagreLayout(filtered, filtEdges, layoutOpts))
+        setFlowEdges(filtEdges)
+      } else {
+        setFlowNodes(applyDagreLayout(rfNodes, rfEdges, layoutOpts))
+        setFlowEdges(rfEdges)
+      }
     }
-  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, expandedGroups, collapseThreshold, config.layoutMode, setFlowNodes, setFlowEdges])
+  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, expandedGroups, collapseThreshold, config.layoutMode, config.clusterStrength, config.repelStrength, setFlowNodes, setFlowEdges])
+
+  // Cleanup simulation when layout mode changes
+  useEffect(() => {
+    return () => {
+      simulationRef.current?.simulation.stop()
+      simulationRef.current = null
+    }
+  }, [config.layoutMode])
+
+  const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node) => {
+    if (config.layoutMode !== 'cluster' || !simulationRef.current) return
+    const { simulation, nodeMap } = simulationRef.current
+    const fn = nodeMap.get(node.id)
+    if (fn) {
+      fn.fx = fn.x
+      fn.fy = fn.y
+      simulation.alphaTarget(0.3).restart()
+    }
+  }, [config.layoutMode])
+
+  const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
+    if (config.layoutMode !== 'cluster' || !simulationRef.current) return
+    const { simulation, nodeMap } = simulationRef.current
+    const fn = nodeMap.get(node.id)
+    if (fn) {
+      fn.fx = null
+      fn.fy = null
+      simulation.alphaTarget(0)
+    }
+  }, [config.layoutMode])
 
   const onNodeMouseEnter: NodeMouseHandler = useCallback((_event, node) => {
     setHoveredNodeId(node.id)
@@ -198,7 +267,7 @@ export function GraphPanel() {
           </Tabs>
         </div>
       </CardHeader>
-      <CardContent className="flex-1 min-h-0 overflow-hidden p-0 relative">
+      <CardContent ref={containerRef} className="flex-1 min-h-0 overflow-hidden p-0 relative">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -206,6 +275,8 @@ export function GraphPanel() {
           onEdgesChange={onEdgesChange}
           onNodeMouseEnter={onNodeMouseEnter}
           onNodeMouseLeave={onNodeMouseLeave}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDragStop={onNodeDragStop}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           proOptions={proOptions}
