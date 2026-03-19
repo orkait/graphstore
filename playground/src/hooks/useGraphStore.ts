@@ -212,11 +212,15 @@ export const useGraphStore = create<GraphStoreState>()(
             }))
           } else {
             const { nodeIds, edgeKeys } = extractHighlights(result)
+            const hasHighlights = nodeIds.size > 0 || edgeKeys.size > 0
             set((s) => ({
               results: [{ id, query, result, error: null, timestamp: Date.now() }, ...s.results].slice(0, 50),
-              highlightedNodeIds: nodeIds,
-              highlightedEdges: edgeKeys,
-              activeResultId: id,
+              // Only update highlights if the result produces them
+              ...(hasHighlights ? {
+                highlightedNodeIds: nodeIds,
+                highlightedEdges: edgeKeys,
+                activeResultId: id,
+              } : {}),
               loading: false
             }))
             if (result.kind === 'ok' && !skipRefresh) await get().refreshGraph()
@@ -276,7 +280,12 @@ export const useGraphStore = create<GraphStoreState>()(
           return
         }
         const { nodeIds, edgeKeys } = extractHighlights(entry.result)
-        set({ activeResultId: id, highlightedNodeIds: nodeIds, highlightedEdges: edgeKeys })
+        if (nodeIds.size > 0 || edgeKeys.size > 0) {
+          set({ activeResultId: id, highlightedNodeIds: nodeIds, highlightedEdges: edgeKeys })
+        } else {
+          // Non-highlightable result: just mark active (blue border) without clearing existing highlights
+          set({ activeResultId: id })
+        }
       },
 
       clearHighlights: () => set({ activeResultId: null, highlightedNodeIds: new Set(), highlightedEdges: new Set() }),

@@ -26,7 +26,9 @@ def execute(executor, query):
 class TestCreateNode:
     def test_create_node(self, executor):
         r = execute(executor, 'CREATE NODE "x" kind = "function" name = "foo"')
-        assert r.kind == "ok"
+        assert r.kind == "node"
+        assert r.data["id"] == "x"
+        assert r.data["kind"] == "function"
         # Verify node exists
         node = executor.store.get_node("x")
         assert node is not None
@@ -47,9 +49,9 @@ class TestUpdateNode:
     def test_update_node(self, executor):
         execute(executor, 'CREATE NODE "x" kind = "function" name = "foo"')
         r = execute(executor, 'UPDATE NODE "x" SET name = "bar"')
-        assert r.kind == "ok"
-        node = executor.store.get_node("x")
-        assert node["name"] == "bar"
+        assert r.kind == "node"
+        assert r.data["id"] == "x"
+        assert r.data["name"] == "bar"
 
     def test_update_missing_node(self, executor):
         with pytest.raises(NodeNotFound):
@@ -63,7 +65,8 @@ class TestUpdateNode:
 class TestUpsertNode:
     def test_upsert_creates_new(self, executor):
         r = execute(executor, 'UPSERT NODE "y" kind = "class" name = "Widget"')
-        assert r.kind == "ok"
+        assert r.kind == "node"
+        assert r.data["id"] == "y"
         node = executor.store.get_node("y")
         assert node is not None
         assert node["kind"] == "class"
@@ -103,7 +106,7 @@ class TestDeleteNodes:
         execute(executor, 'CREATE NODE "c" kind = "class" name = "c"')
 
         r = execute(executor, 'DELETE NODES WHERE kind = "function"')
-        assert r.kind == "ok"
+        assert r.kind == "nodes"
         assert r.count == 2
         assert executor.store.get_node("a") is None
         assert executor.store.get_node("b") is None
@@ -119,7 +122,9 @@ class TestCreateEdge:
         execute(executor, 'CREATE NODE "a" kind = "function" name = "a"')
         execute(executor, 'CREATE NODE "b" kind = "function" name = "b"')
         r = execute(executor, 'CREATE EDGE "a" -> "b" kind = "calls"')
-        assert r.kind == "ok"
+        assert r.kind == "edges"
+        assert r.data[0]["source"] == "a"
+        assert r.data[0]["target"] == "b"
         edges = executor.store.get_edges_from("a", kind="calls")
         assert len(edges) == 1
         assert edges[0]["target"] == "b"
@@ -154,7 +159,7 @@ class TestDeleteEdges:
         execute(executor, 'CREATE EDGE "a" -> "c" kind = "calls"')
 
         r = execute(executor, 'DELETE EDGES FROM "a" WHERE kind = "calls"')
-        assert r.kind == "ok"
+        assert r.kind == "edges"
         assert r.count == 2
         edges = executor.store.get_edges_from("a", kind="calls")
         assert len(edges) == 0
