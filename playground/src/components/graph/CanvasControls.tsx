@@ -5,7 +5,7 @@ import { Slider } from '@/components/ui/slider'
 export function CanvasControls() {
   const config = useGraphStore((s) => s.config)
   const updateConfig = useGraphStore((s) => s.updateConfig)
-  const { layoutMode, collapseThreshold, clusterStrength, repelStrength, centerForce, linkForce, linkDistance } = config
+  const { layoutMode, clusterStrength, repelStrength, centerForce, linkForce, linkDistance } = config
 
   return (
     <Panel position="top-right">
@@ -33,21 +33,6 @@ export function CanvasControls() {
             Cluster
           </button>
         </div>
-
-        {/* Dagre-specific: collapse threshold */}
-        {layoutMode === 'dagre' && (
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground">Collapse</span>
-              <span className="text-[10px] font-mono text-muted-foreground">{collapseThreshold}</span>
-            </div>
-            <Slider
-              value={[collapseThreshold]}
-              min={5} max={100} step={5}
-              onValueChange={(v) => updateConfig({ collapseThreshold: Array.isArray(v) ? v[0] : v })}
-            />
-          </div>
-        )}
 
         {/* Cluster-specific: all sliders 0-100 */}
         {layoutMode === 'cluster' && (
