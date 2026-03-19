@@ -62,6 +62,7 @@ class Executor:
 
     def execute(self, ast) -> Result:
         """Execute a parsed AST node and return a Result."""
+        self.store._ensure_edges_built()
         start = time.perf_counter_ns()
         result = self._dispatch(ast)
         elapsed = (time.perf_counter_ns() - start) // 1000
@@ -591,6 +592,7 @@ class Executor:
         fails, restores from the copy.
         """
         saved_edges = {k: list(v) for k, v in self.store._edges_by_type.items()}
+        saved_edge_keys = set(self.store._edge_keys)
         saved_node_data = [
             dict(d) if d is not None else None
             for d in self.store.node_data[: self.store._next_slot]
@@ -605,10 +607,13 @@ class Executor:
         try:
             for stmt in q.statements:
                 self._dispatch(stmt)
+            # Flush any deferred edge rebuilds after successful batch
+            self.store._ensure_edges_built()
             return Result(kind="ok", data=None, count=0)
         except Exception as e:
             # Rollback
             self.store._edges_by_type = saved_edges
+            self.store._edge_keys = saved_edge_keys
             for i in range(saved_next_slot):
                 self.store.node_data[i] = saved_node_data[i]
             self.store.node_tombstones = saved_tombstones
