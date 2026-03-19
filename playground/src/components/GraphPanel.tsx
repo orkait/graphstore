@@ -36,10 +36,10 @@ function computeDegrees(edges: { source: string; target: string }[]) {
 
 function getEdgeColor(kind: string): string {
   const map: Record<string, string> = {
-    calls: '#3b82f6', extends: '#22c55e', implements: '#a855f7',
-    imports: '#f59e0b', contains: '#06b6d4', uses: '#ec4899',
-    calls_api: '#3b82f6', reads_from: '#ef4444',
-    publishes_to: '#f59e0b', subscribes_to: '#8b5cf6',
+    calls: '#6a9fd8', extends: '#5aad7a', implements: '#9a80c8',
+    imports: '#d4a84a', contains: '#5aaab8', uses: '#c878a0',
+    calls_api: '#6a9fd8', reads_from: '#c87878',
+    publishes_to: '#d4a84a', subscribes_to: '#8a7ab8',
   }
   if (map[kind]) return map[kind]
   const colors = Object.values(map)
