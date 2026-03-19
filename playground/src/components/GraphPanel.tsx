@@ -20,8 +20,7 @@ import { createLiveSimulation, updateSimulationForces } from '@/components/graph
 import type { Simulation } from 'd3-force'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { useMemo, useEffect, useRef, useState, useCallback } from 'react'
-import { Search, Loader2, Eye, Crosshair } from 'lucide-react'
-import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { Search, Loader2 } from 'lucide-react'
 
 const nodeTypes = { custom: CustomNode }
 const edgeTypes = { custom: CustomEdge }
@@ -52,7 +51,7 @@ function getEdgeColor(kind: string): string {
 export function GraphPanel() {
   const graph = useGraphStore((s) => s.graph)
   const config = useGraphStore((s) => s.config)
-  const { viewMode, showMinimap, isDark, nodesep, ranksep, layoutDirection } = config
+  const { showMinimap, isDark, nodesep, ranksep, layoutDirection } = config
   const { collapseThreshold } = config
   const expandedGroups = useGraphStore((s) => s.expandedGroups)
   const highlightedNodeIds = useGraphStore((s) => s.highlightedNodeIds)
@@ -60,7 +59,6 @@ export function GraphPanel() {
   const results = useGraphStore((s) => s.results)
   const lastResultKind = results.length > 0 ? results[0]?.result?.kind : undefined
   const isPathResult = lastResultKind === 'path' || lastResultKind === 'paths'
-  const updateConfig = useGraphStore((s) => s.updateConfig)
   const loading = useGraphStore((s) => s.loading)
 
   const nodes = useFlowStore((s) => s.nodes)
@@ -87,18 +85,12 @@ export function GraphPanel() {
       n: graph.nodes.map(n => n.id).sort(),
       e: graph.edges.map(e => `${e.source}->${e.target}`).sort(),
       f: searchFilter,
-      v: viewMode,
       lm: config.layoutMode,
-      // Dagre needs highlights in key (for collapse auto-expand + query-result filtering)
+      // Dagre needs highlights in key (for collapse auto-expand)
       ...(config.layoutMode === 'dagre' ? {
         h: [...highlightedNodeIds].sort(),
         he: [...highlightedEdges].sort(),
         ns: nodesep, rs: ranksep, ld: layoutDirection, ct: collapseThreshold, eg: expandedGroups,
-      } : {}),
-      // Cluster only needs highlights when in query-result mode (filters nodes)
-      ...(config.layoutMode === 'cluster' && viewMode === 'query-result' ? {
-        h: [...highlightedNodeIds].sort(),
-        he: [...highlightedEdges].sort(),
       } : {}),
     })
 
@@ -202,16 +194,8 @@ export function GraphPanel() {
       simulationRef.current?.simulation.stop()
       simulationRef.current = null
 
-      let layoutNodes = rfNodes
-      let layoutEdges = rfEdges
-
-      if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
-        layoutNodes = rfNodes.filter(n => highlightedNodeIds.has(n.id))
-        layoutEdges = rfEdges.filter(e =>
-          highlightedNodeIds.has(e.source) && highlightedNodeIds.has(e.target) &&
-          highlightedEdges.has(`${e.source}->${e.target}`)
-        )
-      }
+      const layoutNodes = rfNodes
+      const layoutEdges = rfEdges
 
       const container = containerRef.current
       const width = container?.clientWidth || 800
@@ -234,19 +218,12 @@ export function GraphPanel() {
       })
       simulationRef.current = live
     } else {
-      // Dagre layout (existing code)
+      // Dagre layout
       const layoutOpts = { direction: layoutDirection, nodesep, ranksep }
-      if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
-        const filtered = rfNodes.filter(n => highlightedNodeIds.has(n.id))
-        const filtEdges = rfEdges.filter(e => highlightedEdges.has(`${e.source}->${e.target}`))
-        setFlowNodes(applyDagreLayout(filtered, filtEdges, layoutOpts))
-        setFlowEdges(filtEdges)
-      } else {
-        setFlowNodes(applyDagreLayout(rfNodes, rfEdges, layoutOpts))
-        setFlowEdges(rfEdges)
-      }
+      setFlowNodes(applyDagreLayout(rfNodes, rfEdges, layoutOpts))
+      setFlowEdges(rfEdges)
     }
-  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, expandedGroups, collapseThreshold, config.layoutMode, config.clusterStrength, config.repelStrength, config.centerForce, config.linkForce, config.linkDistance, setFlowNodes, setFlowEdges, results, isPathResult])
+  }, [graph, searchFilter, degrees, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, expandedGroups, collapseThreshold, config.layoutMode, config.clusterStrength, config.repelStrength, config.centerForce, config.linkForce, config.linkDistance, setFlowNodes, setFlowEdges, results, isPathResult])
 
   // Cleanup simulation and force fresh layout when mode changes
   useEffect(() => {
@@ -330,52 +307,9 @@ export function GraphPanel() {
         </div>
         <div className="flex items-center gap-1.5 ml-4">
           {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-          <TooltipProvider delay={300}>
-            <div className="flex rounded-md overflow-hidden border border-border text-[11px]">
-              <Tooltip>
-                <TooltipTrigger
-                  render={<button
-                    onClick={() => updateConfig({ viewMode: 'live' })}
-                    className={`px-2.5 py-1.5 transition-colors ${
-                      viewMode === 'live'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-card text-muted-foreground hover:bg-accent'
-                    }`}
-                  />}
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                </TooltipTrigger>
-                <TooltipContent side="bottom"><p className="text-xs">Live - full graph</p></TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger
-                  render={<button
-                    onClick={() => updateConfig({ viewMode: 'query-result' })}
-                    className={`px-2.5 py-1.5 transition-colors ${
-                      viewMode === 'query-result'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-card text-muted-foreground hover:bg-accent'
-                    }`}
-                  />}
-                >
-                  <Crosshair className="w-3.5 h-3.5" />
-                </TooltipTrigger>
-                <TooltipContent side="bottom"><p className="text-xs">Results - query output only</p></TooltipContent>
-              </Tooltip>
-            </div>
-          </TooltipProvider>
         </div>
       </CardHeader>
       <CardContent ref={containerRef} className="flex-1 min-h-0 overflow-hidden p-0 relative">
-        {viewMode === 'query-result' && highlightedNodeIds.size === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-            <div className="text-center text-muted-foreground/60">
-              <Crosshair className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">No results to visualize</p>
-              <p className="text-xs mt-1">Select a result from the panel to see its nodes and edges here</p>
-            </div>
-          </div>
-        )}
         {searchFilter && nodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
             <div className="text-center text-muted-foreground/60">

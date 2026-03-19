@@ -6,7 +6,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
-import { RotateCcw, Settings, BookOpen, Sun, Moon } from 'lucide-react'
+import { Settings, BookOpen, Sun, Moon } from 'lucide-react'
 import { useGraphStore } from '@/hooks/useGraphStore'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { examples } from '@/examples'
@@ -60,10 +60,6 @@ export function Toolbar() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Separator orientation="vertical" className="h-5" />
-        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={resetGraph}>
-          <RotateCcw className="w-3.5 h-3.5" /> Reset
-        </Button>
         <div className="flex-1" />
         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => updateConfig({ isDark: !isDark })}>
           {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}

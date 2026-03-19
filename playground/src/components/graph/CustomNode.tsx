@@ -28,12 +28,11 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
   const isHoverActive = useFlowStore((st) => st.hoveredNodeId != null)
 
   const highlightedNodeIds = useGraphStore((st) => st.highlightedNodeIds)
-  const viewMode = useGraphStore((st) => st.config.viewMode)
   const layoutMode = useGraphStore((st) => st.config.layoutMode)
 
   const isHoverDimmed = isHoverActive && !isHoverTarget && !isHoverNeighbor
   const isQueryHighlighted = highlightedNodeIds.has(id) || Boolean(data.highlighted)
-  const isQueryDimmed = viewMode === 'live' && highlightedNodeIds.size > 0 && !isQueryHighlighted
+  const isQueryDimmed = highlightedNodeIds.size > 0 && !isQueryHighlighted
 
   const highlighted = isHoverTarget || isQueryHighlighted
   const dimmed = isHoverDimmed || isQueryDimmed
@@ -132,7 +131,7 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
           position: 'relative',
         }}
       >
-        <Handle type="target" position={Position.Top} className="!w-0 !h-0 !min-w-0 !min-h-0 !border-0 !bg-transparent" />
+        <Handle type="target" position={Position.Top} className="!w-0 !h-0 !min-w-0 !min-h-0 !border-0 !bg-transparent" style={{ left: '50%', top: '50%' }} />
         <div
           className="text-[10px] font-semibold text-center leading-tight"
           style={{
@@ -144,7 +143,7 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
         >
           {label}
         </div>
-        <Handle type="source" position={Position.Bottom} className="!w-0 !h-0 !min-w-0 !min-h-0 !border-0 !bg-transparent" />
+        <Handle type="source" position={Position.Bottom} className="!w-0 !h-0 !min-w-0 !min-h-0 !border-0 !bg-transparent" style={{ left: '50%', top: '50%' }} />
       </div>
     )
   }

@@ -26,7 +26,6 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
   // Primitive selectors — stable, no unnecessary re-renders
   const hoveredNodeId = useFlowStore((st) => st.hoveredNodeId)
   const highlightedEdges = useGraphStore((st) => st.highlightedEdges)
-  const viewMode = useGraphStore((st) => st.config.viewMode)
   const showEdgeLabels = useGraphStore((st) => st.config.showEdgeLabels)
   const layoutMode = useGraphStore((st) => st.config.layoutMode)
 
@@ -39,7 +38,7 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
   const isHoverEdge = hoveredNodeId != null && (source === hoveredNodeId || target === hoveredNodeId)
   const isHoverDimmed = hoveredNodeId != null && !isHoverEdge
   const isQueryHighlighted = highlightedEdges.has(key)
-  const isQueryDimmed = viewMode === 'live' && highlightedEdges.size > 0 && !isQueryHighlighted
+  const isQueryDimmed = highlightedEdges.size > 0 && !isQueryHighlighted
 
   const highlighted = isHoverEdge || isQueryHighlighted
   const dimmed = isHoverDimmed || isQueryDimmed
@@ -68,7 +67,7 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
         }}
         id={id}
       />
-      {showEdgeLabels && layoutMode !== 'cluster' && (
+      {showEdgeLabels && (
         <EdgeLabelRenderer>
           <div
             style={{
