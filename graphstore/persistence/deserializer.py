@@ -90,7 +90,12 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
         edge_list = json.loads(data)
         store._edges_by_type[etype] = [(s, t, d) for s, t, d in edge_list]
 
-    # Rebuild edge matrices
+    # Rebuild edge keys set and edge matrices
+    store._edge_keys = {
+        (s, t, k)
+        for k, edges in store._edges_by_type.items()
+        for s, t, _d in edges
+    }
     store._rebuild_edges()
 
     # Load indexed fields and rebuild indices

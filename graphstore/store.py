@@ -28,13 +28,15 @@ class CoreStore:
         self._count = 0  # number of live nodes (not counting tombstones)
         self._next_slot = 0  # next slot to fill
         self.node_ids = np.full(self._capacity, -1, dtype=np.int32)
-        self.node_kinds = np.zeros(self._capacity, dtype=np.uint8)
+        self.node_kinds = np.zeros(self._capacity, dtype=np.int32)
         self.node_data: list[dict | None] = [None] * self._capacity
         self.node_tombstones: set[int] = set()
         self.id_to_slot: dict[int, int] = {}
 
         # Edge storage
         self._edges_by_type: dict[str, list[tuple]] = {}
+        self._edge_keys: set[tuple[int, int, str]] = set()  # (src_slot, tgt_slot, kind) for O(1) duplicate check
+        self._edges_dirty = False  # deferred CSR rebuild flag
 
         # Secondary indices
         self.secondary_indices: dict[str, dict] = {}
@@ -61,7 +63,7 @@ class CoreStore:
         new_ids[: self._capacity] = self.node_ids
         self.node_ids = new_ids
 
-        new_kinds = np.zeros(new_cap, dtype=np.uint8)
+        new_kinds = np.zeros(new_cap, dtype=np.int32)
         new_kinds[: self._capacity] = self.node_kinds
         self.node_kinds = new_kinds
 
@@ -76,6 +78,7 @@ class CoreStore:
 
     @property
     def edge_count(self) -> int:
+        self._ensure_edges_built()
         return self.edge_matrices.total_edges
 
     # -- node CRUD -----------------------------------------------------------
@@ -211,19 +214,22 @@ class CoreStore:
         # Check ceiling
         check_ceiling(self._count, self.edge_count, 0, 1, self._ceiling_bytes)
 
-        # Check duplicate
+        # Check duplicate - O(1) set lookup
+        edge_key = (src_slot, tgt_slot, kind)
         edge_data = data or {}
-        if kind in self._edges_by_type:
-            for s, t, d in self._edges_by_type[kind]:
+        if edge_key in self._edge_keys:
+            # Only raise if data also matches (rare: same src/tgt/kind but different data)
+            for s, t, d in self._edges_by_type.get(kind, []):
                 if s == src_slot and t == tgt_slot and d == edge_data:
                     raise GraphStoreError(
                         f"Duplicate edge: {source_id} -> {target_id} kind={kind}"
                     )
 
+        self._edge_keys.add(edge_key)
         self._edges_by_type.setdefault(kind, []).append(
             (src_slot, tgt_slot, edge_data)
         )
-        self._rebuild_edges()
+        self._edges_dirty = True
 
     def delete_edge(self, source_id: str, target_id: str, kind: str):
         """Delete a specific edge."""
@@ -240,10 +246,12 @@ class CoreStore:
             ]
             if not self._edges_by_type[kind]:
                 del self._edges_by_type[kind]
+        self._edge_keys.discard((src_slot, tgt_slot, kind))
         self._rebuild_edges()
 
     def get_edges_from(self, id: str, kind: str | None = None) -> list[dict]:
         """Get outgoing edges from a node."""
+        self._ensure_edges_built()
         if id not in self.string_table:
             return []
         str_id = self.string_table.intern(id)
@@ -263,6 +271,7 @@ class CoreStore:
 
     def get_edges_to(self, id: str, kind: str | None = None) -> list[dict]:
         """Get incoming edges to a node."""
+        self._ensure_edges_built()
         if id not in self.string_table:
             return []
         str_id = self.string_table.intern(id)
@@ -285,6 +294,7 @@ class CoreStore:
     def _cascade_delete_edges(self, slot: int):
         """Remove all edges involving this slot from pending edges."""
         for etype in list(self._edges_by_type.keys()):
+            old_len = len(self._edges_by_type[etype])
             self._edges_by_type[etype] = [
                 (s, t, d)
                 for s, t, d in self._edges_by_type[etype]
@@ -292,10 +302,27 @@ class CoreStore:
             ]
             if not self._edges_by_type[etype]:
                 del self._edges_by_type[etype]
-        self._rebuild_edges()
+            if len(self._edges_by_type.get(etype, [])) != old_len:
+                # Rebuild edge_keys set from scratch (simpler than tracking removals)
+                self._edge_keys = {
+                    (s, t, k)
+                    for k, edges in self._edges_by_type.items()
+                    for s, t, _d in edges
+                }
+        self._edges_dirty = True
+        self._ensure_edges_built()
+
+    def _ensure_edges_built(self):
+        """Lazily rebuild CSR matrices only when dirty."""
+        if not self._edges_dirty:
+            return
+        self._edges_dirty = False
+        num_nodes = max(self._next_slot, 1)
+        self.edge_matrices.rebuild(self._edges_by_type, num_nodes)
 
     def _rebuild_edges(self):
-        """Rebuild EdgeMatrices from pending edge lists."""
+        """Force rebuild EdgeMatrices from pending edge lists."""
+        self._edges_dirty = False
         num_nodes = max(self._next_slot, 1)
         self.edge_matrices.rebuild(self._edges_by_type, num_nodes)
 
