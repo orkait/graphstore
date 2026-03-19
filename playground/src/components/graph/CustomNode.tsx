@@ -37,8 +37,67 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
   const highlighted = isHoverTarget || isQueryHighlighted
   const dimmed = isHoverDimmed || isQueryDimmed
 
+  const isGroup = Boolean(data.isGroup)
+  const childCount = (data.childCount as number) || 0
+  const groupParentId = data.groupParentId as string | undefined
+  const groupKind = data.groupKind as string | undefined
+  const toggleGroup = useGraphStore((st) => st.toggleGroup)
+
   const scale = 1 + Math.min(degree * 0.08, 0.4)
   const minWidth = 140 + Math.min(degree * 8, 40)
+
+  if (isGroup) {
+    const handleClick = () => {
+      if (groupParentId && groupKind) toggleGroup(groupParentId, groupKind)
+    }
+    return (
+      <div
+        onClick={handleClick}
+        style={{
+          backgroundColor: dimmed ? 'var(--graph-node-dimmed-bg)' : `var(--kind-${kindName}-bg)`,
+          borderColor: highlighted
+            ? 'var(--graph-highlight-border)'
+            : dimmed ? 'var(--graph-node-dimmed-border)'
+            : `var(--kind-${kindName}-border)`,
+          borderWidth: highlighted ? '2px' : '1px',
+          borderStyle: 'dashed',
+          opacity: dimmed ? 0.2 : 1,
+          transition: 'opacity 0.2s, background-color 0.2s, border-color 0.2s',
+          minWidth: '180px',
+          cursor: 'pointer',
+        }}
+        className="px-3 py-2 rounded-lg border"
+      >
+        <Handle type="target" position={Position.Top} className="!w-2 !h-2" style={{ background: `var(--kind-${kindName}-border)` }} />
+        <div
+          className="text-xs font-semibold truncate"
+          style={{ color: dimmed ? 'var(--graph-node-dimmed-text)' : `var(--kind-${kindName}-text)` }}
+        >
+          {kind} ({childCount})
+        </div>
+        <div className="flex items-center gap-1.5 mt-1">
+          <div
+            className="text-[9px] inline-block px-1.5 py-0.5 rounded"
+            style={{
+              backgroundColor: `color-mix(in srgb, var(--kind-${kindName}-badge) 13%, transparent)`,
+              color: dimmed ? 'var(--graph-node-dimmed-text)' : `var(--kind-${kindName}-badge)`,
+              border: dimmed
+                ? '1px solid var(--graph-node-dimmed-text)'
+                : `1px solid color-mix(in srgb, var(--kind-${kindName}-badge) 27%, transparent)`,
+            }}
+          >
+            click to expand
+          </div>
+          {data.matchCount != null && (data.matchCount as number) > 0 && (
+            <div className="text-[8px] px-1 py-0.5 rounded" style={{ color: 'var(--graph-highlight-border)', backgroundColor: 'var(--graph-degree-bg)' }}>
+              {data.matchCount as number} matched
+            </div>
+          )}
+        </div>
+        <Handle type="source" position={Position.Bottom} className="!w-2 !h-2" style={{ background: `var(--kind-${kindName}-border)` }} />
+      </div>
+    )
+  }
 
   return (
     <div
