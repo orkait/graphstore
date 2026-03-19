@@ -76,16 +76,10 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
               </>
             )}
             <div className="flex items-center justify-between py-1">
-              <div>
-                <Label className="text-sm">Show Edge Labels</Label>
-                {config.layoutMode === 'cluster' && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Not available in cluster mode</p>
-                )}
-              </div>
+              <Label className="text-sm">Show Edge Labels</Label>
               <Switch
                 checked={config.showEdgeLabels}
                 onCheckedChange={(v) => updateConfig({ showEdgeLabels: v })}
-                disabled={config.layoutMode === 'cluster'}
               />
             </div>
             <div className="flex items-center justify-between py-1">

@@ -4,7 +4,7 @@ import { useGraphStore } from '@/hooks/useGraphStore'
 import { keymap, type ViewUpdate, EditorView } from '@codemirror/view'
 import { useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
-import { Play, PlayCircle, Loader2 } from 'lucide-react'
+import { Play, PlayCircle, Loader2, XCircle, Trash2, RotateCcw } from 'lucide-react'
 
 function toggleComment(view: EditorView): boolean {
   const { state } = view
@@ -49,6 +49,9 @@ export function EditorPanel() {
   const fontSize = useGraphStore((s) => s.config.fontSize)
   const updateConfig = useGraphStore((s) => s.updateConfig)
   const loading = useGraphStore((s) => s.loading)
+  const clearHighlights = useGraphStore((s) => s.clearHighlights)
+  const clearResults = useGraphStore((s) => s.clearResults)
+  const resetGraph = useGraphStore((s) => s.resetGraph)
   const hasSelection = editorSelection.trim().length > 0
 
   const getFullLines = useCallback((view: EditorView) => {
@@ -140,7 +143,19 @@ export function EditorPanel() {
           }}
         />
       </div>
-      <div className="justify-end px-3 py-1.5 flex items-center border-t bg-transparent flex-shrink-0">
+      <div className="px-3 py-1.5 flex items-center border-t bg-transparent flex-shrink-0">
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" className="h-7 px-2" title="Clear highlights" onMouseDown={(e) => { e.preventDefault(); clearHighlights() }}>
+            <XCircle className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 px-2" title="Clear results" onMouseDown={(e) => { e.preventDefault(); clearResults() }}>
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 px-2" title="Reset database" onMouseDown={(e) => { e.preventDefault(); resetGraph() }}>
+            <RotateCcw className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+        <div className="flex-1" />
         <Button
           variant="ghost"
           size="sm"

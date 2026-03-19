@@ -4,7 +4,6 @@ import { toast } from 'sonner'
 import { api, type Result, type GraphData } from '@/api/client'
 import { classHierarchy } from '@/examples/class-hierarchy'
 
-export type ViewMode = 'live' | 'query-result'
 export type LayoutMode = 'dagre' | 'cluster'
 export type LayoutDirection = 'TB' | 'LR'
 
@@ -17,7 +16,6 @@ export interface ResultEntry {
 }
 
 export interface Config {
-  viewMode: ViewMode
   layoutMode: LayoutMode
   showEdgeLabels: boolean
   showMinimap: boolean
@@ -163,7 +161,6 @@ export const useGraphStore = create<GraphStoreState>()(
       graph: { nodes: [], edges: [] },
       results: [],
       config: {
-        viewMode: 'live',
         layoutMode: 'dagre',
         showEdgeLabels: true,
         showMinimap: true,
@@ -329,10 +326,8 @@ export const useGraphStore = create<GraphStoreState>()(
         if ((mergedConfig.layoutMode as string) === 'force') {
           mergedConfig.layoutMode = 'cluster'
         }
-        // Migrate old 'highlight' viewMode to 'live'
-        if ((mergedConfig.viewMode as string) === 'highlight') {
-          mergedConfig.viewMode = 'live'
-        }
+        // Clean up old viewMode from persisted state
+        delete (mergedConfig as Record<string, unknown>).viewMode
         return {
           ...current,
           ...p,
