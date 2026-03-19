@@ -330,37 +330,37 @@ export function GraphPanel() {
         </div>
         <div className="flex items-center gap-1.5 ml-4">
           {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
-          <TooltipProvider delayDuration={300}>
+          <TooltipProvider delay={300}>
             <div className="flex rounded-md overflow-hidden border border-border text-[11px]">
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
+                <TooltipTrigger
+                  render={<button
                     onClick={() => updateConfig({ viewMode: 'live' })}
                     className={`px-2.5 py-1.5 transition-colors ${
                       viewMode === 'live'
                         ? 'bg-primary text-primary-foreground'
                         : 'bg-card text-muted-foreground hover:bg-accent'
                     }`}
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                  </button>
+                  />}
+                >
+                  <Eye className="w-3.5 h-3.5" />
                 </TooltipTrigger>
-                <TooltipContent side="bottom"><p className="text-xs">Live — full graph</p></TooltipContent>
+                <TooltipContent side="bottom"><p className="text-xs">Live - full graph</p></TooltipContent>
               </Tooltip>
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
+                <TooltipTrigger
+                  render={<button
                     onClick={() => updateConfig({ viewMode: 'query-result' })}
                     className={`px-2.5 py-1.5 transition-colors ${
                       viewMode === 'query-result'
                         ? 'bg-primary text-primary-foreground'
                         : 'bg-card text-muted-foreground hover:bg-accent'
                     }`}
-                  >
-                    <Crosshair className="w-3.5 h-3.5" />
-                  </button>
+                  />}
+                >
+                  <Crosshair className="w-3.5 h-3.5" />
                 </TooltipTrigger>
-                <TooltipContent side="bottom"><p className="text-xs">Results — query output only</p></TooltipContent>
+                <TooltipContent side="bottom"><p className="text-xs">Results - query output only</p></TooltipContent>
               </Tooltip>
             </div>
           </TooltipProvider>
