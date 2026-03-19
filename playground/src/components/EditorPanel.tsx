@@ -146,11 +146,6 @@ export function EditorPanel() {
         />
       </div>
       <div className="px-3 py-1.5 flex items-center border-t bg-transparent flex-shrink-0 gap-1">
-        {activeResultId && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onMouseDown={(e) => { e.preventDefault(); clearHighlights() }}>
-            <XCircle className="w-3.5 h-3.5" /> Clear Highlight
-          </Button>
-        )}
         {results.length > 0 && (
           <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onMouseDown={(e) => { e.preventDefault(); clearResults() }}>
             <Trash2 className="w-3.5 h-3.5" /> Clear Results
@@ -160,6 +155,11 @@ export function EditorPanel() {
           <RotateCcw className="w-3.5 h-3.5" /> Reset DB
         </Button>
         <div className="flex-1" />
+        {activeResultId && (
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onMouseDown={(e) => { e.preventDefault(); clearHighlights() }}>
+            <XCircle className="w-3.5 h-3.5" /> Clear Highlight
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"

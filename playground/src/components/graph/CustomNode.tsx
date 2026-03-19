@@ -61,7 +61,7 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
             : `var(--kind-${kindName}-border)`,
           borderWidth: highlighted ? '2px' : '1px',
           borderStyle: 'dashed',
-          opacity: dimmed ? 0.2 : 1,
+          opacity: dimmed ? 'var(--graph-dimmed-opacity)' : 1,
           transition: 'opacity 0.2s, background-color 0.2s, border-color 0.2s',
           minWidth: '180px',
           cursor: 'pointer',
@@ -122,7 +122,7 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
             ? '0 0 20px var(--graph-highlight-shadow)'
             : dimmed ? 'none'
             : `0 0 ${8 + degree * 2}px color-mix(in srgb, var(--kind-${kindName}-border) 40%, transparent)`,
-          opacity: dimmed ? 0.2 : 1,
+          opacity: dimmed ? 'var(--graph-dimmed-opacity)' : 1,
           transition: 'opacity 0.15s, box-shadow 0.15s',
           display: 'flex',
           alignItems: 'center',
@@ -162,7 +162,7 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
           ? '0 0 16px var(--graph-highlight-shadow)'
           : dimmed ? 'none'
           : `0 0 ${6 + degree * 2}px color-mix(in srgb, var(--kind-${kindName}-border) 27%, transparent)`,
-        opacity: dimmed ? 0.2 : 1,
+        opacity: dimmed ? 'var(--graph-dimmed-opacity)' : 1,
         transition: 'opacity 0.2s, background-color 0.2s, border-color 0.2s, box-shadow 0.2s',
         transform: `scale(${dimmed ? 0.95 : scale})`,
         minWidth: `${minWidth}px`,

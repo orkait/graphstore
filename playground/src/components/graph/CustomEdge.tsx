@@ -4,10 +4,10 @@ import { useFlowStore } from '@/hooks/useFlowStore'
 import { useGraphStore } from '@/hooks/useGraphStore'
 
 const EDGE_COLORS: Record<string, string> = {
-  calls: '#3b82f6', extends: '#22c55e', implements: '#a855f7',
-  imports: '#f59e0b', contains: '#06b6d4', uses: '#ec4899',
-  calls_api: '#3b82f6', reads_from: '#ef4444',
-  publishes_to: '#f59e0b', subscribes_to: '#8b5cf6',
+  calls: '#6a9fd8', extends: '#5aad7a', implements: '#9a80c8',
+  imports: '#d4a84a', contains: '#5aaab8', uses: '#c878a0',
+  calls_api: '#6a9fd8', reads_from: '#c87878',
+  publishes_to: '#d4a84a', subscribes_to: '#8a7ab8',
 }
 
 function getEdgeColor(kind: string): string {
@@ -67,7 +67,7 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
           stroke: highlighted ? 'var(--graph-highlight-border)' : dimmed ? 'var(--graph-edge-dimmed)' : color,
           strokeWidth: highlighted ? 3 : (groupStrokeWidth || 2),
           strokeDasharray: isCrossGroup ? '6 3' : undefined,
-          opacity: dimmed ? 0.15 : 0.8,
+          opacity: dimmed ? 'var(--graph-edge-dimmed-opacity)' : 0.8,
           transition: 'opacity 0.2s, stroke 0.2s',
         }}
         id={id}
@@ -84,7 +84,7 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
               backgroundColor: 'var(--graph-edge-label-bg)',
               padding: '1px 4px',
               borderRadius: '3px',
-              opacity: dimmed ? 0.15 : 1,
+              opacity: dimmed ? 'var(--graph-edge-dimmed-opacity)' : 1,
               transition: 'opacity 0.2s',
             }}
           >
