@@ -4,7 +4,7 @@ import { useGraphStore } from '@/hooks/useGraphStore'
 import { keymap, type ViewUpdate, EditorView } from '@codemirror/view'
 import { useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
-import { Play, PlayCircle } from 'lucide-react'
+import { Play, PlayCircle, Loader2 } from 'lucide-react'
 
 function toggleComment(view: EditorView): boolean {
   const { state } = view
@@ -48,6 +48,7 @@ export function EditorPanel() {
   const isDark = useGraphStore((s) => s.config.isDark)
   const fontSize = useGraphStore((s) => s.config.fontSize)
   const updateConfig = useGraphStore((s) => s.updateConfig)
+  const loading = useGraphStore((s) => s.loading)
   const hasSelection = editorSelection.trim().length > 0
 
   const getFullLines = useCallback((view: EditorView) => {
@@ -144,11 +145,14 @@ export function EditorPanel() {
           variant="ghost"
           size="sm"
           className="h-7 text-xs gap-1.5"
-          onMouseDown={(e) => { e.preventDefault(); if (hasSelection) executeSelected(); else executeAll() }}
+          disabled={loading}
+          onMouseDown={(e) => { e.preventDefault(); if (!loading) { if (hasSelection) executeSelected(); else executeAll() } }}
         >
-          {hasSelection
-            ? <><Play className="w-3.5 h-3.5" /> Run Selected</>
-            : <><PlayCircle className="w-3.5 h-3.5" /> Run All</>
+          {loading
+            ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Running...</>
+            : hasSelection
+              ? <><Play className="w-3.5 h-3.5" /> Run Selected</>
+              : <><PlayCircle className="w-3.5 h-3.5" /> Run All</>
           }
         </Button>
       </div>

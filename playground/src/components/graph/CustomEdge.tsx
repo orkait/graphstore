@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { BaseEdge, getBezierPath, getSmoothStepPath, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
+import { BaseEdge, getBezierPath, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
 import { useFlowStore } from '@/hooks/useFlowStore'
 import { useGraphStore } from '@/hooks/useGraphStore'
 
@@ -23,22 +23,23 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
   const kind = (data?.kind as string) || ''
   const color = getEdgeColor(kind)
 
-  // Read hover/highlight state from stores
+  // Primitive selectors — stable, no unnecessary re-renders
   const hoveredNodeId = useFlowStore((st) => st.hoveredNodeId)
   const highlightedEdges = useGraphStore((st) => st.highlightedEdges)
   const viewMode = useGraphStore((st) => st.config.viewMode)
   const showEdgeLabels = useGraphStore((st) => st.config.showEdgeLabels)
   const layoutMode = useGraphStore((st) => st.config.layoutMode)
 
+  // Cluster mode: straight lines (freeform). Dagre mode: bezier curves.
   const [edgePath, labelX, labelY] = layoutMode === 'cluster'
-    ? getSmoothStepPath({ sourceX, sourceY, targetX, targetY })
+    ? [`M ${sourceX},${sourceY} L ${targetX},${targetY}`, (sourceX + targetX) / 2, (sourceY + targetY) / 2] as [string, number, number]
     : getBezierPath({ sourceX, sourceY, targetX, targetY })
 
   const key = `${source}->${target}`
   const isHoverEdge = hoveredNodeId != null && (source === hoveredNodeId || target === hoveredNodeId)
   const isHoverDimmed = hoveredNodeId != null && !isHoverEdge
   const isQueryHighlighted = highlightedEdges.has(key)
-  const isQueryDimmed = viewMode === 'highlight' && highlightedEdges.size > 0 && !isQueryHighlighted
+  const isQueryDimmed = viewMode === 'live' && highlightedEdges.size > 0 && !isQueryHighlighted
 
   const highlighted = isHoverEdge || isQueryHighlighted
   const dimmed = isHoverDimmed || isQueryDimmed
@@ -67,7 +68,7 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
         }}
         id={id}
       />
-      {showEdgeLabels && (
+      {showEdgeLabels && layoutMode !== 'cluster' && (
         <EdgeLabelRenderer>
           <div
             style={{

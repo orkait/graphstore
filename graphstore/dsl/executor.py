@@ -58,6 +58,7 @@ from graphstore.types import Result
 class Executor:
     def __init__(self, store: CoreStore):
         self.store = store
+        self.cost_threshold = 100_000
 
     def execute(self, ast) -> Result:
         """Execute a parsed AST node and return a Result."""
@@ -140,9 +141,9 @@ class Executor:
             )
 
         # Cost check
-        cost = estimate_traverse_cost(q.depth, self.store.edge_matrices, edge_type)
+        cost = estimate_traverse_cost(q.depth, self.store.edge_matrices, edge_type, threshold=self.cost_threshold)
         if cost.rejected:
-            raise CostThresholdExceeded(cost.estimated_frontier, 100_000)
+            raise CostThresholdExceeded(cost.estimated_frontier, self.cost_threshold)
 
         visited = bfs_traverse(matrix, slot, q.depth)
         nodes = []
@@ -390,9 +391,9 @@ class Executor:
         pattern = q.pattern
 
         # Cost check
-        cost = estimate_match_cost(pattern, self.store.edge_matrices)
+        cost = estimate_match_cost(pattern, self.store.edge_matrices, threshold=self.cost_threshold)
         if cost.rejected:
-            raise CostThresholdExceeded(cost.estimated_frontier, 100_000)
+            raise CostThresholdExceeded(cost.estimated_frontier, self.cost_threshold)
 
         # Execute match pattern using sparse matrix traversal
         bindings, edges = self._execute_match_pattern(pattern)

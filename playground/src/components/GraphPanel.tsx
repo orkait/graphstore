@@ -8,20 +8,20 @@ import {
   type Edge,
   type NodeMouseHandler,
 } from '@xyflow/react'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import '@xyflow/react/dist/style.css'
 import { CustomNode } from '@/components/graph/CustomNode'
 import { CustomEdge } from '@/components/graph/CustomEdge'
 import { CanvasControls } from '@/components/graph/CanvasControls'
-import { useGraphStore, type ViewMode } from '@/hooks/useGraphStore'
+import { useGraphStore } from '@/hooks/useGraphStore'
 import { useFlowStore } from '@/hooks/useFlowStore'
 import { applyDagreLayout } from '@/components/graph/layout'
 import { collapseTransform, type GroupNodeData } from '@/components/graph/collapseTransform'
-import { applyForceLayout, createForceSimulation } from '@/components/graph/forceLayout'
+import { createLiveSimulation, updateSimulationForces } from '@/components/graph/forceLayout'
 import type { Simulation } from 'd3-force'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { useMemo, useEffect, useRef, useState, useCallback } from 'react'
-import { Search } from 'lucide-react'
+import { Search, Loader2, Eye, Crosshair } from 'lucide-react'
+import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 
 const nodeTypes = { custom: CustomNode }
 const edgeTypes = { custom: CustomEdge }
@@ -61,6 +61,7 @@ export function GraphPanel() {
   const lastResultKind = results.length > 0 ? results[0]?.result?.kind : undefined
   const isPathResult = lastResultKind === 'path' || lastResultKind === 'paths'
   const updateConfig = useGraphStore((s) => s.updateConfig)
+  const loading = useGraphStore((s) => s.loading)
 
   const nodes = useFlowStore((s) => s.nodes)
   const edges = useFlowStore((s) => s.edges)
@@ -87,12 +88,18 @@ export function GraphPanel() {
       e: graph.edges.map(e => `${e.source}->${e.target}`).sort(),
       f: searchFilter,
       v: viewMode,
-      h: [...highlightedNodeIds].sort(),
-      he: [...highlightedEdges].sort(),
-      ns: nodesep, rs: ranksep, ld: layoutDirection,
-      ct: collapseThreshold,
-      eg: expandedGroups,
-      cs: config.clusterStrength, rs2: config.repelStrength,
+      lm: config.layoutMode,
+      // Dagre needs highlights in key (for collapse auto-expand + query-result filtering)
+      ...(config.layoutMode === 'dagre' ? {
+        h: [...highlightedNodeIds].sort(),
+        he: [...highlightedEdges].sort(),
+        ns: nodesep, rs: ranksep, ld: layoutDirection, ct: collapseThreshold, eg: expandedGroups,
+      } : {}),
+      // Cluster only needs highlights when in query-result mode (filters nodes)
+      ...(config.layoutMode === 'cluster' && viewMode === 'query-result' ? {
+        h: [...highlightedNodeIds].sort(),
+        he: [...highlightedEdges].sort(),
+      } : {}),
     })
 
     if (structureKey === prevStructureRef.current) return
@@ -193,12 +200,12 @@ export function GraphPanel() {
     if (config.layoutMode === 'cluster') {
       // Stop any previous simulation
       simulationRef.current?.simulation.stop()
+      simulationRef.current = null
 
       let layoutNodes = rfNodes
       let layoutEdges = rfEdges
 
       if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
-        // Isolate subgraph: only highlighted nodes, drop edges to non-highlighted
         layoutNodes = rfNodes.filter(n => highlightedNodeIds.has(n.id))
         layoutEdges = rfEdges.filter(e =>
           highlightedNodeIds.has(e.source) && highlightedNodeIds.has(e.target) &&
@@ -210,26 +217,21 @@ export function GraphPanel() {
       const width = container?.clientWidth || 800
       const height = container?.clientHeight || 600
 
-      const positioned = applyForceLayout(layoutNodes, layoutEdges, {
-        clusterStrength: config.clusterStrength,
-        repelStrength: config.repelStrength,
-        width,
-        height,
-        highlightedNodeIds: viewMode === 'highlight' ? highlightedNodeIds : undefined,
-      })
-      setFlowNodes(positioned)
+      // Set edges immediately
       setFlowEdges(layoutEdges)
 
-      // Create a live simulation for drag interactions (starts stopped/cooled)
-      const live = createForceSimulation(positioned, layoutEdges, {
+      // Create a LIVE simulation — nodes animate into place (Obsidian-style)
+      const live = createLiveSimulation(layoutNodes, layoutEdges, {
         clusterStrength: config.clusterStrength,
         repelStrength: config.repelStrength,
+        centerForce: config.centerForce,
+        linkForce: config.linkForce,
+        linkDistance: config.linkDistance,
         width,
         height,
       }, (updatedNodes) => {
         setFlowNodes(updatedNodes)
       })
-      live.simulation.stop()
       simulationRef.current = live
     } else {
       // Dagre layout (existing code)
@@ -244,36 +246,60 @@ export function GraphPanel() {
         setFlowEdges(rfEdges)
       }
     }
-  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, expandedGroups, collapseThreshold, config.layoutMode, config.clusterStrength, config.repelStrength, setFlowNodes, setFlowEdges, results, isPathResult])
+  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, expandedGroups, collapseThreshold, config.layoutMode, config.clusterStrength, config.repelStrength, config.centerForce, config.linkForce, config.linkDistance, setFlowNodes, setFlowEdges, results, isPathResult])
 
-  // Cleanup simulation when layout mode changes
+  // Cleanup simulation and force fresh layout when mode changes
   useEffect(() => {
+    // Reset structureKey so the layout effect re-runs from scratch
+    prevStructureRef.current = ''
     return () => {
       simulationRef.current?.simulation.stop()
       simulationRef.current = null
     }
   }, [config.layoutMode])
 
+  // Update forces live when sliders change (without resetting the simulation)
+  useEffect(() => {
+    if (config.layoutMode !== 'cluster' || !simulationRef.current) return
+    const container = containerRef.current
+    updateSimulationForces(simulationRef.current.simulation, {
+      clusterStrength: config.clusterStrength,
+      repelStrength: config.repelStrength,
+      centerForce: config.centerForce,
+      linkForce: config.linkForce,
+      linkDistance: config.linkDistance,
+      width: container?.clientWidth || 800,
+      height: container?.clientHeight || 600,
+    })
+  }, [config.clusterStrength, config.repelStrength, config.centerForce, config.linkForce, config.linkDistance, config.layoutMode])
+
+  // --- Cluster mode drag: simple pin/unpin ---
   const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node) => {
     if (config.layoutMode !== 'cluster' || !simulationRef.current) return
     const { simulation, nodeMap } = simulationRef.current
     const fn = nodeMap.get(node.id)
-    if (fn) {
-      fn.fx = fn.x
-      fn.fy = fn.y
-      simulation.alphaTarget(0.3).restart()
-    }
+    if (!fn) return
+    fn.fx = node.position.x
+    fn.fy = node.position.y
+    simulation.alphaTarget(0.3).restart()
+  }, [config.layoutMode])
+
+  const onNodeDrag = useCallback((_event: React.MouseEvent, node: Node) => {
+    if (config.layoutMode !== 'cluster' || !simulationRef.current) return
+    const fn = simulationRef.current.nodeMap.get(node.id)
+    if (!fn) return
+    fn.fx = node.position.x
+    fn.fy = node.position.y
   }, [config.layoutMode])
 
   const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
     if (config.layoutMode !== 'cluster' || !simulationRef.current) return
     const { simulation, nodeMap } = simulationRef.current
     const fn = nodeMap.get(node.id)
-    if (fn) {
-      fn.fx = null
-      fn.fy = null
-      simulation.alphaTarget(0)
-    }
+    if (!fn) return
+    fn.fx = null
+    fn.fy = null
+    simulation.alphaTarget(0.02)
   }, [config.layoutMode])
 
   const onNodeMouseEnter: NodeMouseHandler = useCallback((_event, node) => {
@@ -302,17 +328,62 @@ export function GraphPanel() {
             </button>
           )}
         </div>
-        <div className="flex items-center ml-4">
-          <Tabs value={viewMode} onValueChange={(v) => updateConfig({ viewMode: v as ViewMode })} className="h-7 w-[240px]">
-            <TabsList className="grid w-full grid-cols-3 h-7 bg-muted/50 p-1 rounded-md">
-              <TabsTrigger value="live" className="text-[10px] h-5 rounded-sm px-2">Live</TabsTrigger>
-              <TabsTrigger value="query-result" className="text-[10px] h-5 rounded-sm px-2">Results</TabsTrigger>
-              <TabsTrigger value="highlight" className="text-[10px] h-5 rounded-sm px-2">Highlight</TabsTrigger>
-            </TabsList>
-          </Tabs>
+        <div className="flex items-center gap-1.5 ml-4">
+          {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />}
+          <TooltipProvider delayDuration={300}>
+            <div className="flex rounded-md overflow-hidden border border-border text-[11px]">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => updateConfig({ viewMode: 'live' })}
+                    className={`px-2.5 py-1.5 transition-colors ${
+                      viewMode === 'live'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-card text-muted-foreground hover:bg-accent'
+                    }`}
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom"><p className="text-xs">Live — full graph</p></TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => updateConfig({ viewMode: 'query-result' })}
+                    className={`px-2.5 py-1.5 transition-colors ${
+                      viewMode === 'query-result'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-card text-muted-foreground hover:bg-accent'
+                    }`}
+                  >
+                    <Crosshair className="w-3.5 h-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom"><p className="text-xs">Results — query output only</p></TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
         </div>
       </CardHeader>
       <CardContent ref={containerRef} className="flex-1 min-h-0 overflow-hidden p-0 relative">
+        {viewMode === 'query-result' && highlightedNodeIds.size === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+            <div className="text-center text-muted-foreground/60">
+              <Crosshair className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No results to visualize</p>
+              <p className="text-xs mt-1">Select a result from the panel to see its nodes and edges here</p>
+            </div>
+          </div>
+        )}
+        {searchFilter && nodes.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+            <div className="text-center text-muted-foreground/60">
+              <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">No nodes match &lsquo;{searchFilter}&rsquo;</p>
+            </div>
+          </div>
+        )}
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -321,12 +392,16 @@ export function GraphPanel() {
           onNodeMouseEnter={onNodeMouseEnter}
           onNodeMouseLeave={onNodeMouseLeave}
           onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           proOptions={proOptions}
           fitView
           nodesDraggable
+          onlyRenderVisibleElements
+          elevateNodesOnSelect={false}
+          elevateEdgesOnSelect={false}
           className="bg-background"
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--graph-bg-dots)" />

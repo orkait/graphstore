@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Trash2, ChevronDown, ChevronRight } from 'lucide-react'
+import { Trash2, ChevronDown, ChevronRight, X } from 'lucide-react'
 import { useState } from 'react'
 
 function renderValue(value: unknown, depth = 0): React.ReactNode {
@@ -37,10 +37,17 @@ function NestedKVTable({ data, depth = 0 }: { data: Record<string, unknown>; dep
   )
 }
 
+const HIGHLIGHTABLE_KINDS = new Set(['node', 'nodes', 'edges', 'path', 'paths', 'subgraph', 'match'])
+
 function ResultCard({ entry }: { entry: ResultEntry }) {
   const [expanded, setExpanded] = useState(false)
+  const activeResultId = useGraphStore((s) => s.activeResultId)
+  const selectResult = useGraphStore((s) => s.selectResult)
+  const showElapsed = useGraphStore((s) => s.config.showElapsed)
   const isError = entry.error != null
+  const isActive = activeResultId === entry.id
   const result = entry.result
+  const canHighlight = result ? HIGHLIGHTABLE_KINDS.has(result.kind) : false
 
   const renderTable = () => {
     if (!result?.data) return <span className="text-muted-foreground">No data</span>
@@ -209,16 +216,23 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
   }
 
   return (
-    <div className="border border-border rounded-md mb-2 bg-card/50">
+    <div className={`border rounded-md mb-2 ${isActive ? 'border-primary bg-primary/5' : 'border-border bg-card/50'}`}>
       <div
         className="flex items-center gap-2 p-2 cursor-pointer hover:bg-accent/50"
-        onClick={() => setExpanded(!expanded)}
+        title={canHighlight ? 'Click to highlight · Ctrl+Click to expand' : 'Click to expand'}
+        onClick={(e) => {
+          if (e.ctrlKey || e.metaKey) {
+            setExpanded(!expanded)
+          } else if (canHighlight) {
+            selectResult(entry.id)
+          } else {
+            setExpanded(!expanded)
+          }
+        }}
       >
-        {expanded ? (
-          <ChevronDown className="w-3 h-3" />
-        ) : (
-          <ChevronRight className="w-3 h-3" />
-        )}
+        <span onClick={(e) => { e.stopPropagation(); setExpanded(!expanded) }} className="hover:text-foreground">
+          {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        </span>
         <code className="text-xs text-muted-foreground truncate flex-1">
           {entry.query}
         </code>
@@ -230,7 +244,7 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
         </Badge>
         {result && (
           <span className="text-[10px] text-muted-foreground">
-            {result.count} &middot; {(result.elapsed_us / 1000).toFixed(1)}ms
+            {result.count}{showElapsed && <>&nbsp;&middot;&nbsp;{(result.elapsed_us / 1000).toFixed(1)}ms</>}
           </span>
         )}
       </div>
@@ -261,14 +275,23 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
 export function ResultsPanel() {
   const results = useGraphStore((s) => s.results)
   const clearResults = useGraphStore((s) => s.clearResults)
+  const clearHighlights = useGraphStore((s) => s.clearHighlights)
+  const activeResultId = useGraphStore((s) => s.activeResultId)
   return (
     <div className="h-full flex flex-col bg-transparent">
       <div className="px-3 py-2 border-b flex-shrink-0 flex items-center justify-between bg-transparent">
         <div className="text-xs font-semibold text-muted-foreground">Results ({results.length})</div>
-        <div>
-          <Button variant="ghost" size="sm" onClick={clearResults} className="h-6 px-2" title="Clear all results">
-            <Trash2 className="w-3 h-3" />
-          </Button>
+        <div className="flex items-center gap-1">
+          {activeResultId && (
+            <Button variant="ghost" size="sm" onClick={clearHighlights} className="h-6 px-2" title="Clear highlight">
+              <X className="w-3 h-3" />
+            </Button>
+          )}
+          {results.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={clearResults} className="h-6 px-2" title="Clear all results">
+              <Trash2 className="w-3 h-3" />
+            </Button>
+          )}
         </div>
       </div>
       <div className="flex-1 overflow-hidden p-0">

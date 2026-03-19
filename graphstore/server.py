@@ -129,15 +129,48 @@ def get_graph():
 
 @app.post("/api/reset")
 def reset():
+    """Reset the in-memory graph. For persistent DBs, wipes memory and WAL
+    but preserves the script metadata so Run All can repopulate cleanly."""
     global _store
     db_path = os.environ.get("GRAPHSTORE_DB_PATH")
     if db_path:
-        # If persistence is active, it's unsafe to casually "reset" the store
-        # in a way that destroys user data on disk via a simple API call.
-        from fastapi import HTTPException
-        raise HTTPException(status_code=400, detail={"error": "Cannot reset a persistent playground.", "type": "GraphStoreError"})
-        
-    _store = GraphStore()
+        # Preserve the script before wiping
+        old_script = _store.get_script() if _store else None
+        # Close old store
+        if _store and _store._conn:
+            _store._conn.close()
+            _store._conn = None
+        # Wipe the DB file contents but keep the file
+        from graphstore.persistence.database import open_database, set_metadata
+        db_file = Path(db_path) / "graphstore.db"
+        conn = open_database(db_file)
+        conn.execute("DELETE FROM blobs")
+        conn.execute("DELETE FROM wal")
+        conn.execute("DELETE FROM query_log")
+        conn.execute("DELETE FROM metadata")
+        conn.commit()
+        # Restore script
+        if old_script:
+            set_metadata(conn, "playground_script", old_script)
+        conn.close()
+        # Create a fresh store from the now-empty DB
+        _store = GraphStore(path=db_path)
+    else:
+        _store = GraphStore()
+    return {"ok": True}
+
+
+@app.get("/api/script")
+def get_script():
+    store = _get_store()
+    script = store.get_script()
+    return {"script": script}
+
+
+@app.put("/api/script")
+def put_script(req: ExecuteRequest):
+    store = _get_store()
+    store.set_script(req.query)
     return {"ok": True}
 
 
@@ -146,6 +179,8 @@ def config(req: ConfigRequest):
     store = _get_store()
     if req.ceiling_mb is not None:
         store._store._ceiling_bytes = req.ceiling_mb * 1_000_000
+    if req.cost_threshold is not None:
+        store._executor.cost_threshold = req.cost_threshold
     return {"ok": True}
 
 

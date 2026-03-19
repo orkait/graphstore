@@ -29,10 +29,11 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
 
   const highlightedNodeIds = useGraphStore((st) => st.highlightedNodeIds)
   const viewMode = useGraphStore((st) => st.config.viewMode)
+  const layoutMode = useGraphStore((st) => st.config.layoutMode)
 
   const isHoverDimmed = isHoverActive && !isHoverTarget && !isHoverNeighbor
   const isQueryHighlighted = highlightedNodeIds.has(id) || Boolean(data.highlighted)
-  const isQueryDimmed = viewMode === 'highlight' && highlightedNodeIds.size > 0 && !isQueryHighlighted
+  const isQueryDimmed = viewMode === 'live' && highlightedNodeIds.size > 0 && !isQueryHighlighted
 
   const highlighted = isHoverTarget || isQueryHighlighted
   const dimmed = isHoverDimmed || isQueryDimmed
@@ -99,6 +100,56 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
     )
   }
 
+  // Cluster mode: circular Obsidian-style nodes
+  if (layoutMode === 'cluster') {
+    const label = data.label as string
+    // Size based on label length + degree — ensure text fits
+    const baseSize = Math.max(50, label.length * 6 + 20)
+    const size = baseSize + Math.min(degree * 4, 24)
+    return (
+      <div
+        style={{
+          width: `${size}px`,
+          height: `${size}px`,
+          borderRadius: '50%',
+          backgroundColor: dimmed ? 'var(--graph-node-dimmed-bg)' : `var(--kind-${kindName}-bg)`,
+          borderColor: highlighted
+            ? 'var(--graph-highlight-border)'
+            : dimmed ? 'var(--graph-node-dimmed-border)'
+            : `var(--kind-${kindName}-border)`,
+          borderWidth: highlighted ? '2px' : '1px',
+          borderStyle: 'solid',
+          boxShadow: highlighted
+            ? '0 0 20px var(--graph-highlight-shadow)'
+            : dimmed ? 'none'
+            : `0 0 ${8 + degree * 2}px color-mix(in srgb, var(--kind-${kindName}-border) 40%, transparent)`,
+          opacity: dimmed ? 0.2 : 1,
+          transition: 'opacity 0.15s, box-shadow 0.15s',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'grab',
+          position: 'relative',
+        }}
+      >
+        <Handle type="target" position={Position.Top} className="!w-0 !h-0 !min-w-0 !min-h-0 !border-0 !bg-transparent" />
+        <div
+          className="text-[10px] font-semibold text-center leading-tight"
+          style={{
+            color: dimmed ? 'var(--graph-node-dimmed-text)' : `var(--kind-${kindName}-text)`,
+            maxWidth: `${size - 12}px`,
+            wordBreak: 'break-word',
+            padding: '4px',
+          }}
+        >
+          {label}
+        </div>
+        <Handle type="source" position={Position.Bottom} className="!w-0 !h-0 !min-w-0 !min-h-0 !border-0 !bg-transparent" />
+      </div>
+    )
+  }
+
+  // Dagre mode: rectangular card nodes
   return (
     <div
       style={{
