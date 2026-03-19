@@ -262,11 +262,11 @@ class CoreStore:
         result = []
         types_to_check = [kind] if kind else self.edge_matrices.edge_types
         for etype in types_to_check:
-            neighbors = self.edge_matrices.neighbors_out(slot, etype)
-            for tgt_slot in neighbors:
-                tgt_id = self._slot_to_id(tgt_slot)
-                if tgt_id is not None:
-                    result.append({"source": id, "target": tgt_id, "kind": etype})
+            for s, t, d in self._edges_by_type.get(etype, []):
+                if s == slot:
+                    tgt_id = self._slot_to_id(t)
+                    if tgt_id is not None:
+                        result.append({"source": id, "target": tgt_id, "kind": etype, **d})
         return result
 
     def get_edges_to(self, id: str, kind: str | None = None) -> list[dict]:
@@ -282,11 +282,11 @@ class CoreStore:
         result = []
         types_to_check = [kind] if kind else self.edge_matrices.edge_types
         for etype in types_to_check:
-            neighbors = self.edge_matrices.neighbors_in(slot, etype)
-            for src_slot in neighbors:
-                src_id = self._slot_to_id(src_slot)
-                if src_id is not None:
-                    result.append({"source": src_id, "target": id, "kind": etype})
+            for s, t, d in self._edges_by_type.get(etype, []):
+                if t == slot:
+                    src_id = self._slot_to_id(s)
+                    if src_id is not None:
+                        result.append({"source": src_id, "target": id, "kind": etype, **d})
         return result
 
     # -- cascade / rebuild ---------------------------------------------------

@@ -213,10 +213,26 @@ class GraphStore:
 
     # --- Internal ---
 
+    _WAL_HARD_LIMIT = 100_000  # max WAL entries before rejecting writes
+
     def _wal_append(self, statement: str):
-        """Append a mutation to the WAL table."""
+        """Append a mutation to the WAL table. Rejects if WAL exceeds hard limit."""
         conn = self._conn
         if conn is not None:
+            row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
+            if row and row[0] >= self._WAL_HARD_LIMIT:
+                # Try checkpoint first to clear WAL
+                try:
+                    self.checkpoint()
+                except Exception:
+                    pass
+                # Re-check after checkpoint
+                row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
+                if row and row[0] >= self._WAL_HARD_LIMIT:
+                    raise GraphStoreError(
+                        f"WAL exceeds hard limit ({self._WAL_HARD_LIMIT} entries). "
+                        "Checkpoint failed - check disk space."
+                    )
             conn.execute(
                 "INSERT INTO wal (timestamp, statement) VALUES (?, ?)",
                 (time.time(), statement)
@@ -254,6 +270,20 @@ class GraphStore:
         row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
         if row and row[0] > 50_000:
             self.checkpoint()
+        # Log rotation: delete entries older than 7 days
+        self._rotate_query_log()
+
+    def _rotate_query_log(self):
+        """Delete query_log entries older than 7 days."""
+        conn = self._conn
+        if conn is None:
+            return
+        try:
+            cutoff = time.time() - 7 * 86400
+            conn.execute("DELETE FROM query_log WHERE timestamp < ?", (cutoff,))
+            conn.commit()
+        except Exception:
+            pass
 
     def _log_query(self, query: str, elapsed_us: int, result_count: int, error: str | None):
         """Log query to sqlite query_log table."""
