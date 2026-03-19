@@ -35,7 +35,8 @@ class TestExecute:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["kind"] == "ok"
+        assert body["kind"] == "node"
+        assert body["data"]["id"] == "a"
 
     def test_execute_query_node(self, client):
         client.post(
@@ -82,8 +83,8 @@ class TestExecuteBatch:
         assert resp.status_code == 200
         body = resp.json()
         assert len(body) == 2
-        assert body[0]["kind"] == "ok"
-        assert body[1]["kind"] == "ok"
+        assert body[0]["kind"] == "node"
+        assert body[1]["kind"] == "node"
 
 
 # ------------------------------------------------------------------

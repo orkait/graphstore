@@ -541,50 +541,52 @@ class Executor:
         else:
             node_id = q.id
         self.store.put_node(node_id, kind, data)
-        if q.auto_id:
-            return Result(kind="node", data={"id": node_id}, count=1)
-        return Result(kind="ok", data=None, count=0)
+        node = self.store.get_node(node_id)
+        return Result(kind="node", data=node, count=1)
 
     def _update_node(self, q: UpdateNode) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
         self.store.update_node(q.id, data)
-        return Result(kind="ok", data=None, count=0)
+        node = self.store.get_node(q.id)
+        return Result(kind="node", data=node, count=1)
 
     def _upsert_node(self, q: UpsertNode) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
         kind = data.pop("kind", "default")
         self.store.upsert_node(q.id, kind, data)
-        return Result(kind="ok", data=None, count=0)
+        node = self.store.get_node(q.id)
+        return Result(kind="node", data=node, count=1)
 
     def _delete_node(self, q: DeleteNode) -> Result:
         self.store.delete_node(q.id)
-        return Result(kind="ok", data=None, count=0)
+        return Result(kind="ok", data={"id": q.id}, count=1)
 
     def _delete_nodes(self, q: DeleteNodes) -> Result:
         nodes = self.store.get_all_nodes()
         to_delete = [n for n in nodes if self._eval_where(q.where.expr, n)]
+        deleted_ids = []
         for n in to_delete:
             try:
                 self.store.delete_node(n["id"])
+                deleted_ids.append(n["id"])
             except NodeNotFound:
-                pass  # already deleted (cascade from another delete)
-        return Result(kind="ok", data=None, count=len(to_delete))
+                pass
+        return Result(kind="nodes", data=[{"id": i} for i in deleted_ids], count=len(deleted_ids))
 
     def _create_edge(self, q: CreateEdge) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
         kind = data.pop("kind", "default")
         self.store.put_edge(q.source, q.target, kind, data if data else None)
-        return Result(kind="ok", data=None, count=0)
+        return Result(kind="edges", data=[{"source": q.source, "target": q.target, "kind": kind}], count=1)
 
     def _delete_edge(self, q: DeleteEdge) -> Result:
         kind = self._extract_kind_from_where(q.where)
         if kind:
             self.store.delete_edge(q.source, q.target, kind)
         else:
-            # Delete all edges between these nodes
             for etype in list(self.store._edges_by_type.keys()):
                 self.store.delete_edge(q.source, q.target, etype)
-        return Result(kind="ok", data=None, count=0)
+        return Result(kind="ok", data=None, count=1)
 
     def _delete_edges(self, q: DeleteEdges) -> Result:
         kind = self._extract_kind_from_where(q.where)
@@ -595,7 +597,7 @@ class Executor:
 
         for e in edges:
             self.store.delete_edge(e["source"], e["target"], e["kind"])
-        return Result(kind="ok", data=None, count=len(edges))
+        return Result(kind="edges", data=edges, count=len(edges))
 
     def _increment(self, q: Increment) -> Result:
         self.store.increment_field(q.node_id, q.field, q.amount)

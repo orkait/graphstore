@@ -188,7 +188,7 @@ def test_execute_batch():
         'CREATE EDGE "a" -> "b" kind = "link"',
     ])
     assert len(results) == 3
-    assert all(r.kind == "ok" for r in results)
+    assert all(r.kind in ("ok", "node", "nodes", "edges") for r in results)
     assert g.node_count == 2
 
 
