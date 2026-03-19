@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useGraphStore, type LayoutMode, type LayoutDirection } from '@/hooks/useGraphStore'
+import { useGraphStore, type LayoutDirection } from '@/hooks/useGraphStore'
 
 interface Props {
   open: boolean
@@ -40,16 +40,6 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
 
           <TabsContent value="graph" className="space-y-5 mt-5">
 
-            <div className="space-y-2">
-              <Label className="text-sm">Layout Algorithm</Label>
-              <Select value={config.layoutMode} onValueChange={(v) => updateConfig({ layoutMode: v as LayoutMode })}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="dagre">Dagre (hierarchical)</SelectItem>
-                  <SelectItem value="force">Force-directed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
             <div className="space-y-2">
               <Label className="text-sm">Layout Direction</Label>
               <Select value={config.layoutDirection} onValueChange={(v) => updateConfig({ layoutDirection: v as LayoutDirection })}>

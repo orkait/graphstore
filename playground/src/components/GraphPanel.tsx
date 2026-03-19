@@ -12,9 +12,13 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import '@xyflow/react/dist/style.css'
 import { CustomNode } from '@/components/graph/CustomNode'
 import { CustomEdge } from '@/components/graph/CustomEdge'
+import { CanvasControls } from '@/components/graph/CanvasControls'
 import { useGraphStore, type ViewMode } from '@/hooks/useGraphStore'
 import { useFlowStore } from '@/hooks/useFlowStore'
 import { applyDagreLayout } from '@/components/graph/layout'
+import { collapseTransform, type GroupNodeData } from '@/components/graph/collapseTransform'
+import { applyForceLayout, createForceSimulation } from '@/components/graph/forceLayout'
+import type { Simulation } from 'd3-force'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { useMemo, useEffect, useRef, useState, useCallback } from 'react'
 import { Search } from 'lucide-react'
@@ -49,8 +53,13 @@ export function GraphPanel() {
   const graph = useGraphStore((s) => s.graph)
   const config = useGraphStore((s) => s.config)
   const { viewMode, showMinimap, isDark, nodesep, ranksep, layoutDirection } = config
+  const { collapseThreshold } = config
+  const expandedGroups = useGraphStore((s) => s.expandedGroups)
   const highlightedNodeIds = useGraphStore((s) => s.highlightedNodeIds)
   const highlightedEdges = useGraphStore((s) => s.highlightedEdges)
+  const results = useGraphStore((s) => s.results)
+  const lastResultKind = results.length > 0 ? results[0]?.result?.kind : undefined
+  const isPathResult = lastResultKind === 'path' || lastResultKind === 'paths'
   const updateConfig = useGraphStore((s) => s.updateConfig)
 
   const nodes = useFlowStore((s) => s.nodes)
@@ -64,6 +73,9 @@ export function GraphPanel() {
   const [searchFilter, setSearchFilter] = useState('')
   const prevStructureRef = useRef('')
   const proOptions = useMemo(() => ({ hideAttribution: true }), [])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const simulationRef = useRef<{ simulation: Simulation<any, any>; nodeMap: Map<string, any> } | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   const degrees = useMemo(() => computeDegrees(graph.edges), [graph.edges])
 
@@ -78,6 +90,9 @@ export function GraphPanel() {
       h: [...highlightedNodeIds].sort(),
       he: [...highlightedEdges].sort(),
       ns: nodesep, rs: ranksep, ld: layoutDirection,
+      ct: collapseThreshold,
+      eg: expandedGroups,
+      cs: config.clusterStrength, rs2: config.repelStrength,
     })
 
     if (structureKey === prevStructureRef.current) return
@@ -92,39 +107,174 @@ export function GraphPanel() {
       : graph.nodes
     const filteredIds = new Set(filteredGraphNodes.map(n => n.id))
 
-    const rfNodes: Node[] = filteredGraphNodes.map((n) => ({
-      id: n.id,
-      type: 'custom',
-      position: { x: 0, y: 0 },
-      data: {
-        label: n.id,
-        kind: n.kind,
-        degree: degrees[n.id] || 0,
-        fields: n,
-      },
-    }))
+    // For path results, force-expand all groups along the path
+    let effectiveExpanded = expandedGroups
+    if (isPathResult && highlightedNodeIds.size > 0 && config.layoutMode === 'dagre') {
+      effectiveExpanded = { ...expandedGroups }
+      const childrenMap = new Map<string, string[]>()
+      for (const e of graph.edges) {
+        if (!filteredIds.has(e.source) || !filteredIds.has(e.target)) continue
+        const list = childrenMap.get(e.source) || []
+        list.push(e.target)
+        childrenMap.set(e.source, list)
+      }
+      const nodeMap = new Map(filteredGraphNodes.map(n => [n.id, n]))
+      for (const [parentId, children] of childrenMap) {
+        if (children.length <= collapseThreshold) continue
+        for (const childId of children) {
+          if (highlightedNodeIds.has(childId)) {
+            const childNode = nodeMap.get(childId)
+            const kind = childNode?.kind || 'default'
+            const list = effectiveExpanded[parentId] || []
+            if (!list.includes(kind)) {
+              effectiveExpanded[parentId] = [...list, kind]
+            }
+          }
+        }
+      }
+    }
 
-    const rfEdges: Edge[] = graph.edges
-      .filter(e => filteredIds.has(e.source) && filteredIds.has(e.target))
+    // Apply collapse transform for dagre mode
+    const { nodes: collapsedNodes, edges: collapsedEdges, groupMeta } =
+      config.layoutMode === 'dagre'
+        ? collapseTransform(
+            filteredGraphNodes,
+            graph.edges.filter(e => filteredIds.has(e.source) && filteredIds.has(e.target)),
+            collapseThreshold,
+            effectiveExpanded,
+            highlightedNodeIds.size > 0 ? highlightedNodeIds : undefined
+          )
+        : { nodes: filteredGraphNodes, edges: graph.edges.filter(e => filteredIds.has(e.source) && filteredIds.has(e.target)), groupMeta: new Map<string, GroupNodeData>() }
+    const collapsedIds = new Set(collapsedNodes.map(n => n.id))
+
+    const rfNodes: Node[] = collapsedNodes.map((n) => {
+      const meta = groupMeta.get(n.id)
+      return {
+        id: n.id,
+        type: 'custom',
+        position: { x: 0, y: 0 },
+        data: meta
+          ? {
+              label: n.id,
+              kind: meta.kind,
+              degree: meta.childCount,
+              fields: n,
+              isGroup: true,
+              childCount: meta.childCount,
+              groupParentId: meta.parentId,
+              groupKind: meta.kind,
+              matchCount: meta.matchCount,
+              highlighted: meta.matchCount > 0,
+            }
+          : {
+              label: n.id,
+              kind: n.kind,
+              degree: degrees[n.id] || 0,
+              fields: n,
+              highlighted: highlightedNodeIds.has(n.id),
+            },
+      }
+    })
+
+    const rfEdges: Edge[] = collapsedEdges
+      .filter(e => collapsedIds.has(e.source) && collapsedIds.has(e.target))
       .map((e, i) => ({
         id: `e-${i}-${e.source}-${e.target}-${e.kind}`,
         source: e.source,
         target: e.target,
         type: 'custom',
-        data: { kind: e.kind },
+        data: {
+          kind: e.kind,
+          crossGroupCount: e.crossGroupCount,
+          groupChildCount: e.groupChildCount,
+        },
       }))
 
-    const layoutOpts = { direction: layoutDirection, nodesep, ranksep }
-    if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
-      const filtered = rfNodes.filter(n => highlightedNodeIds.has(n.id))
-      const filtEdges = rfEdges.filter(e => highlightedEdges.has(`${e.source}->${e.target}`))
-      setFlowNodes(applyDagreLayout(filtered, filtEdges, layoutOpts))
-      setFlowEdges(filtEdges)
+    if (config.layoutMode === 'cluster') {
+      // Stop any previous simulation
+      simulationRef.current?.simulation.stop()
+
+      let layoutNodes = rfNodes
+      let layoutEdges = rfEdges
+
+      if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
+        // Isolate subgraph: only highlighted nodes, drop edges to non-highlighted
+        layoutNodes = rfNodes.filter(n => highlightedNodeIds.has(n.id))
+        layoutEdges = rfEdges.filter(e =>
+          highlightedNodeIds.has(e.source) && highlightedNodeIds.has(e.target) &&
+          highlightedEdges.has(`${e.source}->${e.target}`)
+        )
+      }
+
+      const container = containerRef.current
+      const width = container?.clientWidth || 800
+      const height = container?.clientHeight || 600
+
+      const positioned = applyForceLayout(layoutNodes, layoutEdges, {
+        clusterStrength: config.clusterStrength,
+        repelStrength: config.repelStrength,
+        width,
+        height,
+        highlightedNodeIds: viewMode === 'highlight' ? highlightedNodeIds : undefined,
+      })
+      setFlowNodes(positioned)
+      setFlowEdges(layoutEdges)
+
+      // Create a live simulation for drag interactions (starts stopped/cooled)
+      const live = createForceSimulation(positioned, layoutEdges, {
+        clusterStrength: config.clusterStrength,
+        repelStrength: config.repelStrength,
+        width,
+        height,
+      }, (updatedNodes) => {
+        setFlowNodes(updatedNodes)
+      })
+      live.simulation.stop()
+      simulationRef.current = live
     } else {
-      setFlowNodes(applyDagreLayout(rfNodes, rfEdges, layoutOpts))
-      setFlowEdges(rfEdges)
+      // Dagre layout (existing code)
+      const layoutOpts = { direction: layoutDirection, nodesep, ranksep }
+      if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
+        const filtered = rfNodes.filter(n => highlightedNodeIds.has(n.id))
+        const filtEdges = rfEdges.filter(e => highlightedEdges.has(`${e.source}->${e.target}`))
+        setFlowNodes(applyDagreLayout(filtered, filtEdges, layoutOpts))
+        setFlowEdges(filtEdges)
+      } else {
+        setFlowNodes(applyDagreLayout(rfNodes, rfEdges, layoutOpts))
+        setFlowEdges(rfEdges)
+      }
     }
-  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, setFlowNodes, setFlowEdges])
+  }, [graph, searchFilter, degrees, viewMode, highlightedNodeIds, highlightedEdges, nodesep, ranksep, layoutDirection, expandedGroups, collapseThreshold, config.layoutMode, config.clusterStrength, config.repelStrength, setFlowNodes, setFlowEdges, results, isPathResult])
+
+  // Cleanup simulation when layout mode changes
+  useEffect(() => {
+    return () => {
+      simulationRef.current?.simulation.stop()
+      simulationRef.current = null
+    }
+  }, [config.layoutMode])
+
+  const onNodeDragStart = useCallback((_event: React.MouseEvent, node: Node) => {
+    if (config.layoutMode !== 'cluster' || !simulationRef.current) return
+    const { simulation, nodeMap } = simulationRef.current
+    const fn = nodeMap.get(node.id)
+    if (fn) {
+      fn.fx = fn.x
+      fn.fy = fn.y
+      simulation.alphaTarget(0.3).restart()
+    }
+  }, [config.layoutMode])
+
+  const onNodeDragStop = useCallback((_event: React.MouseEvent, node: Node) => {
+    if (config.layoutMode !== 'cluster' || !simulationRef.current) return
+    const { simulation, nodeMap } = simulationRef.current
+    const fn = nodeMap.get(node.id)
+    if (fn) {
+      fn.fx = null
+      fn.fy = null
+      simulation.alphaTarget(0)
+    }
+  }, [config.layoutMode])
 
   const onNodeMouseEnter: NodeMouseHandler = useCallback((_event, node) => {
     setHoveredNodeId(node.id)
@@ -162,7 +312,7 @@ export function GraphPanel() {
           </Tabs>
         </div>
       </CardHeader>
-      <CardContent className="flex-1 min-h-0 overflow-hidden p-0 relative">
+      <CardContent ref={containerRef} className="flex-1 min-h-0 overflow-hidden p-0 relative">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -170,6 +320,8 @@ export function GraphPanel() {
           onEdgesChange={onEdgesChange}
           onNodeMouseEnter={onNodeMouseEnter}
           onNodeMouseLeave={onNodeMouseLeave}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDragStop={onNodeDragStop}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           proOptions={proOptions}
@@ -179,6 +331,7 @@ export function GraphPanel() {
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--graph-bg-dots)" />
           <Controls className="!bg-card !border-border !text-foreground [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground [&>button:hover]:!bg-accent" />
+          <CanvasControls />
           {showMinimap && (
             <MiniMap
               className="!bg-card !border-border"
