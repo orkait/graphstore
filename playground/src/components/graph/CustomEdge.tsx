@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { BaseEdge, getBezierPath, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
+import { BaseEdge, getBezierPath, getSmoothStepPath, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
 import { useFlowStore } from '@/hooks/useFlowStore'
 import { useGraphStore } from '@/hooks/useGraphStore'
 
@@ -20,7 +20,6 @@ function getEdgeColor(kind: string): string {
 
 export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
   const { sourceX, sourceY, targetX, targetY, source, target, data, style, id } = props
-  const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY })
   const kind = (data?.kind as string) || ''
   const color = getEdgeColor(kind)
 
@@ -29,6 +28,11 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
   const highlightedEdges = useGraphStore((st) => st.highlightedEdges)
   const viewMode = useGraphStore((st) => st.config.viewMode)
   const showEdgeLabels = useGraphStore((st) => st.config.showEdgeLabels)
+  const layoutMode = useGraphStore((st) => st.config.layoutMode)
+
+  const [edgePath, labelX, labelY] = layoutMode === 'cluster'
+    ? getSmoothStepPath({ sourceX, sourceY, targetX, targetY })
+    : getBezierPath({ sourceX, sourceY, targetX, targetY })
 
   const key = `${source}->${target}`
   const isHoverEdge = hoveredNodeId != null && (source === hoveredNodeId || target === hoveredNodeId)
@@ -39,6 +43,16 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
   const highlighted = isHoverEdge || isQueryHighlighted
   const dimmed = isHoverDimmed || isQueryDimmed
 
+  const isCrossGroup = kind === 'cross-group'
+  const crossGroupCount = (data?.crossGroupCount as number) || 0
+  const displayLabel = isCrossGroup
+    ? `${crossGroupCount} edges`
+    : kind
+
+  const groupChildCount = (data?.groupChildCount as number) || 0
+  const isGroupEdge = groupChildCount > 0
+  const groupStrokeWidth = isGroupEdge ? Math.min(2 + groupChildCount * 0.05, 6) : undefined
+
   return (
     <>
       <BaseEdge
@@ -46,7 +60,8 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
         style={{
           ...style,
           stroke: highlighted ? 'var(--graph-highlight-border)' : dimmed ? 'var(--graph-edge-dimmed)' : color,
-          strokeWidth: highlighted ? 3 : 2,
+          strokeWidth: highlighted ? 3 : (groupStrokeWidth || 2),
+          strokeDasharray: isCrossGroup ? '6 3' : undefined,
           opacity: dimmed ? 0.15 : 0.8,
           transition: 'opacity 0.2s, stroke 0.2s',
         }}
@@ -68,7 +83,7 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
               transition: 'opacity 0.2s',
             }}
           >
-            {kind}
+            {displayLabel}
           </div>
         </EdgeLabelRenderer>
       )}

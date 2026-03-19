@@ -5,7 +5,7 @@ import { api, type Result, type GraphData } from '@/api/client'
 import { classHierarchy } from '@/examples/class-hierarchy'
 
 export type ViewMode = 'live' | 'query-result' | 'highlight'
-export type LayoutMode = 'dagre' | 'force'
+export type LayoutMode = 'dagre' | 'cluster'
 export type LayoutDirection = 'TB' | 'LR'
 
 export interface ResultEntry {
@@ -32,6 +32,9 @@ export interface Config {
   ranksep: number
   layoutDirection: LayoutDirection
   fontSize: number  // editor font size (client-only)
+  collapseThreshold: number  // dagre mode: auto-collapse above this child count
+  clusterStrength: number    // cluster mode: kind clustering attraction (0.1-1.0)
+  repelStrength: number      // cluster mode: node repulsion (50-500)
 }
 
 interface GraphStoreState {
@@ -43,6 +46,7 @@ interface GraphStoreState {
   highlightedNodeIds: Set<string>
   highlightedEdges: Set<string>
   loading: boolean
+  expandedGroups: Record<string, string[]>  // parentId -> kind[] (arrays, not Sets — JSON-serializable for structureKey)
 
   setEditorContent: (content: string) => void
   setEditorSelection: (selection: string) => void
@@ -53,6 +57,8 @@ interface GraphStoreState {
   resetGraph: () => Promise<void>
   clearResults: () => void
   updateConfig: (partial: Partial<Config>) => void
+  toggleGroup: (parentId: string, kind: string) => void
+  resetExpandedGroups: () => void
 }
 
 let resultCounter = 0
@@ -166,12 +172,16 @@ export const useGraphStore = create<GraphStoreState>()(
         ranksep: 80,
         layoutDirection: 'TB',
         fontSize: 14,
+        collapseThreshold: 20,
+        clusterStrength: 0.5,
+        repelStrength: 200,
       },
       editorContent: classHierarchy.script,
       editorSelection: '',
       highlightedNodeIds: new Set(),
       highlightedEdges: new Set(),
       loading: false,
+      expandedGroups: {},
 
       setEditorContent: (content) => set({ editorContent: content }),
       setEditorSelection: (selection) => set({ editorSelection: selection }),
@@ -217,6 +227,8 @@ export const useGraphStore = create<GraphStoreState>()(
       },
 
       executeAll: async () => {
+        // Reset graph first, then execute all statements fresh
+        await get().resetGraph()
         const queries = splitQueries(get().editorContent)
         for (const q of queries) await get().executeQuery(q, true)
         await get().refreshGraph()
@@ -225,7 +237,7 @@ export const useGraphStore = create<GraphStoreState>()(
       refreshGraph: async () => {
         try {
           const graph = await api.getGraph()
-          set({ graph })
+          set({ graph, expandedGroups: {} })
         } catch {
           toast.error('Server unreachable', { description: 'Could not fetch graph data' })
         }
@@ -235,20 +247,26 @@ export const useGraphStore = create<GraphStoreState>()(
         try {
           await api.reset()
         } catch {
-          toast.error('Server unreachable', { description: 'Could not reset graph — is the server running?' })
+          toast.error('Reset failed', { description: 'Could not reset graph — is the server running?' })
         }
         set({
           graph: { nodes: [], edges: [] },
           results: [],
           highlightedNodeIds: new Set(),
           highlightedEdges: new Set(),
+          expandedGroups: {},
         })
       },
 
       clearResults: () => set({ results: [], highlightedNodeIds: new Set(), highlightedEdges: new Set() }),
 
       updateConfig: (partial) => {
+        const prevLayoutMode = get().config.layoutMode
         set((s) => ({ config: { ...s.config, ...partial } }))
+        // Reset collapse state on mode switch
+        if (partial.layoutMode && partial.layoutMode !== prevLayoutMode) {
+          set({ expandedGroups: {} })
+        }
         // Sync server-side settings
         const serverUpdate: Record<string, number> = {}
         if (partial.ceilingMb !== undefined) serverUpdate.ceiling_mb = partial.ceilingMb
@@ -259,6 +277,19 @@ export const useGraphStore = create<GraphStoreState>()(
           })
         }
       },
+
+      toggleGroup: (parentId, kind) => set((s) => {
+        const groups = { ...s.expandedGroups }
+        const list = groups[parentId] || []
+        if (list.includes(kind)) {
+          groups[parentId] = list.filter(k => k !== kind)
+        } else {
+          groups[parentId] = [...list, kind]
+        }
+        return { expandedGroups: groups }
+      }),
+
+      resetExpandedGroups: () => set({ expandedGroups: {} }),
     }),
     {
       name: 'graphstore-storage',
@@ -267,6 +298,19 @@ export const useGraphStore = create<GraphStoreState>()(
         config: state.config,
         editorContent: state.editorContent,
       }),
+      merge: (persisted, current) => {
+        const p = persisted as Partial<GraphStoreState>
+        const mergedConfig = { ...current.config, ...p?.config }
+        // Migrate old 'force' value to 'cluster'
+        if ((mergedConfig.layoutMode as string) === 'force') {
+          mergedConfig.layoutMode = 'cluster'
+        }
+        return {
+          ...current,
+          ...p,
+          config: mergedConfig,
+        }
+      },
     }
   )
 )
