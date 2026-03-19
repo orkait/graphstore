@@ -194,22 +194,34 @@ export function GraphPanel() {
       // Stop any previous simulation
       simulationRef.current?.simulation.stop()
 
+      let layoutNodes = rfNodes
+      let layoutEdges = rfEdges
+
+      if (viewMode === 'query-result' && highlightedNodeIds.size > 0) {
+        // Isolate subgraph: only highlighted nodes, drop edges to non-highlighted
+        layoutNodes = rfNodes.filter(n => highlightedNodeIds.has(n.id))
+        layoutEdges = rfEdges.filter(e =>
+          highlightedNodeIds.has(e.source) && highlightedNodeIds.has(e.target) &&
+          highlightedEdges.has(`${e.source}->${e.target}`)
+        )
+      }
+
       const container = containerRef.current
       const width = container?.clientWidth || 800
       const height = container?.clientHeight || 600
 
-      // Initial synchronous layout for instant positioning
-      const positioned = applyForceLayout(rfNodes, rfEdges, {
+      const positioned = applyForceLayout(layoutNodes, layoutEdges, {
         clusterStrength: config.clusterStrength,
         repelStrength: config.repelStrength,
         width,
         height,
+        highlightedNodeIds: viewMode === 'highlight' ? highlightedNodeIds : undefined,
       })
       setFlowNodes(positioned)
-      setFlowEdges(rfEdges)
+      setFlowEdges(layoutEdges)
 
       // Create a live simulation for drag interactions (starts stopped/cooled)
-      const live = createForceSimulation(positioned, rfEdges, {
+      const live = createForceSimulation(positioned, layoutEdges, {
         clusterStrength: config.clusterStrength,
         repelStrength: config.repelStrength,
         width,
@@ -217,7 +229,6 @@ export function GraphPanel() {
       }, (updatedNodes) => {
         setFlowNodes(updatedNodes)
       })
-      // Stop immediately — we only restart on drag
       live.simulation.stop()
       simulationRef.current = live
     } else {

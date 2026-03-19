@@ -16,6 +16,7 @@ export interface ForceLayoutOptions {
   repelStrength: number
   width: number
   height: number
+  highlightedNodeIds?: Set<string>
 }
 
 interface ForceNode extends ClusterNode {
@@ -67,6 +68,32 @@ export function applyForceLayout(
     .force('collide', forceCollide<ForceNode>(45))
     .force('cluster', forceCluster(clusterStrength))
     .stop()
+
+  // If in highlight mode, add extra attraction between highlighted nodes
+  if (opts.highlightedNodeIds && opts.highlightedNodeIds.size > 0) {
+    const hlIds = opts.highlightedNodeIds
+    simulation.force('highlight-attract', (alpha: number) => {
+      // Compute centroid of highlighted nodes
+      let cx = 0, cy = 0, count = 0
+      for (const fn of forceNodes) {
+        if (hlIds.has(fn.id)) {
+          cx += fn.x || 0
+          cy += fn.y || 0
+          count++
+        }
+      }
+      if (count <= 1) return
+      cx /= count
+      cy /= count
+      // Pull highlighted nodes toward their centroid
+      for (const fn of forceNodes) {
+        if (hlIds.has(fn.id)) {
+          fn.vx = (fn.vx || 0) + (cx - (fn.x || 0)) * 0.1 * alpha
+          fn.vy = (fn.vy || 0) + (cy - (fn.y || 0)) * 0.1 * alpha
+        }
+      }
+    })
+  }
 
   // Run until convergence (standard d3-force synchronous pattern)
   const alphaMin = simulation.alphaMin()
