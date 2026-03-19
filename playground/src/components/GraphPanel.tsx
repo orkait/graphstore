@@ -12,6 +12,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import '@xyflow/react/dist/style.css'
 import { CustomNode } from '@/components/graph/CustomNode'
 import { CustomEdge } from '@/components/graph/CustomEdge'
+import { CanvasControls } from '@/components/graph/CanvasControls'
 import { useGraphStore, type ViewMode } from '@/hooks/useGraphStore'
 import { useFlowStore } from '@/hooks/useFlowStore'
 import { applyDagreLayout } from '@/components/graph/layout'
@@ -179,6 +180,7 @@ export function GraphPanel() {
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--graph-bg-dots)" />
           <Controls className="!bg-card !border-border !text-foreground [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground [&>button:hover]:!bg-accent" />
+          <CanvasControls />
           {showMinimap && (
             <MiniMap
               className="!bg-card !border-border"
