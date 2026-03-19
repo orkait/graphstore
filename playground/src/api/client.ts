@@ -47,12 +47,6 @@ export const api = {
       body: JSON.stringify({ query }),
     }),
 
-  executeBatch: (queries: string[]) =>
-    request<Result[]>('/execute-batch', {
-      method: 'POST',
-      body: JSON.stringify({ queries }),
-    }),
-
   getGraph: () => request<GraphData>('/graph'),
 
   reset: () =>
@@ -63,4 +57,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(config),
     }),
+
+  getScript: () => request<{ script: string | null }>('/script'),
 }

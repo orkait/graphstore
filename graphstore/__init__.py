@@ -169,6 +169,22 @@ class GraphStore:
             return
         _checkpoint_fn(self._store, self._schema, self._conn)
 
+    def set_script(self, script: str) -> None:
+        """Store a DSL script in metadata so the playground can load it."""
+        conn = self._conn
+        if conn is None:
+            return
+        from graphstore.persistence.database import set_metadata
+        set_metadata(conn, "playground_script", script)
+
+    def get_script(self) -> str | None:
+        """Retrieve the stored playground script, if any."""
+        conn = self._conn
+        if conn is None:
+            return None
+        from graphstore.persistence.database import get_metadata
+        return get_metadata(conn, "playground_script")
+
     def close(self) -> None:
         """Checkpoint + close sqlite connection."""
         conn = self._conn

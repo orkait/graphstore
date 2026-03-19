@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { api, type Result, type GraphData } from '@/api/client'
 import { classHierarchy } from '@/examples/class-hierarchy'
 
-export type ViewMode = 'live' | 'query-result' | 'highlight'
+export type ViewMode = 'live' | 'query-result'
 export type LayoutMode = 'dagre' | 'cluster'
 export type LayoutDirection = 'TB' | 'LR'
 
@@ -24,7 +24,6 @@ export interface Config {
   colorByKind: boolean
   ceilingMb: number
   costThreshold: number
-  explainBeforeExecute: boolean
   showElapsed: boolean
   isDark: boolean  // client-only; not synced to server
   // Layout tuning (client-only)
@@ -33,8 +32,11 @@ export interface Config {
   layoutDirection: LayoutDirection
   fontSize: number  // editor font size (client-only)
   collapseThreshold: number  // dagre mode: auto-collapse above this child count
-  clusterStrength: number    // cluster mode: kind clustering attraction (0.1-1.0)
-  repelStrength: number      // cluster mode: node repulsion (50-500)
+  clusterStrength: number    // cluster mode: 0-100 normalized
+  repelStrength: number      // cluster mode: 0-100 normalized
+  centerForce: number        // cluster mode: 0-100 normalized
+  linkForce: number          // cluster mode: 0-100 normalized
+  linkDistance: number        // cluster mode: 0-100 normalized
 }
 
 interface GraphStoreState {
@@ -45,8 +47,9 @@ interface GraphStoreState {
   editorSelection: string
   highlightedNodeIds: Set<string>
   highlightedEdges: Set<string>
+  activeResultId: string | null
   loading: boolean
-  expandedGroups: Record<string, string[]>  // parentId -> kind[] (arrays, not Sets — JSON-serializable for structureKey)
+  expandedGroups: Record<string, string[]>
 
   setEditorContent: (content: string) => void
   setEditorSelection: (selection: string) => void
@@ -56,6 +59,8 @@ interface GraphStoreState {
   refreshGraph: () => Promise<void>
   resetGraph: () => Promise<void>
   clearResults: () => void
+  selectResult: (id: string) => void
+  clearHighlights: () => void
   updateConfig: (partial: Partial<Config>) => void
   toggleGroup: (parentId: string, kind: string) => void
   resetExpandedGroups: () => void
@@ -165,7 +170,6 @@ export const useGraphStore = create<GraphStoreState>()(
         colorByKind: true,
         ceilingMb: 256,
         costThreshold: 100_000,
-        explainBeforeExecute: false,
         showElapsed: true,
         isDark: true,
         nodesep: 50,
@@ -173,13 +177,17 @@ export const useGraphStore = create<GraphStoreState>()(
         layoutDirection: 'TB',
         fontSize: 14,
         collapseThreshold: 20,
-        clusterStrength: 0.5,
-        repelStrength: 200,
+        clusterStrength: 50,
+        repelStrength: 33,
+        centerForce: 11,
+        linkForce: 25,
+        linkDistance: 32,
       },
       editorContent: classHierarchy.script,
       editorSelection: '',
       highlightedNodeIds: new Set(),
       highlightedEdges: new Set(),
+      activeResultId: null,
       loading: false,
       expandedGroups: {},
 
@@ -211,6 +219,7 @@ export const useGraphStore = create<GraphStoreState>()(
               results: [{ id, query, result, error: null, timestamp: Date.now() }, ...s.results].slice(0, 50),
               highlightedNodeIds: nodeIds,
               highlightedEdges: edgeKeys,
+              activeResultId: id,
               loading: false
             }))
             if (result.kind === 'ok' && !skipRefresh) await get().refreshGraph()
@@ -254,11 +263,26 @@ export const useGraphStore = create<GraphStoreState>()(
           results: [],
           highlightedNodeIds: new Set(),
           highlightedEdges: new Set(),
+          activeResultId: null,
           expandedGroups: {},
         })
       },
 
-      clearResults: () => set({ results: [], highlightedNodeIds: new Set(), highlightedEdges: new Set() }),
+      clearResults: () => set({ results: [], highlightedNodeIds: new Set(), highlightedEdges: new Set(), activeResultId: null }),
+
+      selectResult: (id) => {
+        const entry = get().results.find(r => r.id === id)
+        if (!entry?.result) return
+        // Toggle: clicking the active result clears highlights
+        if (get().activeResultId === id) {
+          set({ activeResultId: null, highlightedNodeIds: new Set(), highlightedEdges: new Set() })
+          return
+        }
+        const { nodeIds, edgeKeys } = extractHighlights(entry.result)
+        set({ activeResultId: id, highlightedNodeIds: nodeIds, highlightedEdges: edgeKeys })
+      },
+
+      clearHighlights: () => set({ activeResultId: null, highlightedNodeIds: new Set(), highlightedEdges: new Set() }),
 
       updateConfig: (partial) => {
         const prevLayoutMode = get().config.layoutMode
@@ -304,6 +328,10 @@ export const useGraphStore = create<GraphStoreState>()(
         // Migrate old 'force' value to 'cluster'
         if ((mergedConfig.layoutMode as string) === 'force') {
           mergedConfig.layoutMode = 'cluster'
+        }
+        // Migrate old 'highlight' viewMode to 'live'
+        if ((mergedConfig.viewMode as string) === 'highlight') {
+          mergedConfig.viewMode = 'live'
         }
         return {
           ...current,

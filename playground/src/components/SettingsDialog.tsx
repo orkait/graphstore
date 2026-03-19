@@ -39,42 +39,54 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
           </TabsList>
 
           <TabsContent value="graph" className="space-y-5 mt-5">
-
-            <div className="space-y-2">
-              <Label className="text-sm">Layout Direction</Label>
-              <Select value={config.layoutDirection} onValueChange={(v) => updateConfig({ layoutDirection: v as LayoutDirection })}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="TB">Top to Bottom</SelectItem>
-                  <SelectItem value="LR">Left to Right</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm">Node Separation</Label>
-                <span className="text-sm font-mono text-muted-foreground">{config.nodesep}px</span>
-              </div>
-              <Slider
-                value={[config.nodesep]}
-                min={20} max={200} step={5}
-                onValueChange={(v) => updateConfig({ nodesep: Array.isArray(v) ? v[0] : v })}
-              />
-            </div>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label className="text-sm">Rank Separation</Label>
-                <span className="text-sm font-mono text-muted-foreground">{config.ranksep}px</span>
-              </div>
-              <Slider
-                value={[config.ranksep]}
-                min={30} max={300} step={10}
-                onValueChange={(v) => updateConfig({ ranksep: Array.isArray(v) ? v[0] : v })}
-              />
-            </div>
+            {config.layoutMode === 'dagre' && (
+              <>
+                <div className="space-y-2">
+                  <Label className="text-sm">Layout Direction</Label>
+                  <Select value={config.layoutDirection} onValueChange={(v) => updateConfig({ layoutDirection: v as LayoutDirection })}>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="TB">Top to Bottom</SelectItem>
+                      <SelectItem value="LR">Left to Right</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm">Node Separation</Label>
+                    <span className="text-sm font-mono text-muted-foreground">{config.nodesep}px</span>
+                  </div>
+                  <Slider
+                    value={[config.nodesep]}
+                    min={20} max={200} step={5}
+                    onValueChange={(v) => updateConfig({ nodesep: Array.isArray(v) ? v[0] : v })}
+                  />
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm">Rank Separation</Label>
+                    <span className="text-sm font-mono text-muted-foreground">{config.ranksep}px</span>
+                  </div>
+                  <Slider
+                    value={[config.ranksep]}
+                    min={30} max={300} step={10}
+                    onValueChange={(v) => updateConfig({ ranksep: Array.isArray(v) ? v[0] : v })}
+                  />
+                </div>
+              </>
+            )}
             <div className="flex items-center justify-between py-1">
-              <Label className="text-sm">Show Edge Labels</Label>
-              <Switch checked={config.showEdgeLabels} onCheckedChange={(v) => updateConfig({ showEdgeLabels: v })} />
+              <div>
+                <Label className="text-sm">Show Edge Labels</Label>
+                {config.layoutMode === 'cluster' && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Not available in cluster mode</p>
+                )}
+              </div>
+              <Switch
+                checked={config.showEdgeLabels}
+                onCheckedChange={(v) => updateConfig({ showEdgeLabels: v })}
+                disabled={config.layoutMode === 'cluster'}
+              />
             </div>
             <div className="flex items-center justify-between py-1">
               <Label className="text-sm">Show Minimap</Label>
@@ -109,10 +121,6 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                 onValueChange={(v) => updateConfig({ costThreshold: Array.isArray(v) ? v[0] : v })}
               />
               <p className="text-xs text-muted-foreground">Maximum estimated frontier size before query rejection.</p>
-            </div>
-            <div className="flex items-center justify-between py-1">
-              <Label className="text-sm">Explain Before Execute</Label>
-              <Switch checked={config.explainBeforeExecute} onCheckedChange={(v) => updateConfig({ explainBeforeExecute: v })} />
             </div>
             <div className="flex items-center justify-between py-1">
               <Label className="text-sm">Show Elapsed Time</Label>

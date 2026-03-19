@@ -5,22 +5,39 @@ import {
   forceCenter,
   forceCollide,
   type Simulation,
-  type SimulationNodeDatum,
   type SimulationLinkDatum,
 } from 'd3-force'
 import { forceCluster, type ClusterNode } from './clusterForce'
 import type { Node, Edge } from '@xyflow/react'
 
+// All force values are 0-100 normalized. This maps them to physics values.
 export interface ForceLayoutOptions {
-  clusterStrength: number
-  repelStrength: number
+  clusterStrength: number  // 0-100
+  repelStrength: number    // 0-100
+  centerForce: number      // 0-100
+  linkForce: number        // 0-100
+  linkDistance: number      // 0-100
   width: number
   height: number
-  highlightedNodeIds?: Set<string>
 }
 
-interface ForceNode extends ClusterNode {
-  rfNode: Node  // reference to original React Flow node
+// Map 0-100 slider → actual physics value (linear interpolation)
+function lerp(min: number, max: number, t: number): number {
+  return min + (max - min) * (t / 100)
+}
+
+function mapForces(opts: ForceLayoutOptions) {
+  return {
+    center: lerp(0.01, 0.5, opts.centerForce),      // 0→0.01, 100→0.5
+    repel: lerp(50, 500, opts.repelStrength),         // 0→50, 100→500
+    link: lerp(0.05, 1.0, opts.linkForce),            // 0→0.05, 100→1.0
+    distance: lerp(50, 400, opts.linkDistance),        // 0→50, 100→400
+    cluster: lerp(0, 0.5, opts.clusterStrength),      // 0→0, 100→0.5
+  }
+}
+
+export interface ForceNode extends ClusterNode {
+  rfNode: Node
 }
 
 interface ForceLink extends SimulationLinkDatum<ForceNode> {
@@ -28,130 +45,101 @@ interface ForceLink extends SimulationLinkDatum<ForceNode> {
   target: ForceNode | string
 }
 
-/**
- * Run a d3-force simulation and return positioned React Flow nodes.
- * Simulation runs synchronously until convergence (alpha < alphaMin).
- */
-export function applyForceLayout(
-  rfNodes: Node[],
-  rfEdges: Edge[],
-  opts: ForceLayoutOptions
-): Node[] {
-  if (rfNodes.length === 0) return rfNodes
-
-  const { clusterStrength, repelStrength, width, height } = opts
-
-  // Create simulation nodes
-  const forceNodes: ForceNode[] = rfNodes.map((n) => ({
-    id: n.id,
-    kind: (n.data?.kind as string) || 'default',
-    x: n.position.x || Math.random() * width,
-    y: n.position.y || Math.random() * height,
-    rfNode: n,
-  }))
-
-  const nodeMap = new Map(forceNodes.map(n => [n.id, n]))
-
-  // Create simulation links
-  const forceLinks: ForceLink[] = rfEdges
-    .filter(e => nodeMap.has(e.source) && nodeMap.has(e.target))
-    .map(e => ({
-      source: e.source,
-      target: e.target,
-    }))
-
-  // Build simulation
-  const simulation: Simulation<ForceNode, ForceLink> = forceSimulation(forceNodes)
-    .force('center', forceCenter(width / 2, height / 2).strength(0.05))
-    .force('charge', forceManyBody<ForceNode>().strength(-repelStrength))
-    .force('link', forceLink<ForceNode, ForceLink>(forceLinks).id(d => d.id).distance(100).strength(0.3))
-    .force('collide', forceCollide<ForceNode>(45))
-    .force('cluster', forceCluster(clusterStrength))
-    .stop()
-
-  // If in highlight mode, add extra attraction between highlighted nodes
-  if (opts.highlightedNodeIds && opts.highlightedNodeIds.size > 0) {
-    const hlIds = opts.highlightedNodeIds
-    simulation.force('highlight-attract', (alpha: number) => {
-      // Compute centroid of highlighted nodes
-      let cx = 0, cy = 0, count = 0
-      for (const fn of forceNodes) {
-        if (hlIds.has(fn.id)) {
-          cx += fn.x || 0
-          cy += fn.y || 0
-          count++
-        }
-      }
-      if (count <= 1) return
-      cx /= count
-      cy /= count
-      // Pull highlighted nodes toward their centroid
-      for (const fn of forceNodes) {
-        if (hlIds.has(fn.id)) {
-          fn.vx = (fn.vx || 0) + (cx - (fn.x || 0)) * 0.1 * alpha
-          fn.vy = (fn.vy || 0) + (cy - (fn.y || 0)) * 0.1 * alpha
-        }
-      }
-    })
-  }
-
-  // Run until convergence (standard d3-force synchronous pattern)
-  const alphaMin = simulation.alphaMin()
-  const alphaDecay = simulation.alphaDecay()
-  const numIterations = Math.ceil(Math.log(alphaMin) / Math.log(1 - alphaDecay))
-  for (let i = 0; i < numIterations; i++) {
-    simulation.tick()
-  }
-
-  // Map positions back to React Flow nodes
-  return forceNodes.map(fn => ({
-    ...fn.rfNode,
-    position: { x: fn.x || 0, y: fn.y || 0 },
-  }))
-}
-
-/**
- * Create a live d3-force simulation for drag interactions.
- * Returns the simulation instance so the caller can reheat on drag.
- */
-export function createForceSimulation(
+// ---------------------------------------------------------------------------
+// Live simulation — Obsidian-style elastic physics.
+//
+// Performance:
+//  - Tick callback reuses node array, only updates position objects
+//  - Throttled: skips ticks when positions haven't changed enough
+//  - Barnes-Hut approximation via d3 manyBody (default theta 0.9)
+// ---------------------------------------------------------------------------
+export function createLiveSimulation(
   rfNodes: Node[],
   rfEdges: Edge[],
   opts: ForceLayoutOptions,
   onTick: (nodes: Node[]) => void
 ): { simulation: Simulation<ForceNode, ForceLink>; nodeMap: Map<string, ForceNode> } {
-  const { clusterStrength, repelStrength, width, height } = opts
+  const { width, height } = opts
+  const f = mapForces(opts)
+  const cx = width / 2
+  const cy = height / 2
 
-  const forceNodes: ForceNode[] = rfNodes.map((n) => ({
-    id: n.id,
-    kind: (n.data?.kind as string) || 'default',
-    x: n.position.x || Math.random() * width,
-    y: n.position.y || Math.random() * height,
-    rfNode: n,
-  }))
+  // Scatter in circle — wide enough so fitView doesn't over-zoom
+  const startRadius = Math.min(width, height) * 0.35
+  const forceNodes: ForceNode[] = rfNodes.map((n, i) => {
+    const angle = (i / rfNodes.length) * 2 * Math.PI
+    return {
+      id: n.id,
+      kind: (n.data?.kind as string) || 'default',
+      x: cx + Math.cos(angle) * startRadius + (Math.random() - 0.5) * 10,
+      y: cy + Math.sin(angle) * startRadius + (Math.random() - 0.5) * 10,
+      rfNode: n,
+    }
+  })
 
   const nodeMap = new Map(forceNodes.map(n => [n.id, n]))
 
   const forceLinks: ForceLink[] = rfEdges
     .filter(e => nodeMap.has(e.source) && nodeMap.has(e.target))
-    .map(e => ({
-      source: e.source,
-      target: e.target,
-    }))
+    .map(e => ({ source: e.source, target: e.target }))
 
-  const simulation = forceSimulation(forceNodes)
-    .force('center', forceCenter(width / 2, height / 2).strength(0.05))
-    .force('charge', forceManyBody<ForceNode>().strength(-repelStrength))
-    .force('link', forceLink<ForceNode, ForceLink>(forceLinks).id(d => d.id).distance(100).strength(0.3))
-    .force('collide', forceCollide<ForceNode>(45))
-    .force('cluster', forceCluster(clusterStrength))
+  // Pre-allocate output array — reuse on every tick instead of .map()
+  const outputNodes: Node[] = forceNodes.map(fn => ({
+    ...fn.rfNode,
+    position: { x: fn.x || 0, y: fn.y || 0 },
+  }))
+
+  // Throttle: only push updates when positions change meaningfully
+  let tickCount = 0
+
+  const simulation: Simulation<ForceNode, ForceLink> = forceSimulation(forceNodes)
+    .force('center', forceCenter(cx, cy).strength(f.center))
+    .force('charge', forceManyBody<ForceNode>().strength(-f.repel).theta(0.9))
+    .force('link', forceLink<ForceNode, ForceLink>(forceLinks)
+      .id(d => d.id).distance(f.distance).strength(f.link))
+    .force('collide', forceCollide<ForceNode>(55).strength(0.7).iterations(2))
+    .force('cluster', forceCluster(f.cluster))
+    .alpha(1)
+    .alphaMin(0.0001)
+    .alphaDecay(0.005)
+    .alphaTarget(0.02)
+    .velocityDecay(0.15)
     .on('tick', () => {
-      const positioned = forceNodes.map(fn => ({
-        ...fn.rfNode,
-        position: { x: fn.x || 0, y: fn.y || 0 },
-      }))
-      onTick(positioned)
+      tickCount++
+      // During initial settling (high alpha), update every tick.
+      // Once cooled, update every 3rd tick — positions barely change.
+      if (simulation.alpha() < 0.05 && tickCount % 3 !== 0) return
+
+      // Mutate pre-allocated output — no new objects
+      for (let i = 0; i < forceNodes.length; i++) {
+        outputNodes[i].position.x = forceNodes[i].x || 0
+        outputNodes[i].position.y = forceNodes[i].y || 0
+      }
+      onTick([...outputNodes])  // shallow copy so React detects change
     })
 
   return { simulation, nodeMap }
+}
+
+// ---------------------------------------------------------------------------
+// Update forces on a running simulation (sliders changed).
+// ---------------------------------------------------------------------------
+export function updateSimulationForces(
+  simulation: Simulation<ForceNode, ForceLink>,
+  opts: ForceLayoutOptions
+) {
+  const f = mapForces(opts)
+
+  const center = simulation.force('center') as ReturnType<typeof forceCenter> | undefined
+  if (center) center.x(opts.width / 2).y(opts.height / 2).strength(f.center)
+
+  const charge = simulation.force('charge') as ReturnType<typeof forceManyBody> | undefined
+  if (charge) charge.strength(-f.repel)
+
+  const link = simulation.force('link') as ReturnType<typeof forceLink> | undefined
+  if (link) link.distance(f.distance).strength(f.link)
+
+  simulation.force('cluster', forceCluster(f.cluster))
+
+  simulation.alpha(0.6).alphaTarget(0.02).restart()
 }

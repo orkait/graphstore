@@ -35,8 +35,8 @@ export function forceCluster(strength: number = 0.5) {
       const kind = node.kind || 'default'
       const c = centroids.get(kind)
       if (!c || c.count <= 1) continue
-      const dx = (c.x - (node.x || 0)) * strength * alpha
-      const dy = (c.y - (node.y || 0)) * strength * alpha
+      const dx = (c.x - (node.x || 0)) * strength * 0.04 * alpha
+      const dy = (c.y - (node.y || 0)) * strength * 0.04 * alpha
       node.vx = (node.vx || 0) + dx
       node.vy = (node.vy || 0) + dy
     }

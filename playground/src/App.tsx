@@ -24,11 +24,20 @@ export default function App() {
     const { ceilingMb, costThreshold } = useGraphStore.getState().config
     api.updateConfig({ ceiling_mb: ceilingMb, cost_threshold: costThreshold }).catch(console.error)
 
-    // 2. Fetch the graph and conditionally populate the editor example
-    refreshGraph().then(() => {
-      const g = useGraphStore.getState().graph
-      if (g.nodes.length === 0) executeAll()
-    })
+    // 2. Check if server has a custom script (set via Python API)
+    // If so, load it into the editor instead of the default example
+    Promise.all([refreshGraph(), api.getScript().catch(() => ({ script: null }))]).then(
+      ([, scriptRes]) => {
+        const g = useGraphStore.getState().graph
+        if (scriptRes.script) {
+          // Server has a custom script — use it as editor content
+          useGraphStore.getState().setEditorContent(scriptRes.script)
+        } else if (g.nodes.length === 0) {
+          // No custom script and empty graph — run the default example
+          executeAll()
+        }
+      },
+    )
   }, [refreshGraph, executeAll])
   useEffect(() => { document.documentElement.classList.toggle('dark', isDark) }, [isDark])
 

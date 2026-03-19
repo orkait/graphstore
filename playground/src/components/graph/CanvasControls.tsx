@@ -5,7 +5,7 @@ import { Slider } from '@/components/ui/slider'
 export function CanvasControls() {
   const config = useGraphStore((s) => s.config)
   const updateConfig = useGraphStore((s) => s.updateConfig)
-  const { layoutMode, collapseThreshold, clusterStrength, repelStrength } = config
+  const { layoutMode, collapseThreshold, clusterStrength, repelStrength, centerForce, linkForce, linkDistance } = config
 
   return (
     <Panel position="top-right">
@@ -49,29 +49,62 @@ export function CanvasControls() {
           </div>
         )}
 
-        {/* Cluster-specific: strength sliders */}
+        {/* Cluster-specific: all sliders 0-100 */}
         {layoutMode === 'cluster' && (
           <>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">Cluster</span>
-                <span className="text-[10px] font-mono text-muted-foreground">{clusterStrength.toFixed(1)}</span>
+                <span className="text-[10px] text-muted-foreground">Center force</span>
+                <span className="text-[10px] font-mono text-muted-foreground">{centerForce}</span>
               </div>
               <Slider
-                value={[clusterStrength * 100]}
-                min={10} max={100} step={5}
-                onValueChange={(v) => updateConfig({ clusterStrength: (Array.isArray(v) ? v[0] : v) / 100 })}
+                value={[centerForce]}
+                min={0} max={100} step={1}
+                onValueChange={(v) => updateConfig({ centerForce: Array.isArray(v) ? v[0] : v })}
               />
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">Repel</span>
+                <span className="text-[10px] text-muted-foreground">Repel force</span>
                 <span className="text-[10px] font-mono text-muted-foreground">{repelStrength}</span>
               </div>
               <Slider
                 value={[repelStrength]}
-                min={50} max={500} step={25}
+                min={0} max={100} step={1}
                 onValueChange={(v) => updateConfig({ repelStrength: Array.isArray(v) ? v[0] : v })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-muted-foreground">Link force</span>
+                <span className="text-[10px] font-mono text-muted-foreground">{linkForce}</span>
+              </div>
+              <Slider
+                value={[linkForce]}
+                min={0} max={100} step={1}
+                onValueChange={(v) => updateConfig({ linkForce: Array.isArray(v) ? v[0] : v })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-muted-foreground">Link distance</span>
+                <span className="text-[10px] font-mono text-muted-foreground">{linkDistance}</span>
+              </div>
+              <Slider
+                value={[linkDistance]}
+                min={0} max={100} step={1}
+                onValueChange={(v) => updateConfig({ linkDistance: Array.isArray(v) ? v[0] : v })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-muted-foreground">Cluster force</span>
+                <span className="text-[10px] font-mono text-muted-foreground">{clusterStrength}</span>
+              </div>
+              <Slider
+                value={[clusterStrength]}
+                min={0} max={100} step={1}
+                onValueChange={(v) => updateConfig({ clusterStrength: Array.isArray(v) ? v[0] : v })}
               />
             </div>
           </>
