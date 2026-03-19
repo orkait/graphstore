@@ -46,7 +46,7 @@ export function SettingsDialog({ open, onOpenChange }: Props) {
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="dagre">Dagre (hierarchical)</SelectItem>
-                  <SelectItem value="force">Force-directed</SelectItem>
+                  <SelectItem value="cluster">Cluster</SelectItem>
                 </SelectContent>
               </Select>
             </div>
