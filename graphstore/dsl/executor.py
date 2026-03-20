@@ -851,6 +851,34 @@ class Executor:
 
     # --- Helpers ---
 
+    def _compute_live_mask(self, n: int) -> np.ndarray:
+        """Unified visibility filter: tombstones + TTL + retracted."""
+        mask = self.store.node_ids[:n] >= 0
+
+        # Tombstones
+        if self.store.node_tombstones:
+            tomb_arr = np.array(list(self.store.node_tombstones), dtype=np.int32)
+            tomb_mask = np.zeros(n, dtype=bool)
+            valid = tomb_arr[tomb_arr < n]
+            if len(valid) > 0:
+                tomb_mask[valid] = True
+            mask = mask & ~tomb_mask
+
+        # TTL expiry
+        expires = self.store.columns.get_column("__expires_at__", n)
+        if expires is not None:
+            col, pres, _ = expires
+            now_ms = int(time.time() * 1000)
+            mask = mask & ~(pres & (col > 0) & (col < now_ms))
+
+        # Retracted beliefs
+        retracted = self.store.columns.get_column("__retracted__", n)
+        if retracted is not None:
+            col, pres, _ = retracted
+            mask = mask & ~(pres & (col == 1))
+
+        return mask
+
     def _resolve_slot(self, node_id: str) -> int | None:
         """Resolve a string node ID to its slot index."""
         if node_id not in self.store.string_table:
