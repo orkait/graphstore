@@ -208,6 +208,7 @@ class CreateNode:
     auto_id: bool = False
     expires_in: tuple[int, str] | None = None   # (amount, unit) e.g. (30, "m")
     expires_at: str | None = None                # ISO-8601 string
+    vector: list[float] | None = None
 
 @dataclass
 class VarAssign:
@@ -225,6 +226,7 @@ class UpsertNode:
     fields: list[FieldPair]
     expires_in: tuple[int, str] | None = None
     expires_at: str | None = None
+    vector: list[float] | None = None
 
 @dataclass
 class DeleteNode:
@@ -318,6 +320,14 @@ class RecallQuery:
 class CounterfactualQuery:
     node_id: str
 
+@dataclass
+class SimilarQuery:
+    target_vector: list[float] | None = None
+    target_text: str | None = None
+    target_node_id: str | None = None
+    limit: LimitClause | None = None
+    where: WhereClause | None = None
+
 # --- System queries ---
 @dataclass
 class SysStats:
@@ -358,6 +368,7 @@ class SysRegisterNodeKind:
     kind: str
     required: list[tuple[str, str | None]]  # [(field_name, type_name_or_none), ...]
     optional: list[tuple[str, str | None]]
+    embed_field: str | None = None
 
 @dataclass
 class SysRegisterEdgeKind:

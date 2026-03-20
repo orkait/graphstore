@@ -13,6 +13,7 @@ from graphstore.core.errors import (
     GraphStoreError, QueryError, NodeNotFound, NodeExists,
     CeilingExceeded, VersionMismatch, SchemaError,
     CostThresholdExceeded, BatchRollback, AggregationError,
+    VectorError, EmbedderRequired, VectorNotFound,
 )
 from graphstore.core.memory import DEFAULT_CEILING_BYTES
 
@@ -23,5 +24,6 @@ __all__ = [
     "GraphStoreError", "QueryError", "NodeNotFound", "NodeExists",
     "CeilingExceeded", "VersionMismatch", "SchemaError",
     "CostThresholdExceeded", "BatchRollback", "AggregationError",
+    "VectorError", "EmbedderRequired", "VectorNotFound",
     "DEFAULT_CEILING_BYTES",
 ]

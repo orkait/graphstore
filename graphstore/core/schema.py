@@ -16,6 +16,7 @@ class NodeKindDef:
     required: set[str]
     optional: set[str]
     field_types: dict[str, str] = field(default_factory=dict)
+    embed_field: str | None = None
 
 
 @dataclass
@@ -37,7 +38,8 @@ class SchemaRegistry:
     def has_edge_kinds(self) -> bool:
         return bool(self._edge_kinds)
 
-    def register_node_kind(self, kind: str, required: list, optional: list | None = None):
+    def register_node_kind(self, kind: str, required: list, optional: list | None = None,
+                           embed_field: str | None = None):
         req_fields = set()
         field_types = {}
         for item in required:
@@ -61,6 +63,7 @@ class SchemaRegistry:
 
         self._node_kinds[kind] = NodeKindDef(
             required=req_fields, optional=opt_fields, field_types=field_types,
+            embed_field=embed_field,
         )
 
     def register_edge_kind(self, kind: str, from_kinds: list[str], to_kinds: list[str]):
@@ -100,6 +103,8 @@ class SchemaRegistry:
         }
         if defn.field_types:
             result["field_types"] = defn.field_types
+        if defn.embed_field:
+            result["embed_field"] = defn.embed_field
         return result
 
     def describe_edge_kind(self, kind: str) -> dict | None:
@@ -165,15 +170,18 @@ class SchemaRegistry:
 
     def to_dict(self) -> dict:
         """Export schema for serialization."""
+        node_kinds = {}
+        for k, v in self._node_kinds.items():
+            d = {
+                "required": sorted(v.required),
+                "optional": sorted(v.optional),
+                "field_types": v.field_types,
+            }
+            if v.embed_field:
+                d["embed_field"] = v.embed_field
+            node_kinds[k] = d
         return {
-            "node_kinds": {
-                k: {
-                    "required": sorted(v.required),
-                    "optional": sorted(v.optional),
-                    "field_types": v.field_types,
-                }
-                for k, v in self._node_kinds.items()
-            },
+            "node_kinds": node_kinds,
             "edge_kinds": {
                 k: {"from_kinds": sorted(v.from_kinds), "to_kinds": sorted(v.to_kinds)}
                 for k, v in self._edge_kinds.items()
@@ -188,7 +196,8 @@ class SchemaRegistry:
             field_types = defn.get("field_types", {})
             required = [(f, field_types.get(f)) for f in defn["required"]]
             optional = [(f, field_types.get(f)) for f in defn.get("optional", [])]
-            registry.register_node_kind(kind, required, optional)
+            embed_field = defn.get("embed_field")
+            registry.register_node_kind(kind, required, optional, embed_field=embed_field)
         for kind, defn in data.get("edge_kinds", {}).items():
             registry.register_edge_kind(kind, defn["from_kinds"], defn["to_kinds"])
         return registry

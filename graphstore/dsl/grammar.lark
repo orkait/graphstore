@@ -16,6 +16,7 @@ start: statement
            | aggregate_q
            | recall_q
            | counterfactual
+           | similar_q
 
 node_q:        "NODE" STRING
 nodes_q:       "NODES" where_clause? order_clause? limit_clause? offset_clause?
@@ -40,6 +41,12 @@ aggregate_q: "AGGREGATE" "NODES" where_clause? group_clause? select_clause havin
 
 recall_q: "RECALL" "FROM" STRING "DEPTH" NUMBER limit_clause? where_clause?
 counterfactual: "WHAT" "IF" "RETRACT" STRING
+
+similar_q: "SIMILAR" "TO" similar_target limit_clause? where_clause?
+similar_target: vector_literal      -> similar_vector
+              | STRING              -> similar_text
+              | "NODE" STRING       -> similar_node
+vector_literal: "[" NUMBER ("," NUMBER)* "]"
 group_clause: "GROUP" "BY" IDENTIFIER ("," IDENTIFIER)*
 select_clause: "SELECT" agg_func ("," agg_func)*
 having_clause: "HAVING" having_expr
@@ -73,10 +80,11 @@ arrow: "-[" expr "]->"
             | propagate_stmt
             | bind_context | discard_context
 
-create_node:  "CREATE" "NODE" STRING field_pairs expires_clause?
-            | "CREATE" "NODE" "AUTO" field_pairs expires_clause? -> create_node_auto
+create_node:  "CREATE" "NODE" STRING field_pairs vector_clause? expires_clause?
+            | "CREATE" "NODE" "AUTO" field_pairs vector_clause? expires_clause? -> create_node_auto
 update_node:  "UPDATE" "NODE" STRING "SET" field_pairs
-upsert_node:  "UPSERT" "NODE" STRING field_pairs expires_clause?
+upsert_node:  "UPSERT" "NODE" STRING field_pairs vector_clause? expires_clause?
+vector_clause: "VECTOR" vector_literal
 delete_node:  "DELETE" "NODE" STRING
 delete_nodes: "DELETE" "NODES" where_clause
 
@@ -181,9 +189,10 @@ since_clause:   "SINCE" STRING
 
 sys_explain:    "EXPLAIN" read_query
 
-sys_register_node_kind: "REGISTER" "NODE" "KIND" STRING "REQUIRED" ident_list optional_clause?
+sys_register_node_kind: "REGISTER" "NODE" "KIND" STRING "REQUIRED" ident_list optional_clause? embed_clause?
 sys_register_edge_kind: "REGISTER" "EDGE" "KIND" STRING "FROM" string_list "TO" string_list
 optional_clause: "OPTIONAL" ident_list
+embed_clause: "EMBED" IDENTIFIER
 sys_unregister:         "UNREGISTER" ENTITY_TYPE "KIND" STRING
 
 ENTITY_TYPE: "NODE" | "EDGE"

@@ -235,7 +235,8 @@ class SystemExecutor:
         return Result(kind="plan", data=cost.to_dict(), count=1)
 
     def _register_node_kind(self, q: SysRegisterNodeKind) -> Result:
-        self.schema.register_node_kind(q.kind, q.required, q.optional)
+        self.schema.register_node_kind(q.kind, q.required, q.optional,
+                                       embed_field=q.embed_field)
         # Pre-create columns for typed fields
         type_map = {"string": "int32_interned", "int": "int64", "float": "float64"}
         for item in q.required + q.optional:

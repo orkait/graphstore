@@ -47,6 +47,41 @@ class WriteExecutor(ExecutorBase):
         content = "|".join(parts)
         return hashlib.sha256(content.encode()).hexdigest()[:12]
 
+    def _handle_vector(self, slot: int, kind: str, data: dict, explicit_vector: list[float] | None):
+        """Handle explicit VECTOR clause or auto-embed from schema EMBED field."""
+        if explicit_vector is not None and self._vector_store is not None:
+            vec = np.array(explicit_vector, dtype=np.float32)
+            self._vector_store.add(slot, vec)
+        elif explicit_vector is not None and self._vector_store is None:
+            # Need to lazily init vector store via GraphStore callback
+            if hasattr(self, '_ensure_vector_store_cb') and self._ensure_vector_store_cb:
+                vec = np.array(explicit_vector, dtype=np.float32)
+                self._ensure_vector_store_cb(len(vec))
+                self._vector_store.add(slot, vec)
+        elif self._embedder and self._vector_store is not None:
+            self._try_auto_embed(slot, kind, data)
+        elif self._embedder and self._vector_store is None:
+            # Check if auto-embed needed, lazily init vector store
+            kind_def = self.schema.describe_node_kind(kind)
+            if kind_def and kind_def.get("embed_field"):
+                embed_field = kind_def["embed_field"]
+                text = data.get(embed_field)
+                if text and isinstance(text, str):
+                    if hasattr(self, '_ensure_vector_store_cb') and self._ensure_vector_store_cb:
+                        self._ensure_vector_store_cb(self._embedder.dims)
+                        vec = self._embedder.encode_documents([text])[0]
+                        self._vector_store.add(slot, vec)
+
+    def _try_auto_embed(self, slot: int, kind: str, data: dict):
+        """Auto-embed if schema has EMBED field defined for this kind."""
+        kind_def = self.schema.describe_node_kind(kind)
+        if kind_def and kind_def.get("embed_field"):
+            embed_field = kind_def["embed_field"]
+            text = data.get(embed_field)
+            if text and isinstance(text, str):
+                vec = self._embedder.encode_documents([text])[0]
+                self._vector_store.add(slot, vec)
+
     def _create_node(self, q: CreateNode) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
         kind = data.pop("kind", "default")
@@ -63,6 +98,10 @@ class WriteExecutor(ExecutorBase):
             str_id = self.store.string_table.intern(node_id)
             slot = self.store.id_to_slot[str_id]
             self.store.columns.set_reserved(slot, "__context__", self.store._active_context)
+        # Handle vector: explicit VECTOR clause or auto-embed
+        str_id = self.store.string_table.intern(node_id)
+        slot = self.store.id_to_slot[str_id]
+        self._handle_vector(slot, kind, data, q.vector)
         node = self.store.get_node(node_id)
         return Result(kind="node", data=node, count=1)
 
@@ -79,10 +118,19 @@ class WriteExecutor(ExecutorBase):
         self.store.upsert_node(q.id, kind, data)
         # Handle TTL
         self._apply_ttl(q.id, q.expires_in, q.expires_at)
+        # Handle vector: explicit VECTOR clause or auto-embed
+        str_id = self.store.string_table.intern(q.id)
+        slot = self.store.id_to_slot[str_id]
+        self._handle_vector(slot, kind, data, q.vector)
         node = self.store.get_node(q.id)
         return Result(kind="node", data=node, count=1)
 
     def _delete_node(self, q: DeleteNode) -> Result:
+        # Remove vector before deleting the node (need slot while node still exists)
+        if self._vector_store:
+            slot = self._resolve_slot(q.id)
+            if slot is not None:
+                self._vector_store.remove(slot)
         self.store.delete_node(q.id)
         return Result(kind="ok", data={"id": q.id}, count=1)
 
