@@ -68,6 +68,9 @@ class GraphStore:
             # Try to load existing data
             self._store, self._schema = _load_fn(self._conn)
             self._store._ceiling_bytes = self._ceiling_bytes
+            # Restore vector store from persisted state
+            if hasattr(self._store, 'vectors') and self._store.vectors is not None:
+                self._vector_store = self._store.vectors
         else:
             self._store = CoreStore(ceiling_bytes=self._ceiling_bytes)
             self._schema = SchemaRegistry()
@@ -77,7 +80,9 @@ class GraphStore:
                                   embedder=self._embedder,
                                   vector_store=self._vector_store)
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
-        self._sys_executor = SystemExecutor(self._store, self._schema, self._conn)
+        self._sys_executor = SystemExecutor(self._store, self._schema, self._conn,
+                                               embedder=self._embedder,
+                                               vector_store=self._vector_store)
 
         # Replay WAL (must happen after executor is created)
         if self._path and self._conn:
@@ -88,8 +93,11 @@ class GraphStore:
         start = time.perf_counter_ns()
 
         # Sync vector store reference (may have been lazily created)
-        if self._vector_store is not None and self._executor._vector_store is not self._vector_store:
-            self._executor._vector_store = self._vector_store
+        if self._vector_store is not None:
+            if self._executor._vector_store is not self._vector_store:
+                self._executor._vector_store = self._vector_store
+            if self._sys_executor._vector_store is not self._vector_store:
+                self._sys_executor._vector_store = self._vector_store
 
         try:
             ast = parse(query)
@@ -108,6 +116,10 @@ class GraphStore:
                     result = Result(kind="ok", data=None, count=0)
                 else:
                     result = self._sys_executor.execute(ast)
+                    # Sync vector store back from sys executor (rollback may change it)
+                    if self._sys_executor._vector_store is not self._vector_store:
+                        self._vector_store = self._sys_executor._vector_store
+                        self._executor._vector_store = self._vector_store
             else:
                 # Check if it's a write - log to WAL before executing
                 is_write = isinstance(ast, (
@@ -150,6 +162,7 @@ class GraphStore:
         """Force persist to disk. No-op if path is None."""
         if self._conn is None:
             return
+        self._store.vectors = self._vector_store  # expose to serializer
         _checkpoint_fn(self._store, self._schema, self._conn)
 
     def set_script(self, script: str) -> None:

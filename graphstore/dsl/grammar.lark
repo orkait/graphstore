@@ -174,6 +174,7 @@ system_query: "SYS" sys_command
             | sys_clear | sys_wal
             | sys_expire | sys_contradictions
             | sys_snapshot | sys_rollback | sys_snapshots
+            | sys_duplicates | sys_embedders
 
 sys_stats:      "STATS" STATS_TARGET?
 STATS_TARGET:   "NODES" | "EDGES" | "MEMORY" | "WAL"
@@ -208,6 +209,10 @@ sys_contradictions:  "CONTRADICTIONS" where_clause? "FIELD" IDENTIFIER "GROUP" "
 sys_snapshot: "SNAPSHOT" STRING
 sys_rollback: "ROLLBACK" "TO" STRING
 sys_snapshots: "SNAPSHOTS"
+
+sys_duplicates: "DUPLICATES" where_clause? threshold_clause?
+threshold_clause: "THRESHOLD" NUMBER
+sys_embedders: "EMBEDDERS"
 
 CLEAR_TARGET: "LOG" | "CACHE"
 WAL_ACTION: "STATUS" | "REPLAY"

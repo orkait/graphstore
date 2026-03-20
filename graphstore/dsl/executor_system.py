@@ -20,7 +20,9 @@ from graphstore.dsl.ast_nodes import (
     SysClear,
     SysContradictions,
     SysDescribe,
+    SysDuplicates,
     SysEdgeKinds,
+    SysEmbedders,
     SysExpire,
     SysExplain,
     SysFailedQueries,
@@ -49,10 +51,14 @@ class SystemExecutor:
         store: CoreStore,
         schema: SchemaRegistry,
         conn: sqlite3.Connection | None = None,
+        embedder=None,
+        vector_store=None,
     ):
         self.store = store
         self.schema = schema
         self.conn = conn
+        self._embedder = embedder
+        self._vector_store = vector_store
         self._start_time = time.time()
 
     def execute(self, ast) -> Result:
@@ -83,6 +89,8 @@ class SystemExecutor:
             SysSnapshot: self._snapshot,
             SysRollback: self._rollback,
             SysSnapshots: self._snapshots,
+            SysDuplicates: self._duplicates,
+            SysEmbedders: self._embedders,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -472,19 +480,28 @@ class SystemExecutor:
     def _snapshot(self, q: SysSnapshot) -> Result:
         """SYS SNAPSHOT: save full graph state to a named snapshot."""
         store = self.store
+        ns = store._next_slot
         snap = {
             "columns": store.columns.snapshot_arrays(),
-            "node_ids": store.node_ids[:store._next_slot].copy(),
-            "node_kinds": store.node_kinds[:store._next_slot].copy(),
+            "node_ids": store.node_ids[:ns].copy(),
+            "node_kinds": store.node_kinds[:ns].copy(),
             "tombstones": set(store.node_tombstones),
             "edges_by_type": {k: list(v) for k, v in store._edges_by_type.items()},
             "edge_keys": set(store._edge_keys),
             "id_to_slot": dict(store.id_to_slot),
-            "next_slot": store._next_slot,
+            "next_slot": ns,
             "count": store._count,
             "capacity": store._capacity,
             "active_context": store._active_context,
         }
+        # Snapshot vector state
+        vs = self._vector_store
+        if vs is not None and vs.count() > 0:
+            snap["vector_index"] = vs.save()
+            snap["vector_presence"] = vs._has_vector[:ns].copy()
+            snap["vector_dims"] = vs.dims
+        else:
+            snap["vector_index"] = None
         store._snapshots[q.name] = snap
         return Result(kind="ok", data={"snapshot": q.name}, count=1)
 
@@ -521,6 +538,16 @@ class SystemExecutor:
         store._count = snap["count"]
         store._active_context = snap.get("active_context")
 
+        # Restore vector state
+        if snap.get("vector_index") is not None:
+            from graphstore.vector.store import VectorStore
+            vs = VectorStore(dims=snap["vector_dims"], capacity=store._capacity)
+            vs.load(snap["vector_index"])
+            vs._has_vector[:len(snap["vector_presence"])] = snap["vector_presence"]
+            self._vector_store = vs
+        else:
+            self._vector_store = None
+
         # Rebuild derived state
         store._rebuild_edges()
 
@@ -530,3 +557,78 @@ class SystemExecutor:
         """SYS SNAPSHOTS: list all named snapshots."""
         names = list(self.store._snapshots.keys())
         return Result(kind="snapshots", data=names, count=len(names))
+
+    def _duplicates(self, q: SysDuplicates) -> Result:
+        """SYS DUPLICATES: find near-duplicate nodes by vector similarity."""
+        vs = self._vector_store
+        if vs is None or vs.count() == 0:
+            return Result(kind="duplicates", data=[], count=0)
+
+        store = self.store
+        n = store._next_slot
+
+        # Build live mask
+        mask = store.compute_live_mask(n)
+
+        # Apply optional WHERE filter
+        if q.where:
+            expr = q.where.expr
+            if isinstance(expr, Condition) and expr.field == "kind" and expr.op == "=":
+                kind_mask = store._live_mask(expr.value)
+                mask = mask & kind_mask
+
+        # Collect slots that are both live and have vectors
+        candidate_slots = []
+        for slot in range(n):
+            if mask[slot] and vs.has_vector(slot):
+                candidate_slots.append(slot)
+
+        if len(candidate_slots) < 2:
+            return Result(kind="duplicates", data=[], count=0)
+
+        # For each candidate, find its nearest neighbor among candidates
+        seen = set()
+        pairs = []
+        candidate_mask = np.zeros(max(n, vs._capacity), dtype=bool)
+        for s in candidate_slots:
+            candidate_mask[s] = True
+
+        for slot in candidate_slots:
+            vec = vs.get_vector(slot)
+            if vec is None:
+                continue
+            # Search for top-2 (first result may be self)
+            slots_found, dists = vs.search(vec, k=2, mask=candidate_mask)
+            for found_slot, dist in zip(slots_found, dists):
+                found_slot = int(found_slot)
+                if found_slot == slot:
+                    continue
+                # cosine similarity = 1 - cosine distance
+                similarity = 1.0 - float(dist)
+                if similarity >= q.threshold:
+                    pair_key = (min(slot, found_slot), max(slot, found_slot))
+                    if pair_key not in seen:
+                        seen.add(pair_key)
+                        # Resolve IDs
+                        id_a = store.string_table.lookup(int(store.node_ids[pair_key[0]]))
+                        id_b = store.string_table.lookup(int(store.node_ids[pair_key[1]]))
+                        pairs.append({
+                            "node_a": id_a,
+                            "node_b": id_b,
+                            "similarity": round(similarity, 6),
+                        })
+
+        return Result(kind="duplicates", data=pairs, count=len(pairs))
+
+    def _embedders(self, q: SysEmbedders) -> Result:
+        """SYS EMBEDDERS: list active embedder info."""
+        info = []
+        if self._embedder:
+            info.append({
+                "name": self._embedder.name,
+                "dims": self._embedder.dims,
+                "status": "active",
+            })
+        else:
+            info.append({"name": "none", "status": "no embedder configured"})
+        return Result(kind="embedders", data=info, count=len(info))

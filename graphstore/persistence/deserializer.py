@@ -139,6 +139,24 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
         for field in indexed_fields:
             store.add_index(field)
 
+    # Load vector index if present
+    dims_row = conn.execute("SELECT data FROM blobs WHERE key='vector_dims'").fetchone()
+    if dims_row:
+        from graphstore.vector.store import VectorStore
+        dims = int(dims_row[0])
+        store.vectors = VectorStore(dims=dims, capacity=capacity)
+
+        index_row = conn.execute("SELECT data FROM blobs WHERE key='vector_index'").fetchone()
+        if index_row:
+            store.vectors.load(index_row[0])
+
+        pres_row = conn.execute("SELECT data, dtype FROM blobs WHERE key='vector_presence'").fetchone()
+        if pres_row:
+            loaded = np.frombuffer(pres_row[0], dtype=np.dtype(pres_row[1])).copy()
+            store.vectors._has_vector[:len(loaded)] = loaded
+    else:
+        store.vectors = None
+
     # Load schema
     schema = SchemaRegistry()
     schema_row = conn.execute("SELECT data FROM blobs WHERE key='schema'").fetchone()
