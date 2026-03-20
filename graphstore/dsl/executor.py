@@ -75,7 +75,6 @@ class Executor:
 
     def execute(self, ast) -> Result:
         """Execute a parsed AST node and return a Result."""
-        self.store._ensure_edges_built()
         start = time.perf_counter_ns()
         result = self._dispatch(ast)
         elapsed = (time.perf_counter_ns() - start) // 1000
