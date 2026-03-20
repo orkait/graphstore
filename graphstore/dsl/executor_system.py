@@ -10,14 +10,18 @@ import sqlite3
 from graphstore.store import CoreStore
 from graphstore.schema import SchemaRegistry
 from graphstore.types import Result
+import numpy as np
+
 from graphstore.dsl.ast_nodes import (
     Condition,
     MatchQuery,
     NodesQuery,
     SysCheckpoint,
     SysClear,
+    SysContradictions,
     SysDescribe,
     SysEdgeKinds,
+    SysExpire,
     SysExplain,
     SysFailedQueries,
     SysFrequentQueries,
@@ -71,6 +75,8 @@ class SystemExecutor:
             SysRebuild: self._rebuild,
             SysClear: self._clear,
             SysWal: self._wal,
+            SysExpire: self._expire,
+            SysContradictions: self._contradictions,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -291,3 +297,138 @@ class SystemExecutor:
             # Will be wired up by GraphStore
             return Result(kind="ok", data=None, count=0)
         return Result(kind="ok", data=None, count=0)
+
+    def _expire(self, q: SysExpire) -> Result:
+        """SYS EXPIRE: tombstone nodes whose __expires_at__ has passed."""
+        n = self.store._next_slot
+        if n == 0:
+            return Result(kind="ok", data={"expired": 0}, count=0)
+
+        # Build live mask (non-tombstoned only, don't filter by expiry since we want to find expired)
+        mask = self.store.node_ids[:n] >= 0
+        if self.store.node_tombstones:
+            tomb_arr = np.array(list(self.store.node_tombstones), dtype=np.int32)
+            tomb_mask = np.zeros(n, dtype=bool)
+            valid = tomb_arr[tomb_arr < n]
+            if len(valid) > 0:
+                tomb_mask[valid] = True
+            mask = mask & ~tomb_mask
+
+        # Apply optional WHERE filter (kind filter)
+        if q.where:
+            from graphstore.dsl.executor import Executor
+            kind_filter = None
+            expr = q.where.expr
+            if isinstance(expr, Condition) and expr.field == "kind" and expr.op == "=":
+                kind_filter = expr.value
+            if kind_filter:
+                kind_mask = self.store._live_mask(kind_filter)
+                mask = mask & kind_mask
+
+        # Find expired nodes
+        expires = self.store.columns.get_column("__expires_at__", n)
+        if expires is None:
+            return Result(kind="ok", data={"expired": 0}, count=0)
+
+        col, pres, _ = expires
+        now_ms = int(time.time() * 1000)
+        expired_mask = mask & pres & (col > 0) & (col < now_ms)
+
+        expired_slots = np.nonzero(expired_mask)[0]
+        expired_count = 0
+        for slot_idx in expired_slots:
+            nid = self.store._slot_to_id(int(slot_idx))
+            if nid:
+                try:
+                    self.store.delete_node(nid)
+                    expired_count += 1
+                except Exception:
+                    pass
+
+        return Result(kind="ok", data={"expired": expired_count}, count=expired_count)
+
+    def _contradictions(self, q: SysContradictions) -> Result:
+        """SYS CONTRADICTIONS: find groups with >1 distinct value for a field."""
+        n = self.store._next_slot
+        if n == 0:
+            return Result(kind="contradictions", data=[], count=0)
+
+        # Build live mask
+        mask = self.store.node_ids[:n] >= 0
+        if self.store.node_tombstones:
+            tomb_arr = np.array(list(self.store.node_tombstones), dtype=np.int32)
+            tomb_mask = np.zeros(n, dtype=bool)
+            valid = tomb_arr[tomb_arr < n]
+            if len(valid) > 0:
+                tomb_mask[valid] = True
+            mask = mask & ~tomb_mask
+
+        # Retracted filter
+        retracted = self.store.columns.get_column("__retracted__", n)
+        if retracted is not None:
+            col_r, pres_r, _ = retracted
+            mask = mask & ~(pres_r & (col_r == 1))
+
+        # TTL filter
+        expires = self.store.columns.get_column("__expires_at__", n)
+        if expires is not None:
+            col_e, pres_e, _ = expires
+            now_ms = int(time.time() * 1000)
+            mask = mask & ~(pres_e & (col_e > 0) & (col_e < now_ms))
+
+        # Apply WHERE filter (kind filter)
+        if q.where:
+            expr = q.where.expr
+            if isinstance(expr, Condition) and expr.field == "kind" and expr.op == "=":
+                kind_mask = self.store._live_mask(expr.value)
+                mask = mask & kind_mask
+
+        filtered_count = int(np.sum(mask))
+        if filtered_count == 0:
+            return Result(kind="contradictions", data=[], count=0)
+
+        # Get group_by and field columns
+        group_field = q.group_by
+        value_field = q.field
+
+        if not self.store.columns.has_column(group_field):
+            return Result(kind="contradictions", data=[], count=0)
+        if not self.store.columns.has_column(value_field):
+            return Result(kind="contradictions", data=[], count=0)
+
+        group_col = self.store.columns._columns[group_field][:n][mask]
+        value_col = self.store.columns._columns[value_field][:n][mask]
+        group_dtype = self.store.columns._dtypes[group_field]
+        value_dtype = self.store.columns._dtypes[value_field]
+
+        # Group by group_col, find groups with >1 distinct value
+        unique_groups = np.unique(group_col)
+        contradictions = []
+        for gkey in unique_groups:
+            group_mask = group_col == gkey
+            values_in_group = value_col[group_mask]
+            unique_vals = np.unique(values_in_group)
+            if len(unique_vals) > 1:
+                # Resolve group key
+                if group_dtype == "int32_interned":
+                    group_name = self.store.string_table.lookup(int(gkey))
+                elif group_dtype == "float64":
+                    group_name = float(gkey)
+                else:
+                    group_name = int(gkey)
+                # Resolve values
+                resolved_vals = []
+                for v in unique_vals:
+                    if value_dtype == "int32_interned":
+                        resolved_vals.append(self.store.string_table.lookup(int(v)))
+                    elif value_dtype == "float64":
+                        resolved_vals.append(float(v))
+                    else:
+                        resolved_vals.append(int(v))
+                contradictions.append({
+                    "group": group_name,
+                    "values": resolved_vals,
+                    "count": len(unique_vals),
+                })
+
+        return Result(kind="contradictions", data=contradictions, count=len(contradictions))

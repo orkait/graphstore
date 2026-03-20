@@ -206,6 +206,8 @@ class CreateNode:
     id: str | None  # None for AUTO ID
     fields: list[FieldPair]
     auto_id: bool = False
+    expires_in: tuple[int, str] | None = None   # (amount, unit) e.g. (30, "m")
+    expires_at: str | None = None                # ISO-8601 string
 
 @dataclass
 class VarAssign:
@@ -221,6 +223,8 @@ class UpdateNode:
 class UpsertNode:
     id: str
     fields: list[FieldPair]
+    expires_in: tuple[int, str] | None = None
+    expires_at: str | None = None
 
 @dataclass
 class DeleteNode:
@@ -264,6 +268,28 @@ class Increment:
 @dataclass
 class Batch:
     statements: list  # list of write queries
+
+@dataclass
+class AssertStmt:
+    id: str
+    fields: list[FieldPair]
+    confidence: float | None = None
+    source: str | None = None
+
+@dataclass
+class RetractStmt:
+    id: str
+    reason: str | None = None
+
+@dataclass
+class UpdateNodes:
+    where: WhereClause
+    fields: list[FieldPair]
+
+@dataclass
+class MergeStmt:
+    source_id: str
+    target_id: str
 
 # --- System queries ---
 @dataclass
@@ -332,3 +358,13 @@ class SysClear:
 @dataclass
 class SysWal:
     action: str  # "STATUS" or "REPLAY"
+
+@dataclass
+class SysExpire:
+    where: WhereClause | None = None
+
+@dataclass
+class SysContradictions:
+    where: WhereClause | None = None
+    field: str = ""
+    group_by: str = ""
