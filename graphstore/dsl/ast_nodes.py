@@ -90,6 +90,17 @@ class DistanceQuery:
     max_depth: int
 
 @dataclass
+class WeightedShortestPathQuery:
+    from_id: str
+    to_id: str
+    where: WhereClause | None = None
+
+@dataclass
+class WeightedDistanceQuery:
+    from_id: str
+    to_id: str
+
+@dataclass
 class AncestorsQuery:
     node_id: str
     depth: int

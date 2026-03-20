@@ -10,6 +10,7 @@ start: statement
 // --- Reads ---
 ?read_query: node_q | nodes_q | edges_q | traverse_q | subgraph_q
            | path_q | paths_q | shortest_q | distance_q
+           | weighted_sp_q | weighted_dist_q
            | ancestors_q | descendants_q | common_q | match_q
 
 node_q:        "NODE" STRING
@@ -21,6 +22,8 @@ path_q:        "PATH" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER where_clause?
 paths_q:       "PATHS" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER where_clause?
 shortest_q:    "SHORTEST" "PATH" "FROM" STRING "TO" STRING where_clause?
 distance_q:    "DISTANCE" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER
+weighted_sp_q: "WEIGHTED" "SHORTEST" "PATH" "FROM" STRING "TO" STRING where_clause?
+weighted_dist_q: "WEIGHTED" "DISTANCE" "FROM" STRING "TO" STRING
 ancestors_q:   "ANCESTORS" "OF" STRING "DEPTH" NUMBER where_clause?
 descendants_q: "DESCENDANTS" "OF" STRING "DEPTH" NUMBER where_clause?
 common_q:      "COMMON" "NEIGHBORS" "OF" STRING "AND" STRING where_clause?

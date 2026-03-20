@@ -1,3 +1,4 @@
+import heapq
 import numpy as np
 from scipy.sparse import csr_matrix
 
@@ -153,6 +154,54 @@ def find_all_paths(
 
     dfs(source, [source], {source}, 0)
     return paths
+
+
+def dijkstra(
+    matrix: csr_matrix,
+    source: int,
+    target: int,
+    max_cost: float = float('inf'),
+) -> tuple[list[int] | None, float]:
+    """Weighted shortest path using Dijkstra's algorithm.
+
+    Edge weights come from the CSR matrix data array.
+    Returns (path, total_cost) or (None, inf) if no path exists.
+    """
+    if source == target:
+        return [source], 0.0
+
+    dist = {source: 0.0}
+    prev: dict[int, int | None] = {source: None}
+    heap = [(0.0, source)]
+
+    while heap:
+        d, node = heapq.heappop(heap)
+        if node == target:
+            # Reconstruct path
+            path = []
+            n: int | None = target
+            while n is not None:
+                path.append(n)
+                n = prev[n]
+            path.reverse()
+            return path, d
+        if d > dist.get(node, float('inf')):
+            continue
+        if d > max_cost:
+            continue
+
+        start = matrix.indptr[node]
+        end = matrix.indptr[node + 1]
+        for idx in range(start, end):
+            nb = int(matrix.indices[idx])
+            w = float(matrix.data[idx])
+            nd = d + w
+            if nd < dist.get(nb, float('inf')):
+                dist[nb] = nd
+                prev[nb] = node
+                heapq.heappush(heap, (nd, nb))
+
+    return None, float('inf')
 
 
 def common_neighbors(matrix: csr_matrix, node_a: int, node_b: int) -> np.ndarray:

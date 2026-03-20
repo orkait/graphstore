@@ -18,6 +18,8 @@ from graphstore.dsl.ast_nodes import (
     DegreeCondition,
     DeleteEdge,
     VarAssign,
+    WeightedShortestPathQuery,
+    WeightedDistanceQuery,
     DeleteEdges,
     DeleteNode,
     DeleteNodes,
@@ -50,6 +52,7 @@ from graphstore.path import (
     bfs_traverse,
     bidirectional_bfs,
     common_neighbors,
+    dijkstra,
     find_all_paths,
 )
 from graphstore.store import CoreStore
@@ -82,6 +85,8 @@ class Executor:
             PathsQuery: self._paths,
             ShortestPathQuery: self._shortest_path,
             DistanceQuery: self._distance,
+            WeightedShortestPathQuery: self._weighted_shortest_path,
+            WeightedDistanceQuery: self._weighted_distance,
             AncestorsQuery: self._ancestors,
             DescendantsQuery: self._descendants,
             CommonNeighborsQuery: self._common_neighbors,
@@ -277,6 +282,41 @@ class Executor:
         path = bidirectional_bfs(matrix, matrix_t, src_slot, tgt_slot, q.max_depth)
         dist = len(path) - 1 if path else -1
         return Result(kind="distance", data=dist, count=1)
+
+    def _weighted_shortest_path(self, q: WeightedShortestPathQuery) -> Result:
+        src_slot = self._resolve_slot(q.from_id)
+        tgt_slot = self._resolve_slot(q.to_id)
+        if src_slot is None or tgt_slot is None:
+            return Result(kind="path", data=None, count=0)
+
+        edge_type = self._extract_kind_from_where(q.where)
+        matrix = self.store.edge_matrices.get({edge_type} if edge_type else None)
+        if matrix is None:
+            return Result(kind="path", data=None, count=0)
+
+        path, cost = dijkstra(matrix, src_slot, tgt_slot)
+        if path is None:
+            return Result(kind="path", data=None, count=0)
+
+        path_ids = [self.store._slot_to_id(s) for s in path]
+        return Result(kind="path", data=path_ids, count=len(path_ids))
+
+    def _weighted_distance(self, q: WeightedDistanceQuery) -> Result:
+        src_slot = self._resolve_slot(q.from_id)
+        tgt_slot = self._resolve_slot(q.to_id)
+        if src_slot is None or tgt_slot is None:
+            return Result(kind="distance", data=-1, count=1)
+
+        matrix = self.store.edge_matrices.get(None)
+        if matrix is None:
+            if src_slot == tgt_slot:
+                return Result(kind="distance", data=0.0, count=1)
+            return Result(kind="distance", data=-1, count=1)
+
+        path, cost = dijkstra(matrix, src_slot, tgt_slot)
+        if path is None:
+            return Result(kind="distance", data=-1, count=1)
+        return Result(kind="distance", data=cost, count=1)
 
     def _ancestors(self, q: AncestorsQuery) -> Result:
         slot = self._resolve_slot(q.node_id)

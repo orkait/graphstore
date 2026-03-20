@@ -16,6 +16,8 @@ from graphstore.dsl.ast_nodes import (
     PathsQuery,
     ShortestPathQuery,
     DistanceQuery,
+    WeightedShortestPathQuery,
+    WeightedDistanceQuery,
     AncestorsQuery,
     DescendantsQuery,
     CommonNeighborsQuery,
@@ -152,6 +154,19 @@ class DSLTransformer(Transformer):
             from_id=self._str(args[0]),
             to_id=self._str(args[1]),
             max_depth=self._num(args[2]),
+        )
+
+    def weighted_sp_q(self, args):
+        return WeightedShortestPathQuery(
+            from_id=self._str(args[0]),
+            to_id=self._str(args[1]),
+            where=self._find(args[2:], WhereClause),
+        )
+
+    def weighted_dist_q(self, args):
+        return WeightedDistanceQuery(
+            from_id=self._str(args[0]),
+            to_id=self._str(args[1]),
         )
 
     def ancestors_q(self, args):
