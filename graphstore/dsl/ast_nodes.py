@@ -10,6 +10,21 @@ class Condition:
     value: Any   # str, int, float, or None (for NULL)
 
 @dataclass
+class ContainsCondition:
+    field: str
+    value: str
+
+@dataclass
+class LikeCondition:
+    field: str
+    pattern: str  # SQL-like: % = any, _ = single char
+
+@dataclass
+class InCondition:
+    field: str
+    values: list
+
+@dataclass
 class DegreeCondition:
     degree_type: str   # "INDEGREE" or "OUTDEGREE"
     edge_kind: str | None  # optional edge kind filter

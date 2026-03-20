@@ -82,8 +82,11 @@ or_expr: and_expr "OR" or_expr | and_expr
 and_expr: not_expr "AND" and_expr | not_expr
 not_expr: "NOT" not_expr -> not_term
         | atom
-?atom: condition | "(" expr ")" | degree_condition
+?atom: condition | contains_cond | like_cond | in_cond | "(" expr ")" | degree_condition
 condition: IDENTIFIER OP value
+contains_cond: IDENTIFIER "CONTAINS" STRING
+like_cond: IDENTIFIER "LIKE" STRING
+in_cond: IDENTIFIER "IN" "(" value ("," value)* ")"
 degree_condition: degree_kw IDENTIFIER? OP NUMBER
 degree_kw: "INDEGREE" -> indegree
           | "OUTDEGREE" -> outdegree

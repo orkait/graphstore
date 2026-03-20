@@ -13,6 +13,9 @@ from graphstore.dsl.ast_nodes import (
     Batch,
     CommonNeighborsQuery,
     Condition,
+    ContainsCondition,
+    LikeCondition,
+    InCondition,
     CreateEdge,
     CreateNode,
     DegreeCondition,
@@ -59,13 +62,15 @@ from graphstore.path import (
     dijkstra,
     find_all_paths,
 )
+from graphstore.schema import SchemaRegistry
 from graphstore.store import CoreStore
 from graphstore.types import Result
 
 
 class Executor:
-    def __init__(self, store: CoreStore):
+    def __init__(self, store: CoreStore, schema: SchemaRegistry | None = None):
         self.store = store
+        self.schema = schema or SchemaRegistry()
         self.cost_threshold = 100_000
 
     def execute(self, ast) -> Result:
@@ -592,6 +597,7 @@ class Executor:
     def _create_node(self, q: CreateNode) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
         kind = data.pop("kind", "default")
+        self.schema.validate_node(kind, data)
         if q.auto_id:
             node_id = self._generate_auto_id(kind, data)
         else:
@@ -609,6 +615,7 @@ class Executor:
     def _upsert_node(self, q: UpsertNode) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
         kind = data.pop("kind", "default")
+        self.schema.validate_node(kind, data)
         self.store.upsert_node(q.id, kind, data)
         node = self.store.get_node(q.id)
         return Result(kind="node", data=node, count=1)
@@ -632,6 +639,11 @@ class Executor:
     def _create_edge(self, q: CreateEdge) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
         kind = data.pop("kind", "default")
+        # Validate edge endpoint kinds if schema is registered
+        src_node = self.store.get_node(q.source)
+        tgt_node = self.store.get_node(q.target)
+        if src_node and tgt_node:
+            self.schema.validate_edge(kind, src_node["kind"], tgt_node["kind"])
         self.store.put_edge(q.source, q.target, kind, data if data else None)
         return Result(kind="edges", data=[{"source": q.source, "target": q.target, "kind": kind}], count=1)
 
@@ -777,6 +789,34 @@ class Executor:
         """Evaluate a WHERE expression against a data dict."""
         if isinstance(expr, Condition):
             return self._eval_condition(expr, data)
+        elif isinstance(expr, ContainsCondition):
+            actual = data.get(expr.field)
+            if actual is None:
+                return False
+            return expr.value in str(actual)
+        elif isinstance(expr, LikeCondition):
+            actual = data.get(expr.field)
+            if actual is None:
+                return False
+            import re
+            # Convert SQL LIKE pattern to regex: % -> .*, _ -> .
+            # Replace wildcards first, escape the rest, then restore wildcards
+            parts = []
+            i = 0
+            p = expr.pattern
+            while i < len(p):
+                if p[i] == '%':
+                    parts.append('.*')
+                elif p[i] == '_':
+                    parts.append('.')
+                else:
+                    parts.append(re.escape(p[i]))
+                i += 1
+            pattern = ''.join(parts)
+            return bool(re.fullmatch(pattern, str(actual)))
+        elif isinstance(expr, InCondition):
+            actual = data.get(expr.field)
+            return actual in expr.values
         elif isinstance(expr, DegreeCondition):
             return self._eval_degree_condition(expr, data)
         elif isinstance(expr, AndExpr):
