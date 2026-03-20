@@ -12,11 +12,12 @@ start: statement
            | path_q | paths_q | shortest_q | distance_q
            | weighted_sp_q | weighted_dist_q
            | ancestors_q | descendants_q | common_q | match_q
+           | count_q
 
 node_q:        "NODE" STRING
-nodes_q:       "NODES" where_clause? limit_clause?
-edges_q:       "EDGES" direction STRING where_clause?
-traverse_q:    "TRAVERSE" "FROM" STRING "DEPTH" NUMBER where_clause?
+nodes_q:       "NODES" where_clause? order_clause? limit_clause? offset_clause?
+edges_q:       "EDGES" direction STRING where_clause? limit_clause?
+traverse_q:    "TRAVERSE" "FROM" STRING "DEPTH" NUMBER where_clause? limit_clause?
 subgraph_q:    "SUBGRAPH" "FROM" STRING "DEPTH" NUMBER
 path_q:        "PATH" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER where_clause?
 paths_q:       "PATHS" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER where_clause?
@@ -28,6 +29,9 @@ ancestors_q:   "ANCESTORS" "OF" STRING "DEPTH" NUMBER where_clause?
 descendants_q: "DESCENDANTS" "OF" STRING "DEPTH" NUMBER where_clause?
 common_q:      "COMMON" "NEIGHBORS" "OF" STRING "AND" STRING where_clause?
 match_q:       "MATCH" pattern limit_clause?
+count_q:       "COUNT" count_target where_clause?
+count_target:  "NODES" -> count_nodes
+             | "EDGES" -> count_edges
 
 direction: "FROM" -> dir_from
          | "TO" -> dir_to
@@ -42,7 +46,7 @@ arrow: "-[" expr "]->"
 // --- Writes ---
 ?write_query: create_node | update_node | upsert_node
             | delete_node | delete_nodes
-            | create_edge | delete_edge | delete_edges
+            | create_edge | update_edge | delete_edge | delete_edges
             | increment
 
 create_node:  "CREATE" "NODE" STRING field_pairs
@@ -54,6 +58,7 @@ delete_nodes: "DELETE" "NODES" where_clause
 
 create_edge:  "CREATE" "EDGE" node_ref "->" node_ref field_pairs
 node_ref: STRING | VARIABLE
+update_edge:  "UPDATE" "EDGE" STRING "->" STRING "SET" field_pairs where_clause?
 delete_edge:  "DELETE" "EDGE" STRING "->" STRING where_clause?
 delete_edges: "DELETE" "EDGES" direction STRING where_clause?
 
@@ -63,7 +68,7 @@ batch: "BEGIN" _NL (_batch_stmt _NL)* "COMMIT"
 _batch_stmt: var_assign
            | create_node | update_node | upsert_node
            | delete_node | delete_nodes
-           | create_edge | delete_edge | delete_edges
+           | create_edge | update_edge | delete_edge | delete_edges
            | increment
 
 var_assign: VARIABLE "=" write_query
@@ -88,6 +93,10 @@ OP: "!=" | ">=" | "<=" | "=" | ">" | "<"
       | NUMBER -> val_number
       | "NULL" -> val_null
 limit_clause: "LIMIT" NUMBER
+offset_clause: "OFFSET" NUMBER
+order_clause: "ORDER" "BY" IDENTIFIER order_dir?
+order_dir: "ASC" -> order_asc
+          | "DESC" -> order_desc
 
 // =============================================
 // SYSTEM DSL

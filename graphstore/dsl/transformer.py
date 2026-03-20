@@ -33,8 +33,12 @@ from graphstore.dsl.ast_nodes import (
     DeleteNode,
     DeleteNodes,
     CreateEdge,
+    UpdateEdge,
     DeleteEdge,
     DeleteEdges,
+    OffsetClause,
+    OrderClause,
+    CountQuery,
     Increment,
     Batch,
     SysStats,
@@ -107,20 +111,24 @@ class DSLTransformer(Transformer):
 
     def nodes_q(self, args):
         where = self._find(args, WhereClause)
+        order = self._find(args, OrderClause)
         limit = self._find(args, LimitClause)
-        return NodesQuery(where=where, limit=limit)
+        offset = self._find(args, OffsetClause)
+        return NodesQuery(where=where, order=order, limit=limit, offset=offset)
 
     def edges_q(self, args):
         direction = args[0]  # "FROM" or "TO"
         node_id = self._str(args[1])
         where = self._find(args[2:], WhereClause)
-        return EdgesQuery(direction=direction, node_id=node_id, where=where)
+        limit = self._find(args[2:], LimitClause)
+        return EdgesQuery(direction=direction, node_id=node_id, where=where, limit=limit)
 
     def traverse_q(self, args):
         return TraverseQuery(
             start_id=self._str(args[0]),
             depth=self._num(args[1]),
             where=self._find(args[2:], WhereClause),
+            limit=self._find(args[2:], LimitClause),
         )
 
     def subgraph_q(self, args):
@@ -376,6 +384,39 @@ class DSLTransformer(Transformer):
 
     def limit_clause(self, args):
         return LimitClause(value=self._num(args[0]))
+
+    def offset_clause(self, args):
+        return OffsetClause(value=self._num(args[0]))
+
+    def order_clause(self, args):
+        field = str(args[0])
+        direction = args[1] if len(args) > 1 else "ASC"
+        return OrderClause(field=field, direction=direction)
+
+    def order_asc(self, args):
+        return "ASC"
+
+    def order_desc(self, args):
+        return "DESC"
+
+    def count_q(self, args):
+        target = args[0]
+        where = self._find(args[1:], WhereClause)
+        return CountQuery(target=target, where=where)
+
+    def count_nodes(self, args):
+        return "NODES"
+
+    def count_edges(self, args):
+        return "EDGES"
+
+    def update_edge(self, args):
+        return UpdateEdge(
+            source=self._str(args[0]),
+            target=self._str(args[1]),
+            fields=args[2] if len(args) > 2 and isinstance(args[2], list) else [],
+            where=self._find(args[2:], WhereClause),
+        )
 
     # --- System queries ---
     def sys_stats(self, args):

@@ -20,6 +20,10 @@ from graphstore.dsl.ast_nodes import (
     VarAssign,
     WeightedShortestPathQuery,
     WeightedDistanceQuery,
+    CountQuery,
+    UpdateEdge,
+    OffsetClause,
+    OrderClause,
     DeleteEdges,
     DeleteNode,
     DeleteNodes,
@@ -91,12 +95,14 @@ class Executor:
             DescendantsQuery: self._descendants,
             CommonNeighborsQuery: self._common_neighbors,
             MatchQuery: self._match,
+            CountQuery: self._count,
             CreateNode: self._create_node,
             UpdateNode: self._update_node,
             UpsertNode: self._upsert_node,
             DeleteNode: self._delete_node,
             DeleteNodes: self._delete_nodes,
             CreateEdge: self._create_edge,
+            UpdateEdge: self._update_edge,
             DeleteEdge: self._delete_edge,
             DeleteEdges: self._delete_edges,
             Increment: self._increment,
@@ -117,8 +123,13 @@ class Executor:
         nodes = self.store.get_all_nodes()
         if q.where:
             nodes = [n for n in nodes if self._eval_where(q.where.expr, n)]
+        if q.order:
+            reverse = q.order.direction == "DESC"
+            nodes.sort(key=lambda n: (n.get(q.order.field) is None, n.get(q.order.field, "")), reverse=reverse)
+        if q.offset:
+            nodes = nodes[q.offset.value:]
         if q.limit:
-            nodes = nodes[: q.limit.value]
+            nodes = nodes[:q.limit.value]
         return Result(kind="nodes", data=nodes, count=len(nodes))
 
     def _edges(self, q: EdgesQuery) -> Result:
@@ -130,6 +141,8 @@ class Executor:
         # Apply remaining filters if where has more than just kind
         if q.where and not self._is_simple_kind_filter(q.where):
             edges = [e for e in edges if self._eval_where(q.where.expr, e)]
+        if q.limit:
+            edges = edges[:q.limit.value]
         return Result(kind="edges", data=edges, count=len(edges))
 
     def _traverse(self, q: TraverseQuery) -> Result:
@@ -161,6 +174,8 @@ class Executor:
                 if node:
                     node["_depth"] = depth
                     nodes.append(node)
+        if q.limit:
+            nodes = nodes[:q.limit.value]
         return Result(kind="nodes", data=nodes, count=len(nodes))
 
     def _subgraph(self, q: SubgraphQuery) -> Result:
@@ -619,6 +634,44 @@ class Executor:
         kind = data.pop("kind", "default")
         self.store.put_edge(q.source, q.target, kind, data if data else None)
         return Result(kind="edges", data=[{"source": q.source, "target": q.target, "kind": kind}], count=1)
+
+    def _update_edge(self, q: UpdateEdge) -> Result:
+        kind = self._extract_kind_from_where(q.where)
+        update_data = {fp.name: fp.value for fp in q.fields}
+        # Find and update matching edges
+        updated = 0
+        for etype in ([kind] if kind else list(self.store._edges_by_type.keys())):
+            if etype not in self.store._edges_by_type:
+                continue
+            src_str_id = self.store.string_table.intern(q.source)
+            tgt_str_id = self.store.string_table.intern(q.target)
+            src_slot = self.store.id_to_slot.get(src_str_id)
+            tgt_slot = self.store.id_to_slot.get(tgt_str_id)
+            if src_slot is None or tgt_slot is None:
+                continue
+            for i, (s, t, d) in enumerate(self.store._edges_by_type[etype]):
+                if s == src_slot and t == tgt_slot:
+                    self.store._edges_by_type[etype][i] = (s, t, {**d, **update_data})
+                    updated += 1
+        if updated > 0:
+            self.store._edges_dirty = True
+            self.store._ensure_edges_built()
+        return Result(kind="ok", data={"source": q.source, "target": q.target, "updated": updated}, count=updated)
+
+    def _count(self, q: CountQuery) -> Result:
+        if q.target == "NODES":
+            if q.where:
+                nodes = self.store.get_all_nodes()
+                count = sum(1 for n in nodes if self._eval_where(q.where.expr, n))
+            else:
+                count = self.store.node_count
+        else:  # EDGES
+            if q.where:
+                edges = self.store.get_all_edges()
+                count = sum(1 for e in edges if self._eval_where(q.where.expr, e))
+            else:
+                count = self.store.edge_count
+        return Result(kind="count", data=count, count=count)
 
     def _delete_edge(self, q: DeleteEdge) -> Result:
         kind = self._extract_kind_from_where(q.where)
