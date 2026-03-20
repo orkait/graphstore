@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add document ingestion, storage, and image understanding to graphstore - the fourth engine (DocumentStore + Ingestor + tiered routing).
+**Goal:** Add document ingestion, persistent storage, and cross-document intelligence. SQLite as disk staging area, graph brain as intelligence layer.
 
-**Architecture:** DocumentStore is a SQLite table for raw blobs (text, images, JSON) keyed by node slot. Ingestors convert files to markdown via tiered routing: MarkItDown (general) → PyMuPDF4LLM (PDF structure) → Docling (hard PDFs) → VLM fallback (SmolVLM2/Qwen3-VL for images). Chunker splits markdown into searchable nodes. All orchestrated via DSL `INGEST` command.
+**Architecture:** Three-phase pipeline: INGEST (file → SQLite + graph nodes with summaries), EMBED (summaries → VectorStore, automatic), CONNECT (auto-wire cross-document relationships via vector similarity). DocumentStore is always on disk (SQLite). Summaries (~200 chars) live in columns + vectors for fast search. Full text fetched on demand via WITH DOCUMENT.
 
 **Tech Stack:** markitdown (Microsoft), pymupdf4llm, docling (IBM), SQLite (blobs), Ollama (vision models)
 
@@ -26,7 +26,8 @@
 | `graphstore/ingest/chunker.py` | Create | Text chunking (heading/paragraph/fixed) |
 | `graphstore/ingest/vision.py` | Create | VisionHandler (Ollama client) |
 | `graphstore/ingest/router.py` | Create | Tiered routing logic |
-| `graphstore/dsl/grammar.lark` | Modify | INGEST, DOCUMENT clause, WITH DOCUMENT |
+| `graphstore/ingest/connector.py` | Create | SYS CONNECT: auto-wire cross-doc relationships |
+| `graphstore/dsl/grammar.lark` | Modify | INGEST, DOCUMENT, WITH DOCUMENT, CONNECT |
 | `graphstore/dsl/ast_nodes.py` | Modify | IngestStmt, document fields |
 | `graphstore/dsl/transformer.py` | Modify | Transform new rules |
 | `graphstore/dsl/executor_writes.py` | Modify | _ingest, DOCUMENT on create |
