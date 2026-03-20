@@ -247,29 +247,6 @@ class TestGetMaskIn:
         assert cs.get_mask_in("missing", [1], 1) is None
 
 
-class TestRebuildFrom:
-    def test_rebuild_reconstructs_columns(self):
-        cs = ColumnStore(StringTable(), capacity=8)
-        node_data = [
-            {"score": 42, "name": "alice"},
-            {"score": 99, "name": "bob"},
-            None,
-        ]
-        cs.rebuild_from(node_data, 3)
-        assert cs.has_column("score")
-        assert cs.has_column("name")
-        mask = cs.get_mask("score", "=", 42, 3)
-        assert list(mask) == [True, False, False]
-
-    def test_rebuild_clears_old_columns(self):
-        cs = ColumnStore(StringTable(), capacity=8)
-        cs.set(0, {"old_field": 1})
-        assert cs.has_column("old_field")
-        cs.rebuild_from([{"new_field": 2}], 1)
-        assert not cs.has_column("old_field")
-        assert cs.has_column("new_field")
-
-
 class TestDeclareColumn:
     def test_declare_creates_empty_column(self):
         cs = ColumnStore(StringTable(), capacity=8)

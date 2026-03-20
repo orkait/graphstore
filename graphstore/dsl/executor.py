@@ -4,7 +4,6 @@ Handles all user read and write queries. System queries are handled
 separately by the server layer.
 """
 
-import copy
 import time
 from collections import deque
 

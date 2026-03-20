@@ -191,20 +191,6 @@ class ColumnStore:
         """Set a single field value at a slot. Auto-infers type like set()."""
         self.set(slot, {field: value})
 
-    def rebuild_from(self, node_data: list[dict | None], n: int) -> None:
-        """Clear all columns and re-scan data dicts[:n] to repopulate.
-
-        Accepts a list of dicts (may be None per slot). Used for batch
-        rollback and deserialization migration.
-        """
-        self._columns.clear()
-        self._presence.clear()
-        self._dtypes.clear()
-        for slot in range(n):
-            data = node_data[slot]
-            if data is not None:
-                self.set(slot, data)
-
     def snapshot_arrays(self) -> dict[str, tuple]:
         """Return deep copies of all column arrays for snapshot/rollback.
 
