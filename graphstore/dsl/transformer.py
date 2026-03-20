@@ -49,6 +49,10 @@ from graphstore.dsl.ast_nodes import (
     CountQuery,
     Increment,
     Batch,
+    AssertStmt,
+    RetractStmt,
+    UpdateNodes,
+    MergeStmt,
     SysStats,
     SysKinds,
     SysEdgeKinds,
@@ -64,6 +68,8 @@ from graphstore.dsl.ast_nodes import (
     SysRebuild,
     SysClear,
     SysWal,
+    SysExpire,
+    SysContradictions,
 )
 
 
@@ -266,16 +272,24 @@ class DSLTransformer(Transformer):
 
     # --- Writes ---
     def create_node(self, args):
+        fields = args[1] if isinstance(args[1], list) else []
+        exp_in, exp_at = self._find_expires(args[2:])
         return CreateNode(
             id=self._str(args[0]),
-            fields=args[1] if isinstance(args[1], list) else [],
+            fields=fields,
+            expires_in=exp_in,
+            expires_at=exp_at,
         )
 
     def create_node_auto(self, args):
+        fields = args[0] if isinstance(args[0], list) else []
+        exp_in, exp_at = self._find_expires(args[1:])
         return CreateNode(
             id=None,
-            fields=args[0] if isinstance(args[0], list) else [],
+            fields=fields,
             auto_id=True,
+            expires_in=exp_in,
+            expires_at=exp_at,
         )
 
     def var_assign(self, args):
@@ -301,10 +315,57 @@ class DSLTransformer(Transformer):
         )
 
     def upsert_node(self, args):
+        fields = args[1] if isinstance(args[1], list) else []
+        exp_in, exp_at = self._find_expires(args[2:])
         return UpsertNode(
             id=self._str(args[0]),
-            fields=args[1] if isinstance(args[1], list) else [],
+            fields=fields,
+            expires_in=exp_in,
+            expires_at=exp_at,
         )
+
+    def expires_in(self, args):
+        return ("expires_in", self._num(args[0]), str(args[1]))
+
+    def expires_at(self, args):
+        return ("expires_at", self._str(args[0]))
+
+    def assert_stmt(self, args):
+        node_id = self._str(args[0])
+        fields = args[1] if isinstance(args[1], list) else []
+        confidence = None
+        source = None
+        for a in args[2:]:
+            if isinstance(a, tuple) and a[0] == "confidence":
+                confidence = a[1]
+            elif isinstance(a, tuple) and a[0] == "source":
+                source = a[1]
+        return AssertStmt(id=node_id, fields=fields, confidence=confidence, source=source)
+
+    def confidence_clause(self, args):
+        return ("confidence", self._num(args[0]))
+
+    def source_clause(self, args):
+        return ("source", self._str(args[0]))
+
+    def retract_stmt(self, args):
+        node_id = self._str(args[0])
+        reason = None
+        for a in args[1:]:
+            if isinstance(a, tuple) and a[0] == "reason":
+                reason = a[1]
+        return RetractStmt(id=node_id, reason=reason)
+
+    def reason_clause(self, args):
+        return ("reason", self._str(args[0]))
+
+    def update_nodes(self, args):
+        where = args[0]
+        fields = args[1] if isinstance(args[1], list) else []
+        return UpdateNodes(where=where, fields=fields)
+
+    def merge_stmt(self, args):
+        return MergeStmt(source_id=self._str(args[0]), target_id=self._str(args[1]))
 
     def delete_node(self, args):
         return DeleteNode(id=self._str(args[0]))
@@ -599,6 +660,27 @@ class DSLTransformer(Transformer):
         action = str(args[0])
         return SysWal(action=action)
 
+    def sys_expire(self, args):
+        where = self._find(args, WhereClause)
+        return SysExpire(where=where)
+
+    def sys_contradictions(self, args):
+        where = self._find(args, WhereClause)
+        # The last two args are IDENTIFIER tokens: field, group_by
+        identifiers = [str(a) for a in args if isinstance(a, str) and not isinstance(a, Token)]
+        # Actually, IDENTIFIER tokens are strings after transformation
+        # Filter out WhereClause and collect remaining string identifiers
+        idents = []
+        for a in args:
+            if isinstance(a, WhereClause):
+                continue
+            if isinstance(a, (str, Token)) and not isinstance(a, WhereClause):
+                idents.append(str(a))
+        # idents should be [field, group_by_field]
+        field = idents[0] if len(idents) >= 1 else ""
+        group_by = idents[1] if len(idents) >= 2 else ""
+        return SysContradictions(where=where, field=field, group_by=group_by)
+
     def typed_ident_with_type(self, args):
         return (str(args[0]), str(args[1]))
 
@@ -629,3 +711,15 @@ class DSLTransformer(Transformer):
             if isinstance(a, cls):
                 return a
         return None
+
+    def _find_expires(self, args):
+        """Extract expires_in or expires_at from args. Returns (exp_in, exp_at)."""
+        exp_in = None
+        exp_at = None
+        for a in args:
+            if isinstance(a, tuple):
+                if a[0] == "expires_in":
+                    exp_in = (int(a[1]), a[2])
+                elif a[0] == "expires_at":
+                    exp_at = a[1]
+        return exp_in, exp_at

@@ -64,13 +64,28 @@ arrow: "-[" expr "]->"
             | delete_node | delete_nodes
             | create_edge | update_edge | delete_edge | delete_edges
             | increment
+            | assert_stmt | retract_stmt | update_nodes | merge_stmt
 
-create_node:  "CREATE" "NODE" STRING field_pairs
-            | "CREATE" "NODE" "AUTO" field_pairs -> create_node_auto
+create_node:  "CREATE" "NODE" STRING field_pairs expires_clause?
+            | "CREATE" "NODE" "AUTO" field_pairs expires_clause? -> create_node_auto
 update_node:  "UPDATE" "NODE" STRING "SET" field_pairs
-upsert_node:  "UPSERT" "NODE" STRING field_pairs
+upsert_node:  "UPSERT" "NODE" STRING field_pairs expires_clause?
 delete_node:  "DELETE" "NODE" STRING
 delete_nodes: "DELETE" "NODES" where_clause
+
+assert_stmt:  "ASSERT" STRING field_pairs confidence_clause? source_clause?
+confidence_clause: "CONFIDENCE" NUMBER
+source_clause: "SOURCE" STRING
+
+retract_stmt: "RETRACT" STRING reason_clause?
+reason_clause: "REASON" STRING
+
+update_nodes: "UPDATE" "NODES" where_clause "SET" field_pairs
+
+merge_stmt:   "MERGE" "NODE" STRING "INTO" STRING
+
+expires_clause: "EXPIRES" "IN" NUMBER TIME_UNIT -> expires_in
+              | "EXPIRES" "AT" STRING           -> expires_at
 
 create_edge:  "CREATE" "EDGE" node_ref "->" node_ref field_pairs
 node_ref: STRING | VARIABLE
@@ -86,6 +101,7 @@ _batch_stmt: var_assign
            | delete_node | delete_nodes
            | create_edge | update_edge | delete_edge | delete_edges
            | increment
+           | assert_stmt | retract_stmt | update_nodes | merge_stmt
 
 var_assign: VARIABLE "=" write_query
 
@@ -136,6 +152,7 @@ system_query: "SYS" sys_command
             | sys_explain | sys_register_node_kind | sys_register_edge_kind
             | sys_unregister | sys_checkpoint | sys_rebuild
             | sys_clear | sys_wal
+            | sys_expire | sys_contradictions
 
 sys_stats:      "STATS" STATS_TARGET?
 STATS_TARGET:   "NODES" | "EDGES" | "MEMORY" | "WAL"
@@ -162,6 +179,9 @@ sys_checkpoint: "CHECKPOINT"
 sys_rebuild:    "REBUILD" "INDICES"
 sys_clear:      "CLEAR" CLEAR_TARGET
 sys_wal:        "WAL" WAL_ACTION
+
+sys_expire:          "EXPIRE" where_clause?
+sys_contradictions:  "CONTRADICTIONS" where_clause? "FIELD" IDENTIFIER "GROUP" "BY" IDENTIFIER
 
 CLEAR_TARGET: "LOG" | "CACHE"
 WAL_ACTION: "STATUS" | "REPLAY"

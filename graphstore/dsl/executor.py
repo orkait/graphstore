@@ -13,6 +13,7 @@ from graphstore.dsl.ast_nodes import (
     AggregateQuery,
     AncestorsQuery,
     AndExpr,
+    AssertStmt,
     Batch,
     CommonNeighborsQuery,
     Condition,
@@ -23,6 +24,9 @@ from graphstore.dsl.ast_nodes import (
     CreateNode,
     DegreeCondition,
     DeleteEdge,
+    MergeStmt,
+    RetractStmt,
+    UpdateNodes,
     VarAssign,
     WeightedShortestPathQuery,
     WeightedDistanceQuery,
@@ -116,6 +120,10 @@ class Executor:
             DeleteEdges: self._delete_edges,
             Increment: self._increment,
             Batch: self._batch,
+            AssertStmt: self._assert,
+            RetractStmt: self._retract,
+            UpdateNodes: self._update_nodes,
+            MergeStmt: self._merge,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -126,6 +134,12 @@ class Executor:
 
     def _node(self, q: NodeQuery) -> Result:
         data = self.store.get_node(q.id)
+        if data is not None:
+            # Check if retracted or expired
+            slot = self._resolve_slot(q.id)
+            if slot is not None:
+                if not self._is_slot_visible(slot):
+                    data = None
         return Result(kind="node", data=data, count=1 if data else 0)
 
     def _nodes(self, q: NodesQuery) -> Result:
@@ -156,6 +170,9 @@ class Executor:
                     nodes = self.store.get_all_nodes(kind=kind_filter)
             else:
                 nodes = self.store.get_all_nodes(kind=kind_filter)
+
+        # Post-filter: exclude retracted and expired nodes
+        nodes = self._filter_visible(nodes)
 
         if q.order:
             reverse = q.order.direction == "DESC"
@@ -648,6 +665,8 @@ class Executor:
         else:
             node_id = q.id
         self.store.put_node(node_id, kind, data)
+        # Handle TTL
+        self._apply_ttl(node_id, q.expires_in, q.expires_at)
         node = self.store.get_node(node_id)
         return Result(kind="node", data=node, count=1)
 
@@ -662,6 +681,8 @@ class Executor:
         kind = data.pop("kind", "default")
         self.schema.validate_node(kind, data)
         self.store.upsert_node(q.id, kind, data)
+        # Handle TTL
+        self._apply_ttl(q.id, q.expires_in, q.expires_at)
         node = self.store.get_node(q.id)
         return Result(kind="node", data=node, count=1)
 
@@ -944,6 +965,191 @@ class Executor:
         self.store.increment_field(q.node_id, q.field, q.amount)
         return Result(kind="ok", data=None, count=0)
 
+    def _assert(self, q: AssertStmt) -> Result:
+        """ASSERT: upsert with reserved __confidence__, __source__, __retracted__=0."""
+        data = {fp.name: fp.value for fp in q.fields}
+        kind = data.pop("kind", "default")
+        self.schema.validate_node(kind, data)
+        self.store.upsert_node(q.id, kind, data)
+        # Set reserved belief fields
+        str_id = self.store.string_table.intern(q.id)
+        slot = self.store.id_to_slot[str_id]
+        if q.confidence is not None:
+            self.store.columns.set_reserved(slot, "__confidence__", q.confidence)
+        if q.source is not None:
+            self.store.columns.set_reserved(slot, "__source__", q.source)
+        self.store.columns.set_reserved(slot, "__retracted__", 0)
+        node = self.store.get_node(q.id)
+        return Result(kind="node", data=node, count=1)
+
+    def _retract(self, q: RetractStmt) -> Result:
+        """RETRACT: mark node as retracted (invisible via live_mask)."""
+        if q.id not in self.store.string_table:
+            raise NodeNotFound(q.id)
+        str_id = self.store.string_table.intern(q.id)
+        slot = self.store.id_to_slot.get(str_id)
+        if slot is None or slot in self.store.node_tombstones:
+            raise NodeNotFound(q.id)
+        now_ms = int(time.time() * 1000)
+        self.store.columns.set_reserved(slot, "__retracted__", 1)
+        self.store.columns.set_reserved(slot, "__retracted_at__", now_ms)
+        if q.reason:
+            self.store.columns.set_reserved(slot, "__retract_reason__", q.reason)
+        return Result(kind="ok", data={"id": q.id}, count=1)
+
+    def _update_nodes(self, q: UpdateNodes) -> Result:
+        """UPDATE NODES WHERE ... SET ...: bulk column update."""
+        n = self.store._next_slot
+        if n == 0:
+            return Result(kind="ok", data={"updated": 0}, count=0)
+
+        mask = self._compute_live_mask(n)
+
+        # Apply WHERE filter
+        kind_filter = self._extract_kind_from_where(q.where)
+        if kind_filter:
+            kind_mask = self.store._live_mask(kind_filter)
+            mask = mask & kind_mask
+            remaining = self._strip_kind_from_expr(q.where.expr)
+            if remaining is not None:
+                col_mask = self._try_column_filter(remaining, mask, n)
+                if col_mask is not None:
+                    mask = col_mask
+                else:
+                    # Fallback: materialize and filter
+                    fallback_mask = np.zeros(n, dtype=bool)
+                    for slot_idx in np.nonzero(mask)[0]:
+                        node = self.store._materialize_slot(int(slot_idx))
+                        if node and self._eval_where(q.where.expr, node):
+                            fallback_mask[int(slot_idx)] = True
+                    mask = fallback_mask
+        else:
+            col_mask = self._try_column_filter(q.where.expr, mask, n)
+            if col_mask is not None:
+                mask = col_mask
+            else:
+                fallback_mask = np.zeros(n, dtype=bool)
+                for slot_idx in np.nonzero(mask)[0]:
+                    node = self.store._materialize_slot(int(slot_idx))
+                    if node and self._eval_where(q.where.expr, node):
+                        fallback_mask[int(slot_idx)] = True
+                mask = fallback_mask
+
+        update_data = {fp.name: fp.value for fp in q.fields}
+        matching_slots = np.nonzero(mask)[0]
+        now_ms = int(time.time() * 1000)
+
+        for slot_idx in matching_slots:
+            slot = int(slot_idx)
+            self.store.columns.set(slot, update_data)
+            self.store.columns.set_reserved(slot, "__updated_at__", now_ms)
+
+        updated = len(matching_slots)
+        return Result(kind="ok", data={"updated": updated}, count=updated)
+
+    def _merge(self, q: MergeStmt) -> Result:
+        """MERGE NODE src INTO tgt: copy fields, rewire edges, tombstone source."""
+        # Validate source and target exist
+        if q.source_id not in self.store.string_table:
+            raise NodeNotFound(q.source_id)
+        src_str = self.store.string_table.intern(q.source_id)
+        src_slot = self.store.id_to_slot.get(src_str)
+        if src_slot is None or src_slot in self.store.node_tombstones:
+            raise NodeNotFound(q.source_id)
+
+        if q.target_id not in self.store.string_table:
+            raise NodeNotFound(q.target_id)
+        tgt_str = self.store.string_table.intern(q.target_id)
+        tgt_slot = self.store.id_to_slot.get(tgt_str)
+        if tgt_slot is None or tgt_slot in self.store.node_tombstones:
+            raise NodeNotFound(q.target_id)
+
+        # 1. Copy source column values to target where target has no value
+        fields_merged = 0
+        for field in list(self.store.columns._columns.keys()):
+            if field.startswith("__") and field.endswith("__"):
+                continue  # skip reserved columns
+            if not self.store.columns._presence[field][src_slot]:
+                continue  # source has no value
+            if self.store.columns._presence[field][tgt_slot]:
+                continue  # target wins on conflict
+            # Copy source value to target
+            dtype = self.store.columns._dtypes[field]
+            raw = self.store.columns._columns[field][src_slot]
+            self.store.columns._columns[field][tgt_slot] = raw
+            self.store.columns._presence[field][tgt_slot] = True
+            fields_merged += 1
+
+        # 2. Re-wire all edges from source to target
+        edges_rewired = 0
+        for etype in list(self.store._edges_by_type.keys()):
+            new_edges = []
+            for s, t, d in self.store._edges_by_type[etype]:
+                if s == src_slot:
+                    new_edges.append((tgt_slot, t, d))
+                    edges_rewired += 1
+                elif t == src_slot:
+                    new_edges.append((s, tgt_slot, d))
+                    edges_rewired += 1
+                else:
+                    new_edges.append((s, t, d))
+            self.store._edges_by_type[etype] = new_edges
+
+        # 3. Drop duplicate edges after re-wiring
+        for etype in list(self.store._edges_by_type.keys()):
+            seen = set()
+            deduped = []
+            for s, t, d in self.store._edges_by_type[etype]:
+                key = (s, t)
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append((s, t, d))
+            self.store._edges_by_type[etype] = deduped
+            if not deduped:
+                del self.store._edges_by_type[etype]
+
+        # 4. Rebuild edge keys
+        self.store._edge_keys = {
+            (s, t, k)
+            for k, edges in self.store._edges_by_type.items()
+            for s, t, _d in edges
+        }
+        self.store._edges_dirty = True
+        self.store._ensure_edges_built()
+
+        # 5. Tombstone source
+        self.store.delete_node(q.source_id)
+
+        # 6. Update target's __updated_at__
+        now_ms = int(time.time() * 1000)
+        self.store.columns.set_reserved(tgt_slot, "__updated_at__", now_ms)
+
+        return Result(
+            kind="ok",
+            data={
+                "merged_into": q.target_id,
+                "fields_merged": fields_merged,
+                "edges_rewired": edges_rewired,
+            },
+            count=1,
+        )
+
+    def _apply_ttl(self, node_id: str, expires_in: tuple | None, expires_at: str | None):
+        """Set __expires_at__ on a node based on TTL clauses."""
+        if expires_in is None and expires_at is None:
+            return
+        str_id = self.store.string_table.intern(node_id)
+        slot = self.store.id_to_slot[str_id]
+        if expires_in is not None:
+            amount, unit = expires_in
+            unit_ms = {"s": 1000, "m": 60000, "h": 3600000, "d": 86400000}[unit]
+            expire_ms = int(time.time() * 1000) + amount * unit_ms
+        else:
+            from datetime import datetime
+            dt = datetime.fromisoformat(expires_at)
+            expire_ms = int(dt.timestamp() * 1000)
+        self.store.columns.set_reserved(slot, "__expires_at__", expire_ms)
+
     def _batch(self, q: Batch) -> Result:
         """Execute batch with rollback on failure.
 
@@ -1043,6 +1249,33 @@ class Executor:
         if slot is None or slot in self.store.node_tombstones:
             return None
         return slot
+
+    def _is_slot_visible(self, slot: int) -> bool:
+        """Check if a slot passes TTL and retraction checks."""
+        # Check retracted
+        if self.store.columns.has_column("__retracted__"):
+            if self.store.columns._presence["__retracted__"][slot]:
+                if int(self.store.columns._columns["__retracted__"][slot]) == 1:
+                    return False
+        # Check TTL expiry
+        if self.store.columns.has_column("__expires_at__"):
+            if self.store.columns._presence["__expires_at__"][slot]:
+                expire_ms = int(self.store.columns._columns["__expires_at__"][slot])
+                if expire_ms > 0 and expire_ms < int(time.time() * 1000):
+                    return False
+        return True
+
+    def _filter_visible(self, nodes: list[dict]) -> list[dict]:
+        """Filter out retracted and expired nodes from a node list."""
+        if not self.store.columns.has_column("__retracted__") and \
+           not self.store.columns.has_column("__expires_at__"):
+            return nodes
+        result = []
+        for node in nodes:
+            slot = self._resolve_slot(node["id"])
+            if slot is not None and self._is_slot_visible(slot):
+                result.append(node)
+        return result
 
     def _eval_where(self, expr, data: dict) -> bool:
         """Evaluate a WHERE expression against a data dict."""
