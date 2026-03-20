@@ -25,6 +25,7 @@ def low_degree_store():
     store.put_node("c", "fn", {})
     store.put_edge("a", "b", "calls")
     store.put_edge("b", "c", "calls")
+    store._ensure_edges_built()
     return store
 
 
@@ -38,6 +39,7 @@ def high_degree_store():
         store.put_node(f"n{i}", "fn", {})
     for i in range(1, hub_count):
         store.put_edge("n0", f"n{i}", "calls")
+    store._ensure_edges_built()
     return store
 
 
@@ -75,13 +77,11 @@ class TestEstimateTraverseCost:
         n = 100
         for i in range(n):
             store.put_node(f"n{i}", "fn", {})
-        # Connect every node to every other -> avg degree = n-1 = 99
         for i in range(n):
             for j in range(n):
                 if i != j:
                     store.put_edge(f"n{i}", f"n{j}", "calls")
-        # avg_degree = 99*100 / 100 = 99
-        # depth 3: 99^3 = 970299 > 100_000
+        store._ensure_edges_built()
         cost = estimate_traverse_cost(3, store.edge_matrices, "calls")
         assert cost.rejected
         assert cost.estimated_frontier > DEFAULT_FRONTIER_THRESHOLD
@@ -113,6 +113,7 @@ class TestEstimateMatchCost:
             for j in range(n):
                 if i != j:
                     store.put_edge(f"n{i}", f"n{j}", "calls")
+        store._ensure_edges_built()
 
         pattern = MatchPattern(
             steps=[

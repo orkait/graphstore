@@ -20,7 +20,7 @@ class CoreStore:
 
     def __init__(self, ceiling_bytes: int = DEFAULT_CEILING_BYTES):
         self.string_table = StringTable()
-        self.edge_matrices = EdgeMatrices()
+        self._edge_matrices = EdgeMatrices()
         self._ceiling_bytes = ceiling_bytes
 
         # Node storage - pre-allocate
@@ -77,9 +77,15 @@ class CoreStore:
         return self._count
 
     @property
-    def edge_count(self) -> int:
+    def edge_matrices(self) -> EdgeMatrices:
+        """Auto-rebuilds CSR matrices if dirty."""
         self._ensure_edges_built()
-        return self.edge_matrices.total_edges
+        return self._edge_matrices
+
+    @property
+    def edge_count(self) -> int:
+        # Use raw count to avoid CSR rebuild for simple counting
+        return sum(len(v) for v in self._edges_by_type.values())
 
     # -- node CRUD -----------------------------------------------------------
 
@@ -91,8 +97,9 @@ class CoreStore:
             if slot not in self.node_tombstones:
                 raise NodeExists(id)
 
-        # Check ceiling
-        check_ceiling(self._count, self.edge_count, 1, 0, self._ceiling_bytes)
+        # Check ceiling (use raw count to avoid triggering CSR rebuild)
+        raw_edge_count = sum(len(v) for v in self._edges_by_type.values())
+        check_ceiling(self._count, raw_edge_count, 1, 0, self._ceiling_bytes)
 
         kind_id = self.string_table.intern(kind)
         slot = self._alloc_slot()
@@ -211,8 +218,9 @@ class CoreStore:
         if tgt_slot is None or tgt_slot in self.node_tombstones:
             raise NodeNotFound(target_id)
 
-        # Check ceiling
-        check_ceiling(self._count, self.edge_count, 0, 1, self._ceiling_bytes)
+        # Check ceiling (use raw count to avoid triggering CSR rebuild)
+        raw_edge_count = sum(len(v) for v in self._edges_by_type.values())
+        check_ceiling(self._count, raw_edge_count, 0, 1, self._ceiling_bytes)
 
         # Check duplicate - O(1) set lookup
         edge_key = (src_slot, tgt_slot, kind)
@@ -318,13 +326,13 @@ class CoreStore:
             return
         self._edges_dirty = False
         num_nodes = max(self._next_slot, 1)
-        self.edge_matrices.rebuild(self._edges_by_type, num_nodes)
+        self._edge_matrices.rebuild(self._edges_by_type, num_nodes)
 
     def _rebuild_edges(self):
         """Force rebuild EdgeMatrices from pending edge lists."""
         self._edges_dirty = False
         num_nodes = max(self._next_slot, 1)
-        self.edge_matrices.rebuild(self._edges_by_type, num_nodes)
+        self._edge_matrices.rebuild(self._edges_by_type, num_nodes)
 
     # -- helpers -------------------------------------------------------------
 
@@ -371,29 +379,42 @@ class CoreStore:
 
     def get_all_nodes(self, kind: str | None = None) -> list[dict]:
         """Get all live nodes, optionally filtered by kind."""
-        result = []
         if kind and kind not in self.string_table:
-            return result  # unknown kind means zero matches
-        kind_id = (
-            self.string_table.intern(kind)
-            if kind
-            else None
-        )
-        for slot in range(self._next_slot):
-            if slot in self.node_tombstones:
-                continue
+            return []
+
+        n = self._next_slot
+        if n == 0:
+            return []
+
+        # Build live-slot mask using numpy
+        ids = self.node_ids[:n]
+        mask = ids >= 0  # not empty slots
+
+        # Exclude tombstones via numpy
+        if self.node_tombstones:
+            tomb_arr = np.array(list(self.node_tombstones), dtype=np.int32)
+            tomb_mask = np.zeros(n, dtype=bool)
+            tomb_mask[tomb_arr[tomb_arr < n]] = True
+            mask &= ~tomb_mask
+
+        # Kind filter via numpy
+        if kind is not None:
+            kind_id = self.string_table.intern(kind)
+            mask &= self.node_kinds[:n] == kind_id
+
+        # Extract only matching slots
+        slots = np.nonzero(mask)[0]
+
+        result = []
+        for slot in slots:
+            slot = int(slot)
             if self.node_data[slot] is None:
                 continue
-            if kind_id is not None and self.node_kinds[slot] != kind_id:
-                continue
-            str_id = int(self.node_ids[slot])
-            result.append(
-                {
-                    "id": self.string_table.lookup(str_id),
-                    "kind": self.string_table.lookup(int(self.node_kinds[slot])),
-                    **self.node_data[slot],
-                }
-            )
+            result.append({
+                "id": self.string_table.lookup(int(ids[slot])),
+                "kind": self.string_table.lookup(int(self.node_kinds[slot])),
+                **self.node_data[slot],
+            })
         return result
 
     # -- field operations ----------------------------------------------------
