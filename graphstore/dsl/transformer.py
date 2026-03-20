@@ -79,6 +79,8 @@ from graphstore.dsl.ast_nodes import (
     SysSnapshot,
     SysRollback,
     SysSnapshots,
+    SysDuplicates,
+    SysEmbedders,
 )
 
 
@@ -746,6 +748,20 @@ class DSLTransformer(Transformer):
 
     def sys_snapshots(self, args):
         return SysSnapshots()
+
+    def sys_duplicates(self, args):
+        where = self._find(args, WhereClause)
+        threshold = 0.95
+        for a in args:
+            if isinstance(a, tuple) and a[0] == "threshold":
+                threshold = a[1]
+        return SysDuplicates(where=where, threshold=threshold)
+
+    def threshold_clause(self, args):
+        return ("threshold", self._num(args[0]))
+
+    def sys_embedders(self, args):
+        return SysEmbedders()
 
     def sys_contradictions(self, args):
         where = self._find(args, WhereClause)

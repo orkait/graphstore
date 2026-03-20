@@ -87,6 +87,20 @@ def checkpoint(store: CoreStore, schema: SchemaRegistry, conn):
         conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
                      ("schema", json.dumps(schema.to_dict()).encode(), "json"))
 
+        # Vector index
+        vectors = getattr(store, 'vectors', None)
+        if vectors is not None and vectors.count() > 0:
+            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                         ("vector_index", vectors.save(), "usearch"))
+            pres = vectors._has_vector[:store._next_slot]
+            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                         ("vector_presence", pres.tobytes(), str(pres.dtype)))
+            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                         ("vector_dims", str(vectors.dims).encode(), "text"))
+        else:
+            # Clear any stale vector blobs
+            conn.execute("DELETE FROM blobs WHERE key IN ('vector_index', 'vector_presence', 'vector_dims')")
+
         # Version + timestamp
         conn.execute("INSERT OR REPLACE INTO metadata VALUES (?, ?)",
                      ("schema_version", str(SCHEMA_VERSION)))

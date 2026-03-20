@@ -418,3 +418,12 @@ class SysRollback:
 @dataclass
 class SysSnapshots:
     pass
+
+@dataclass
+class SysDuplicates:
+    where: WhereClause | None = None
+    threshold: float = 0.95
+
+@dataclass
+class SysEmbedders:
+    pass
