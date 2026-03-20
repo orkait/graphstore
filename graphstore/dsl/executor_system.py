@@ -341,15 +341,64 @@ class SystemExecutor:
         expired_mask = mask & pres & (col > 0) & (col < now_ms)
 
         expired_slots = np.nonzero(expired_mask)[0]
+        if len(expired_slots) == 0:
+            return Result(kind="ok", data={"expired": 0}, count=0)
+
+        # Batch tombstone: clear columns, remove from id_to_slot, add to tombstones
         expired_count = 0
+        expired_slot_set = set()
         for slot_idx in expired_slots:
-            nid = self.store._slot_to_id(int(slot_idx))
-            if nid:
-                try:
-                    self.store.delete_node(nid)
-                    expired_count += 1
-                except NodeNotFound:
-                    pass
+            slot = int(slot_idx)
+            nid_str_id = int(self.store.node_ids[slot])
+            if nid_str_id == -1:
+                continue
+
+            # Remove from secondary indices
+            for field in self.store._indexed_fields:
+                if self.store.columns.has_column(field) and self.store.columns._presence[field][slot]:
+                    dtype = self.store.columns._dtypes[field]
+                    raw = self.store.columns._columns[field][slot]
+                    if dtype == "int32_interned":
+                        val = self.store.string_table.lookup(int(raw))
+                    elif dtype == "float64":
+                        val = float(raw)
+                    else:
+                        val = int(raw)
+                    idx_list = self.store.secondary_indices.get(field, {}).get(val, [])
+                    if slot in idx_list:
+                        idx_list.remove(slot)
+
+            self.store.columns.clear(slot)
+            self.store.node_tombstones.add(slot)
+            if nid_str_id in self.store.id_to_slot:
+                del self.store.id_to_slot[nid_str_id]
+            self.store._count -= 1
+            expired_slot_set.add(slot)
+            expired_count += 1
+
+        # Single pass: remove all expired slots from all edge lists at once
+        if expired_slot_set:
+            any_removed = False
+            for etype in list(self.store._edges_by_type.keys()):
+                old_len = len(self.store._edges_by_type[etype])
+                self.store._edges_by_type[etype] = [
+                    (s, t, d) for s, t, d in self.store._edges_by_type[etype]
+                    if s not in expired_slot_set and t not in expired_slot_set
+                ]
+                if not self.store._edges_by_type[etype]:
+                    del self.store._edges_by_type[etype]
+                if len(self.store._edges_by_type.get(etype, [])) != old_len:
+                    any_removed = True
+
+            if any_removed:
+                # Rebuild edge_keys from scratch once
+                self.store._edge_keys = {
+                    (s, t, k)
+                    for k, edges in self.store._edges_by_type.items()
+                    for s, t, _d in edges
+                }
+            self.store._edges_dirty = True
+            self.store._ensure_edges_built()
 
         return Result(kind="ok", data={"expired": expired_count}, count=expired_count)
 

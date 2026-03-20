@@ -160,56 +160,122 @@ class Executor:
         # Try secondary index fast path for simple equality on indexed field
         nodes = self._try_index_lookup(q.where, kind_filter) if q.where else None
 
-        if nodes is None:
-            if q.where and not self._is_simple_kind_filter(q.where):
-                # Strip kind from expression (handled by numpy), get remaining filter
-                remaining = self._strip_kind_from_expr(q.where.expr)
-
-                if remaining is not None:
-                    # Try column filter first
-                    col_result = self._try_column_nodes(remaining, kind_filter)
-                    if col_result is not None:
-                        nodes = col_result
-                    else:
-                        raw_pred = self._make_raw_predicate(remaining)
-                        if raw_pred is not None:
-                            nodes = self.store.get_all_nodes(kind=kind_filter, predicate=raw_pred)
-                        else:
-                            nodes = self.store.get_all_nodes(kind=kind_filter)
-                            nodes = [n for n in nodes if self._eval_where(q.where.expr, n)]
+        if nodes is not None:
+            # Index path returned materialized nodes - apply visibility + order + limit
+            nodes = self._filter_visible(nodes)
+            if q.order:
+                reverse = q.order.direction == "DESC"
+                col_sorted = self._try_column_order_by(
+                    nodes, q.order.field, reverse,
+                    q.limit.value if q.limit else None,
+                    q.offset.value if q.offset else None,
+                )
+                if col_sorted is not None:
+                    nodes = col_sorted
                 else:
-                    # Only kind filter remained, already handled by numpy
-                    nodes = self.store.get_all_nodes(kind=kind_filter)
+                    nodes.sort(
+                        key=lambda n: (n.get(q.order.field) is None, n.get(q.order.field, "")),
+                        reverse=reverse,
+                    )
+                    if q.offset:
+                        nodes = nodes[q.offset.value:]
+                    if q.limit:
+                        nodes = nodes[:q.limit.value]
             else:
-                nodes = self.store.get_all_nodes(kind=kind_filter)
+                if q.offset:
+                    nodes = nodes[q.offset.value:]
+                if q.limit:
+                    nodes = nodes[:q.limit.value]
+            return Result(kind="nodes", data=nodes, count=len(nodes))
 
-        # Post-filter: exclude retracted and expired nodes
-        nodes = self._filter_visible(nodes)
+        # === Slot-mask path: compute mask, apply LIMIT before materialization ===
+        n = self.store._next_slot
+        if n == 0:
+            return Result(kind="nodes", data=[], count=0)
 
+        # Start with full live mask (tombstones + TTL + retracted + context)
+        final_mask = self._compute_live_mask(n)
+
+        # Apply kind filter via numpy
+        if kind_filter:
+            kind_mask = self.store._live_mask(kind_filter)
+            # Intersect with live mask (kind_mask only filters tombstones+kind,
+            # final_mask also filters TTL/retracted/context)
+            final_mask = final_mask & kind_mask
+
+        # Apply WHERE column/predicate filter
+        fallback_predicate = None
+        if q.where and not self._is_simple_kind_filter(q.where):
+            remaining = self._strip_kind_from_expr(q.where.expr)
+            if remaining is not None:
+                col_mask = self._try_column_filter(remaining, final_mask, n)
+                if col_mask is not None:
+                    final_mask = col_mask
+                else:
+                    # Try raw predicate for slot-level filtering
+                    raw_pred = self._make_raw_predicate(remaining)
+                    if raw_pred is not None:
+                        # Apply predicate as a post-materialization filter
+                        fallback_predicate = lambda node, _expr=remaining: self._eval_where(_expr, node)
+                    else:
+                        # Full expression eval needed
+                        fallback_predicate = lambda node, _expr=q.where.expr: self._eval_where(_expr, node)
+
+        # Get matching slots
+        slots = np.where(final_mask)[0]
+
+        # Apply ORDER BY on column data (not materialized dicts)
         if q.order:
             reverse = q.order.direction == "DESC"
-            col_sorted = self._try_column_order_by(
-                nodes, q.order.field, reverse,
+            slots = self._order_slots_by_column(
+                slots, q.order.field, reverse,
                 q.limit.value if q.limit else None,
                 q.offset.value if q.offset else None,
+                fallback_predicate,
             )
-            if col_sorted is not None:
-                nodes = col_sorted
+            if slots is not None:
+                # Slots already ordered and sliced; materialize
+                result = []
+                for s in slots:
+                    node = self.store._materialize_slot(int(s))
+                    if node is not None:
+                        if fallback_predicate and not fallback_predicate(node):
+                            continue
+                        result.append(node)
+                return Result(kind="nodes", data=result, count=len(result))
             else:
+                # Column sort not possible - materialize, filter, sort in Python
+                nodes = self._materialize_slots_filtered(slots, fallback_predicate)
                 nodes.sort(
-                    key=lambda n: (n.get(q.order.field) is None, n.get(q.order.field, "")),
+                    key=lambda nd: (nd.get(q.order.field) is None, nd.get(q.order.field, "")),
                     reverse=reverse,
                 )
                 if q.offset:
                     nodes = nodes[q.offset.value:]
                 if q.limit:
                     nodes = nodes[:q.limit.value]
-        else:
+                return Result(kind="nodes", data=nodes, count=len(nodes))
+
+        # No ORDER BY: apply OFFSET + LIMIT to slot array BEFORE materializing
+        if fallback_predicate is None:
             if q.offset:
-                nodes = nodes[q.offset.value:]
+                slots = slots[q.offset.value:]
             if q.limit:
-                nodes = nodes[:q.limit.value]
-        return Result(kind="nodes", data=nodes, count=len(nodes))
+                slots = slots[:q.limit.value]
+            result = []
+            for s in slots:
+                node = self.store._materialize_slot(int(s))
+                if node is not None:
+                    result.append(node)
+        else:
+            # With fallback predicate, must materialize+filter then slice
+            result = self._materialize_slots_filtered(slots, fallback_predicate)
+            if q.offset:
+                result = result[q.offset.value:]
+            if q.limit:
+                result = result[:q.limit.value]
+
+        return Result(kind="nodes", data=result, count=len(result))
 
     def _edges(self, q: EdgesQuery) -> Result:
         kind = self._extract_kind_from_where(q.where)
@@ -1107,10 +1173,40 @@ class Executor:
         matching_slots = np.nonzero(mask)[0]
         now_ms = int(time.time() * 1000)
 
-        for slot_idx in matching_slots:
-            slot = int(slot_idx)
-            self.store.columns.set(slot, update_data)
-            self.store.columns.set_reserved(slot, "__updated_at__", now_ms)
+        if len(matching_slots) > 0:
+            store = self.store
+            # Bulk numpy assignment for columnar fields
+            for fp in q.fields:
+                field = fp.name
+                value = fp.value
+                if store.columns.has_column(field):
+                    dtype_str = store.columns._dtypes[field]
+                    if dtype_str == "int32_interned" and isinstance(value, str):
+                        raw_val = store.string_table.intern(value)
+                        store.columns._columns[field][matching_slots] = raw_val
+                        store.columns._presence[field][matching_slots] = True
+                    elif dtype_str == "int64" and isinstance(value, int):
+                        store.columns._columns[field][matching_slots] = int(value)
+                        store.columns._presence[field][matching_slots] = True
+                    elif dtype_str == "float64" and isinstance(value, (int, float)) and not isinstance(value, bool):
+                        store.columns._columns[field][matching_slots] = float(value)
+                        store.columns._presence[field][matching_slots] = True
+                    else:
+                        # Type mismatch - fall back to per-slot set
+                        for slot_idx in matching_slots:
+                            store.columns.set(int(slot_idx), {field: value})
+                else:
+                    # Column doesn't exist yet - use set() which auto-creates
+                    for slot_idx in matching_slots:
+                        store.columns.set(int(slot_idx), {field: value})
+
+            # Bulk set __updated_at__ via numpy
+            if store.columns.has_column("__updated_at__"):
+                store.columns._columns["__updated_at__"][matching_slots] = now_ms
+                store.columns._presence["__updated_at__"][matching_slots] = True
+            else:
+                for slot_idx in matching_slots:
+                    store.columns.set_reserved(int(slot_idx), "__updated_at__", now_ms)
 
         # Rebuild secondary indices for updated fields
         for fp in q.fields:
@@ -1588,11 +1684,12 @@ class Executor:
 
         # Context filtering: when bound, only show nodes tagged with active context
         if hasattr(self.store, '_active_context') and self.store._active_context:
-            ctx_id = self.store.string_table.intern(self.store._active_context)
-            ctx_mask = self.store.columns.get_mask("__context__", "=", ctx_id, n)
+            ctx_name = self.store._active_context
+            ctx_mask = self.store.columns.get_mask("__context__", "=", ctx_name, n)
             if ctx_mask is not None:
                 mask = mask & ctx_mask
             else:
+                # No __context__ column at all - nothing has context
                 mask = np.zeros(n, dtype=bool)
 
         return mask
@@ -2081,6 +2178,76 @@ class Executor:
             slot = int(slots[idx])
             node_idx = slot_to_idx[slot]
             result.append(nodes[node_idx])
+        return result
+
+    def _order_slots_by_column(self, slots: np.ndarray, field: str,
+                               descending: bool, limit: int | None,
+                               offset: int | None,
+                               fallback_predicate=None) -> np.ndarray | None:
+        """Sort slot indices by column values using numpy, apply offset+limit.
+
+        Returns sorted+sliced slot array, or None if column not available.
+        When fallback_predicate is set, we can't use argpartition (need full sort)
+        but still sort by column values.
+        """
+        col_info = self.store.columns.get_column(field, self.store._next_slot)
+        if col_info is None:
+            return None
+        col_data, col_pres, dtype_str = col_info
+
+        if dtype_str == "int32_interned":
+            return None
+
+        if len(slots) == 0:
+            return slots
+
+        values = col_data[slots].astype(np.float64)
+        present = col_pres[slots]
+
+        if descending:
+            values[~present] = -np.inf
+        else:
+            values[~present] = np.inf
+
+        total = len(slots)
+        eff_offset = offset or 0
+        eff_limit = limit if limit is not None else total
+
+        if fallback_predicate is not None:
+            # Can't partition when we need post-filter; do full sort
+            if descending:
+                sorted_idx = np.argsort(-values)
+            else:
+                sorted_idx = np.argsort(values)
+            return slots[sorted_idx]
+
+        k = min(eff_offset + eff_limit, total)
+
+        if k < total and k > 0:
+            if descending:
+                part_idx = np.argpartition(-values, k)[:k]
+                sorted_idx = part_idx[np.argsort(-values[part_idx])]
+            else:
+                part_idx = np.argpartition(values, k)[:k]
+                sorted_idx = part_idx[np.argsort(values[part_idx])]
+        else:
+            if descending:
+                sorted_idx = np.argsort(-values)
+            else:
+                sorted_idx = np.argsort(values)
+
+        sorted_idx = sorted_idx[eff_offset:eff_offset + eff_limit]
+        return slots[sorted_idx]
+
+    def _materialize_slots_filtered(self, slots: np.ndarray, predicate=None) -> list[dict]:
+        """Materialize slot array into node dicts, optionally filtering by predicate."""
+        result = []
+        for s in slots:
+            node = self.store._materialize_slot(int(s))
+            if node is not None:
+                if predicate and not predicate(node):
+                    continue
+                result.append(node)
         return result
 
     def _extract_edge_type_from_expr(self, expr) -> str | None:
