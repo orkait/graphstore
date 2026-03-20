@@ -1,7 +1,7 @@
 """End-to-end tests for DSL read operations: DSL string -> parse -> execute -> verify Result."""
 
 import pytest
-from graphstore.store import CoreStore
+from graphstore.core.store import CoreStore
 from graphstore.dsl.parser import parse
 from graphstore.dsl.executor import Executor
 

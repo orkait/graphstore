@@ -1,7 +1,7 @@
 """End-to-end tests for column-accelerated DSL queries."""
 
 import pytest
-from graphstore.store import CoreStore
+from graphstore.core.store import CoreStore
 from graphstore.dsl.parser import parse
 from graphstore.dsl.executor import Executor
 
@@ -120,9 +120,9 @@ class TestColumnFilterDelete:
         assert r2.data == 4
 
 
-from graphstore.schema import SchemaRegistry
+from graphstore.core.schema import SchemaRegistry
 from graphstore.dsl.executor_system import SystemExecutor
-from graphstore.errors import BatchRollback
+from graphstore.core.errors import BatchRollback
 
 
 class TestBatchRollbackColumns:

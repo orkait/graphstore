@@ -3,12 +3,12 @@
 import time
 import pytest
 
-from graphstore.store import CoreStore
-from graphstore.schema import SchemaRegistry
+from graphstore.core.store import CoreStore
+from graphstore.core.schema import SchemaRegistry
 from graphstore.dsl.parser import parse
 from graphstore.dsl.executor_system import SystemExecutor
 from graphstore.persistence.database import open_database
-from graphstore.errors import GraphStoreError
+from graphstore.core.errors import GraphStoreError
 
 
 @pytest.fixture

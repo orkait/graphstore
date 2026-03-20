@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from graphstore.errors import VersionMismatch
+from graphstore.core.errors import VersionMismatch
 from graphstore.persistence.database import (
     SCHEMA_VERSION,
     get_metadata,
@@ -13,8 +13,8 @@ from graphstore.persistence.database import (
 )
 from graphstore.persistence.deserializer import load
 from graphstore.persistence.serializer import checkpoint
-from graphstore.schema import SchemaRegistry
-from graphstore.store import CoreStore
+from graphstore.core.schema import SchemaRegistry
+from graphstore.core.store import CoreStore
 
 
 # ── Helpers ─────────────────────────────────────────────────────────

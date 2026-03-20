@@ -1,7 +1,7 @@
 """Tests for graph intelligence: RECALL, PROPAGATE, COUNTERFACTUAL, SNAPSHOT, CONTEXT."""
 import pytest
 from graphstore import GraphStore
-from graphstore.errors import NodeNotFound
+from graphstore.core.errors import NodeNotFound
 
 
 class TestRecall:

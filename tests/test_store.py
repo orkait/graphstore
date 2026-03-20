@@ -2,9 +2,9 @@
 
 import pytest
 
-from graphstore.errors import CeilingExceeded, GraphStoreError, NodeExists, NodeNotFound
-from graphstore.memory import BYTES_PER_EDGE, BYTES_PER_NODE
-from graphstore.store import CoreStore
+from graphstore.core.errors import CeilingExceeded, GraphStoreError, NodeExists, NodeNotFound
+from graphstore.core.memory import BYTES_PER_EDGE, BYTES_PER_NODE
+from graphstore.core.store import CoreStore
 
 
 # ── Helpers ─────────────────────────────────────────────────────────

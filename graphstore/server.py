@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from graphstore import GraphStore
-from graphstore.errors import GraphStoreError
+from graphstore.core.errors import GraphStoreError
 
 app = FastAPI(title="graphstore playground")
 

@@ -14,7 +14,7 @@ from graphstore.dsl.ast_nodes import (
     SysExplain, SysRegisterNodeKind, SysRegisterEdgeKind,
     SysUnregister, SysCheckpoint, SysRebuild, SysClear, SysWal,
 )
-from graphstore.errors import QueryError
+from graphstore.core.errors import QueryError
 
 
 # =============================================

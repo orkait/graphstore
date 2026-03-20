@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from graphstore.errors import SchemaError
+from graphstore.core.errors import SchemaError
 
 
 @dataclass

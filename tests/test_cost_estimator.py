@@ -1,7 +1,7 @@
 """Tests for the cost estimator module."""
 
 import pytest
-from graphstore.store import CoreStore
+from graphstore.core.store import CoreStore
 from graphstore.dsl.cost_estimator import (
     estimate_match_cost,
     estimate_traverse_cost,
