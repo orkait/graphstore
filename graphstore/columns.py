@@ -170,6 +170,28 @@ class ColumnStore:
         if field not in self._dtypes:
             self._create_column(field, dtype_str)
 
+    def _ensure_column(self, field: str, dtype_str: str) -> None:
+        """Create column if it doesn't exist. No-op if it already exists."""
+        if field not in self._dtypes:
+            self._create_column(field, dtype_str)
+
+    def set_reserved(self, slot: int, field: str, value) -> None:
+        """Set a system-managed column value. Auto-interns strings."""
+        if isinstance(value, str):
+            self._ensure_column(field, "int32_interned")
+            self._columns[field][slot] = self._string_table.intern(value)
+        elif isinstance(value, float):
+            self._ensure_column(field, "float64")
+            self._columns[field][slot] = value
+        else:
+            self._ensure_column(field, "int64")
+            self._columns[field][slot] = int(value)
+        self._presence[field][slot] = True
+
+    def set_field(self, slot: int, field: str, value) -> None:
+        """Set a single field value at a slot. Auto-infers type like set()."""
+        self.set(slot, {field: value})
+
     def rebuild_from(self, node_data: list[dict | None], n: int) -> None:
         """Clear all columns and re-scan node_data[:n] to repopulate."""
         self._columns.clear()
