@@ -6,7 +6,7 @@ Unregistered kinds pass through without validation (schema-free mode).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from graphstore.errors import SchemaError
 
@@ -15,6 +15,7 @@ from graphstore.errors import SchemaError
 class NodeKindDef:
     required: set[str]
     optional: set[str]
+    field_types: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -36,10 +37,30 @@ class SchemaRegistry:
     def has_edge_kinds(self) -> bool:
         return bool(self._edge_kinds)
 
-    def register_node_kind(self, kind: str, required: list[str], optional: list[str] | None = None):
+    def register_node_kind(self, kind: str, required: list, optional: list | None = None):
+        req_fields = set()
+        field_types = {}
+        for item in required:
+            if isinstance(item, tuple):
+                name, type_name = item
+                req_fields.add(name)
+                if type_name:
+                    field_types[name] = type_name
+            else:
+                req_fields.add(item)
+
+        opt_fields = set()
+        for item in (optional or []):
+            if isinstance(item, tuple):
+                name, type_name = item
+                opt_fields.add(name)
+                if type_name:
+                    field_types[name] = type_name
+            else:
+                opt_fields.add(item)
+
         self._node_kinds[kind] = NodeKindDef(
-            required=set(required),
-            optional=set(optional or []),
+            required=req_fields, optional=opt_fields, field_types=field_types,
         )
 
     def register_edge_kind(self, kind: str, from_kinds: list[str], to_kinds: list[str]):
@@ -72,11 +93,14 @@ class SchemaRegistry:
         defn = self._node_kinds.get(kind)
         if defn is None:
             return None
-        return {
+        result = {
             "kind": kind,
             "required": sorted(defn.required),
             "optional": sorted(defn.optional),
         }
+        if defn.field_types:
+            result["field_types"] = defn.field_types
+        return result
 
     def describe_edge_kind(self, kind: str) -> dict | None:
         defn = self._edge_kinds.get(kind)
@@ -92,7 +116,7 @@ class SchemaRegistry:
         """Validate node data against registered kind schema.
 
         If kind is not registered, no validation (schema-free mode).
-        Raises SchemaError if required fields are missing.
+        Raises SchemaError if required fields are missing or types mismatch.
         """
         if kind not in self._node_kinds:
             return  # unregistered kind, no validation
@@ -100,6 +124,24 @@ class SchemaRegistry:
         missing = defn.required - set(data.keys())
         if missing:
             raise SchemaError(f"kind '{kind}' requires fields: {sorted(missing)}")
+        for field_name, value in data.items():
+            if field_name in defn.field_types:
+                expected = defn.field_types[field_name]
+                if not self._type_matches(value, expected):
+                    raise SchemaError(
+                        f"Field '{field_name}' expects type '{expected}', "
+                        f"got {type(value).__name__}"
+                    )
+
+    @staticmethod
+    def _type_matches(value, type_name: str) -> bool:
+        if type_name == "string":
+            return isinstance(value, str)
+        if type_name == "int":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if type_name == "float":
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
+        return True
 
     def validate_edge(self, kind: str, source_kind: str, target_kind: str):
         """Validate edge endpoint kinds against registered schema.
@@ -125,7 +167,11 @@ class SchemaRegistry:
         """Export schema for serialization."""
         return {
             "node_kinds": {
-                k: {"required": sorted(v.required), "optional": sorted(v.optional)}
+                k: {
+                    "required": sorted(v.required),
+                    "optional": sorted(v.optional),
+                    "field_types": v.field_types,
+                }
                 for k, v in self._node_kinds.items()
             },
             "edge_kinds": {
@@ -139,7 +185,10 @@ class SchemaRegistry:
         """Rebuild from serialized form."""
         registry = cls()
         for kind, defn in data.get("node_kinds", {}).items():
-            registry.register_node_kind(kind, defn["required"], defn.get("optional", []))
+            field_types = defn.get("field_types", {})
+            required = [(f, field_types.get(f)) for f in defn["required"]]
+            optional = [(f, field_types.get(f)) for f in defn.get("optional", [])]
+            registry.register_node_kind(kind, required, optional)
         for kind, defn in data.get("edge_kinds", {}).items():
             registry.register_edge_kind(kind, defn["from_kinds"], defn["to_kinds"])
         return registry

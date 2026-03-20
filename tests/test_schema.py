@@ -277,3 +277,52 @@ class TestHasKindsProperties:
         assert reg.has_edge_kinds is True
         reg.unregister_edge_kind("R")
         assert reg.has_edge_kinds is False
+
+
+# ── Typed fields ────────────────────────────────────────────────────
+
+
+class TestTypedFields:
+    def test_register_with_types(self):
+        sr = SchemaRegistry()
+        sr.register_node_kind("fn", [("name", "string"), ("line", "int")], [("score", "float")])
+        defn = sr.get_node_kind("fn")
+        assert "name" in defn.required
+        assert defn.field_types == {"name": "string", "line": "int", "score": "float"}
+
+    def test_validate_type_mismatch_raises(self):
+        sr = SchemaRegistry()
+        sr.register_node_kind("fn", [("name", "string"), ("line", "int")])
+        with pytest.raises(SchemaError):
+            sr.validate_node("fn", {"name": 42, "line": 1})
+
+    def test_validate_correct_types_passes(self):
+        sr = SchemaRegistry()
+        sr.register_node_kind("fn", [("name", "string"), ("line", "int")])
+        sr.validate_node("fn", {"name": "main", "line": 1})
+
+    def test_untyped_fields_skip_type_check(self):
+        sr = SchemaRegistry()
+        sr.register_node_kind("fn", [("name", None)], [])
+        sr.validate_node("fn", {"name": 42})
+
+    def test_backward_compat_string_list(self):
+        sr = SchemaRegistry()
+        sr.register_node_kind("fn", ["name", "line"])
+        defn = sr.get_node_kind("fn")
+        assert "name" in defn.required
+        assert defn.field_types == {}
+
+    def test_describe_includes_types(self):
+        sr = SchemaRegistry()
+        sr.register_node_kind("fn", [("name", "string")])
+        desc = sr.describe_node_kind("fn")
+        assert desc["field_types"] == {"name": "string"}
+
+    def test_serialization_preserves_types(self):
+        sr = SchemaRegistry()
+        sr.register_node_kind("fn", [("name", "string"), ("line", "int")])
+        data = sr.to_dict()
+        sr2 = SchemaRegistry.from_dict(data)
+        defn = sr2.get_node_kind("fn")
+        assert defn.field_types == {"name": "string", "line": "int"}

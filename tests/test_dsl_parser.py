@@ -532,15 +532,29 @@ class TestSystemQueries:
         r = parse('SYS REGISTER NODE KIND "function" REQUIRED kind, name')
         assert isinstance(r, SysRegisterNodeKind)
         assert r.kind == "function"
-        assert r.required == ["kind", "name"]
+        assert r.required == [("kind", None), ("name", None)]
         assert r.optional == []
 
     def test_sys_register_node_kind_with_optional(self):
         r = parse('SYS REGISTER NODE KIND "function" REQUIRED kind, name OPTIONAL description')
         assert isinstance(r, SysRegisterNodeKind)
         assert r.kind == "function"
-        assert r.required == ["kind", "name"]
-        assert r.optional == ["description"]
+        assert r.required == [("kind", None), ("name", None)]
+        assert r.optional == [("description", None)]
+
+    def test_register_with_typed_fields(self):
+        r = parse('SYS REGISTER NODE KIND "function" REQUIRED name:string, line:int OPTIONAL score:float')
+        assert isinstance(r, SysRegisterNodeKind)
+        assert r.required == [("name", "string"), ("line", "int")]
+        assert r.optional == [("score", "float")]
+
+    def test_register_mixed_typed_untyped(self):
+        r = parse('SYS REGISTER NODE KIND "function" REQUIRED name:string, description')
+        assert r.required == [("name", "string"), ("description", None)]
+
+    def test_register_untyped_still_works(self):
+        r = parse('SYS REGISTER NODE KIND "thing" REQUIRED name, value')
+        assert r.required == [("name", None), ("value", None)]
 
     def test_sys_register_edge_kind(self):
         r = parse('SYS REGISTER EDGE KIND "calls" FROM "function", "method" TO "function"')

@@ -45,6 +45,7 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     # Create store and set its internals
     store = CoreStore()
     store.string_table = string_table
+    store.columns._string_table = string_table
     store._next_slot = meta["next_slot"]
     store._count = meta["count"]
 
@@ -104,6 +105,40 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
         indexed_fields = json.loads(idx_row[0])
         for field in indexed_fields:
             store.add_index(field)
+
+    # Load column store data
+    col_rows = conn.execute(
+        "SELECT key, data, dtype FROM blobs WHERE key LIKE 'columns:%'"
+    ).fetchall()
+
+    if col_rows:
+        col_blobs: dict[str, dict] = {}
+        for key, data, dtype in col_rows:
+            parts = key.split(":", 2)
+            if len(parts) == 3:
+                field_name = parts[1]
+                sub_key = parts[2]
+                col_blobs.setdefault(field_name, {})[sub_key] = (data, dtype)
+
+        for field_name, blobs in col_blobs.items():
+            if "data" in blobs and "presence" in blobs and "dtype" in blobs:
+                data_blob, data_np_dtype = blobs["data"]
+                pres_blob, pres_np_dtype = blobs["presence"]
+                col_dtype_raw = blobs["dtype"][0]
+                col_dtype_str = col_dtype_raw.decode() if isinstance(col_dtype_raw, bytes) else col_dtype_raw
+
+                col_arr = np.frombuffer(data_blob, dtype=np.dtype(data_np_dtype)).copy()
+                pres_arr = np.frombuffer(pres_blob, dtype=np.dtype(pres_np_dtype)).copy()
+
+                full_col = store.columns._make_sentinel_array(col_dtype_str, capacity)
+                full_col[:len(col_arr)] = col_arr
+                store.columns._columns[field_name] = full_col
+
+                full_pres = np.zeros(capacity, dtype=bool)
+                full_pres[:len(pres_arr)] = pres_arr
+                store.columns._presence[field_name] = full_pres
+
+                store.columns._dtypes[field_name] = col_dtype_str
 
     # Load schema
     schema = SchemaRegistry()

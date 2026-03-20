@@ -35,6 +35,19 @@ def checkpoint(store: CoreStore, schema: SchemaRegistry, conn):
         conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
                      ("node_data", json.dumps(node_data_list).encode(), "json"))
 
+        # Column store data
+        conn.execute("DELETE FROM blobs WHERE key LIKE 'columns:%'")
+        for field in store.columns._columns:
+            col_data = store.columns._columns[field][:store._next_slot]
+            pres_data = store.columns._presence[field][:store._next_slot]
+            dtype_str = store.columns._dtypes[field]
+            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                         (f"columns:{field}:data", col_data.tobytes(), str(col_data.dtype)))
+            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                         (f"columns:{field}:presence", pres_data.tobytes(), str(pres_data.dtype)))
+            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                         (f"columns:{field}:dtype", dtype_str.encode(), "text"))
+
         # Edge matrices: one set of blobs per type
         # First, clear old edge blobs
         conn.execute("DELETE FROM blobs WHERE key LIKE 'edges:%'")

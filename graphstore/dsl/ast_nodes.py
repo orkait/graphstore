@@ -283,8 +283,8 @@ class SysExplain:
 @dataclass
 class SysRegisterNodeKind:
     kind: str
-    required: list[str]
-    optional: list[str]
+    required: list[tuple[str, str | None]]  # [(field_name, type_name_or_none), ...]
+    optional: list[tuple[str, str | None]]
 
 @dataclass
 class SysRegisterEdgeKind:

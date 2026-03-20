@@ -12,6 +12,7 @@ import numpy as np
 from graphstore.edges import EdgeMatrices
 from graphstore.errors import GraphStoreError, NodeExists, NodeNotFound
 from graphstore.memory import DEFAULT_CEILING_BYTES, check_ceiling
+from graphstore.columns import ColumnStore
 from graphstore.strings import StringTable
 
 
@@ -42,6 +43,9 @@ class CoreStore:
         self.secondary_indices: dict[str, dict] = {}
         self._indexed_fields: set[str] = set()
 
+        # Columnar acceleration layer
+        self.columns = ColumnStore(self.string_table, self._capacity)
+
     # -- slot management -----------------------------------------------------
 
     def _alloc_slot(self) -> int:
@@ -68,6 +72,7 @@ class CoreStore:
         self.node_kinds = new_kinds
 
         self.node_data.extend([None] * self._capacity)
+        self.columns.grow(new_cap)
         self._capacity = new_cap
 
     # -- properties ----------------------------------------------------------
@@ -107,6 +112,7 @@ class CoreStore:
         self.node_ids[slot] = str_id
         self.node_kinds[slot] = kind_id
         self.node_data[slot] = dict(data)  # copy
+        self.columns.set(slot, data)
         self.id_to_slot[str_id] = slot
         self._count += 1
 
@@ -153,6 +159,7 @@ class CoreStore:
 
         # Update data
         self.node_data[slot].update(data)
+        self.columns.set(slot, data)
 
         # Add new values to indices
         for field in self._indexed_fields:
@@ -188,6 +195,7 @@ class CoreStore:
                     idx_list.remove(slot)
 
         # Tombstone
+        self.columns.clear(slot)
         self.node_tombstones.add(slot)
         self.node_data[slot] = None
         del self.id_to_slot[str_id]
@@ -377,63 +385,129 @@ class CoreStore:
                     result.append({"source": src_id, "target": tgt_id, "kind": etype, **data})
         return result
 
-    def get_all_nodes(self, kind: str | None = None) -> list[dict]:
-        """Get all live nodes, optionally filtered by kind."""
-        if kind and kind not in self.string_table:
-            return []
-
+    def _live_slots(self, kind: str | None = None) -> np.ndarray:
+        """Return numpy array of live slot indices, optionally filtered by kind."""
         n = self._next_slot
         if n == 0:
-            return []
+            return np.empty(0, dtype=np.int32)
 
-        # Build live-slot mask using numpy
-        ids = self.node_ids[:n]
-        mask = ids >= 0  # not empty slots
+        if kind and kind not in self.string_table:
+            return np.empty(0, dtype=np.int32)
 
-        # Exclude tombstones via numpy
+        mask = self.node_ids[:n] >= 0
+
         if self.node_tombstones:
             tomb_arr = np.array(list(self.node_tombstones), dtype=np.int32)
             tomb_mask = np.zeros(n, dtype=bool)
             tomb_mask[tomb_arr[tomb_arr < n]] = True
             mask &= ~tomb_mask
 
-        # Kind filter via numpy
         if kind is not None:
             kind_id = self.string_table.intern(kind)
             mask &= self.node_kinds[:n] == kind_id
 
-        # Extract only matching slots
-        slots = np.nonzero(mask)[0]
+        return np.nonzero(mask)[0]
+
+    def _live_mask(self, kind: str | None = None) -> np.ndarray:
+        """Return boolean mask of live slots, optionally filtered by kind."""
+        n = self._next_slot
+        if n == 0:
+            return np.empty(0, dtype=bool)
+
+        mask = self.node_ids[:n] >= 0
+
+        if self.node_tombstones:
+            tomb_arr = np.array(list(self.node_tombstones), dtype=np.int32)
+            tomb_mask = np.zeros(n, dtype=bool)
+            tomb_mask[tomb_arr[tomb_arr < n]] = True
+            mask = mask & ~tomb_mask
+
+        if kind is not None:
+            if kind not in self.string_table:
+                return np.zeros(n, dtype=bool)
+            kind_id = self.string_table.intern(kind)
+            mask = mask & (self.node_kinds[:n] == kind_id)
+
+        return mask
+
+    def _materialize_slot(self, slot: int) -> dict | None:
+        """Build a full node dict from a slot index."""
+        data = self.node_data[slot]
+        if data is None:
+            return None
+        return {
+            "id": self.string_table.lookup(int(self.node_ids[slot])),
+            "kind": self.string_table.lookup(int(self.node_kinds[slot])),
+            **data,
+        }
+
+    def get_all_nodes(self, kind: str | None = None, predicate=None) -> list[dict]:
+        """Get all live nodes, optionally filtered by kind and/or predicate.
+
+        Args:
+            kind: Optional kind string for numpy-accelerated filtering.
+            predicate: Optional callable(raw_data_dict) -> bool for late
+                materialization. Evaluated against node_data[slot] BEFORE
+                constructing the full merged dict.
+        """
+        slots = self._live_slots(kind)
+        if len(slots) == 0:
+            return []
 
         result = []
         for slot in slots:
             slot = int(slot)
-            if self.node_data[slot] is None:
+            data = self.node_data[slot]
+            if data is None:
+                continue
+            # Late materialization: test predicate on raw data before dict construction
+            if predicate is not None and not predicate(data):
                 continue
             result.append({
-                "id": self.string_table.lookup(int(ids[slot])),
+                "id": self.string_table.lookup(int(self.node_ids[slot])),
                 "kind": self.string_table.lookup(int(self.node_kinds[slot])),
-                **self.node_data[slot],
+                **data,
             })
         return result
 
-    def count_nodes(self, kind: str | None = None) -> int:
-        """Count live nodes without building dicts. Uses numpy."""
-        if kind and kind not in self.string_table:
-            return 0
-        n = self._next_slot
-        if n == 0:
-            return 0
-        mask = self.node_ids[:n] >= 0
-        if self.node_tombstones:
-            tomb_arr = np.array(list(self.node_tombstones), dtype=np.int32)
-            tomb_mask = np.zeros(n, dtype=bool)
-            tomb_mask[tomb_arr[tomb_arr < n]] = True
-            mask &= ~tomb_mask
-        if kind is not None:
-            kind_id = self.string_table.intern(kind)
-            mask &= self.node_kinds[:n] == kind_id
-        return int(np.count_nonzero(mask))
+    def count_nodes(self, kind: str | None = None, predicate=None) -> int:
+        """Count live nodes without building dicts. Uses numpy.
+
+        Args:
+            kind: Optional kind string for numpy-accelerated filtering.
+            predicate: Optional callable(raw_data_dict) -> bool. When provided,
+                counts only nodes whose raw data passes the predicate, still
+                without constructing the full merged dict.
+        """
+        slots = self._live_slots(kind)
+        if predicate is None:
+            return len(slots)
+        count = 0
+        for slot in slots:
+            data = self.node_data[int(slot)]
+            if data is not None and predicate(data):
+                count += 1
+        return count
+
+    def query_node_ids(self, kind: str | None = None, predicate=None) -> list[str]:
+        """Return node IDs matching criteria without full dict construction.
+
+        Useful for DELETE NODES WHERE — only the ID is needed to delete.
+        """
+        slots = self._live_slots(kind)
+        if len(slots) == 0:
+            return []
+        result = []
+        ids = self.node_ids
+        for slot in slots:
+            slot = int(slot)
+            data = self.node_data[slot]
+            if data is None:
+                continue
+            if predicate is not None and not predicate(data):
+                continue
+            result.append(self.string_table.lookup(int(ids[slot])))
+        return result
 
     # -- field operations ----------------------------------------------------
 
@@ -453,3 +527,4 @@ class CoreStore:
                 f"Field '{field}' is not numeric: {type(current).__name__}"
             )
         data[field] = current + amount
+        self.columns.set(slot, {field: data[field]})
