@@ -7,6 +7,7 @@ enforcement.
 
 from __future__ import annotations
 
+import time
 import numpy as np
 
 from graphstore.edges import EdgeMatrices
@@ -112,6 +113,9 @@ class CoreStore:
         self.columns.set(slot, data)
         self.id_to_slot[str_id] = slot
         self._count += 1
+        now_ms = int(time.time() * 1000)
+        self.columns.set_reserved(slot, "__created_at__", now_ms)
+        self.columns.set_reserved(slot, "__updated_at__", now_ms)
 
         # Update secondary indices
         for field in self._indexed_fields:
@@ -162,6 +166,7 @@ class CoreStore:
         for field in self._indexed_fields:
             if field in data:
                 self.secondary_indices[field].setdefault(data[field], []).append(slot)
+        self.columns.set_reserved(slot, "__updated_at__", int(time.time() * 1000))
 
     def upsert_node(self, id: str, kind: str, data: dict) -> int:
         """Create or update node."""
@@ -562,3 +567,4 @@ class CoreStore:
 
         new_val = current + amount
         self.columns.set_field(slot, field, new_val)
+        self.columns.set_reserved(slot, "__updated_at__", int(time.time() * 1000))
