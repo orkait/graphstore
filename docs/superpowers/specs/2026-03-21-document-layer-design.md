@@ -301,15 +301,29 @@ graphstore/
 | Feature | Document Interaction |
 |---|---|
 | CREATE NODE ... DOCUMENT "text" | Store text in DocumentStore (SQLite) |
-| DELETE NODE | Remove document from DocumentStore |
-| MERGE NODE "a" INTO "b" | Keep target's document, discard source's |
+| DELETE NODE | Remove document from DocumentStore. If kind="document", cascade-delete all chunk nodes connected via outgoing edges. |
+| MERGE NODE "a" INTO "b" | If target has no document, copy source's document to target. If target has document, keep target's. |
 | RETRACT | Document stays (audit trail), node invisible |
 | SYS EXPIRE | Remove expired documents from DocumentStore |
-| SYS SNAPSHOT/ROLLBACK | Documents in SQLite are not snapshotted (too large). Snapshots cover graph + columns + vectors only. |
+| SYS SNAPSHOT/ROLLBACK | Documents not snapshotted (too large). On ROLLBACK, scan DocumentStore for orphaned slots (slots with documents but no live graph node) and delete them. |
 | SIMILAR TO | Finds chunks by embedding. Agent fetches document with WITH DOCUMENT. |
 | RECALL | Graph traversal finds related chunks. Agent fetches document with WITH DOCUMENT. |
 | BATCH rollback | Documents created in batch are deleted on rollback. |
+| BIND CONTEXT + INGEST | Chunks created by INGEST inherit the active context. |
 | Persistence | DocumentStore IS SQLite - already persistent. |
+| path=None (in-memory mode) | DocumentStore uses `sqlite3.connect(":memory:")`. Documents exist in memory only, lost on close. Consistent with graph behavior. |
+
+### 9.1 Behavioural Rules
+
+**In-memory mode:** When `path=None`, DocumentStore uses an in-memory SQLite connection. INGEST and DOCUMENT work normally but data is lost on close. This is consistent - without a path, everything is ephemeral.
+
+**Duplicate ingestion:** If `INGEST "file.pdf" AS "doc:report"` and "doc:report" already exists, raise `NodeExists`. Agent must delete the existing document first or use a different ID. If no AS clause, auto-generated IDs (content-hash) are always unique.
+
+**Cascade delete:** When a node with `kind = "document"` is deleted, all outgoing edge targets that have `kind = "chunk"` or `kind = "image"` are also deleted (cascade). This prevents orphaned chunks. Regular node deletion (non-document kind) does NOT cascade.
+
+**Scanned PDF detection:** After pymupdf4llm extraction, if the result averages less than 50 characters per page, the IngestResult.confidence is set to < 0.5 and a warning is included in metadata: `{"warning": "Low text extraction. Consider: USING docling"}`. The agent can decide whether to re-ingest with a different backend.
+
+**Docling lazy import:** Docling is a core dependency (in pyproject.toml) but is never imported at startup. The `DoclingIngestor` class imports `docling` only when `USING docling` is specified. This keeps startup time and memory usage low for agents that don't need Docling.
 
 ## 10. The Full Agent Flow
 
