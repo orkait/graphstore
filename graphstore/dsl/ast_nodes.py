@@ -291,6 +291,33 @@ class MergeStmt:
     source_id: str
     target_id: str
 
+@dataclass
+class PropagateStmt:
+    node_id: str
+    field: str
+    depth: int
+
+@dataclass
+class BindContext:
+    name: str
+
+@dataclass
+class DiscardContext:
+    name: str
+
+# --- Read queries (intelligence) ---
+
+@dataclass
+class RecallQuery:
+    node_id: str
+    depth: int
+    limit: LimitClause | None = None
+    where: WhereClause | None = None
+
+@dataclass
+class CounterfactualQuery:
+    node_id: str
+
 # --- System queries ---
 @dataclass
 class SysStats:
@@ -368,3 +395,15 @@ class SysContradictions:
     where: WhereClause | None = None
     field: str = ""
     group_by: str = ""
+
+@dataclass
+class SysSnapshot:
+    name: str
+
+@dataclass
+class SysRollback:
+    name: str
+
+@dataclass
+class SysSnapshots:
+    pass

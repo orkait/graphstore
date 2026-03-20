@@ -46,6 +46,12 @@ class CoreStore:
         # Columnar acceleration layer
         self.columns = ColumnStore(self.string_table, self._capacity)
 
+        # Active context (for BIND/DISCARD CONTEXT)
+        self._active_context: str | None = None
+
+        # Named snapshots storage (for SYS SNAPSHOT/ROLLBACK)
+        self._snapshots: dict[str, dict] = {}
+
     # -- slot management -----------------------------------------------------
 
     def _alloc_slot(self) -> int:

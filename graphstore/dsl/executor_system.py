@@ -29,7 +29,10 @@ from graphstore.dsl.ast_nodes import (
     SysRebuild,
     SysRegisterEdgeKind,
     SysRegisterNodeKind,
+    SysRollback,
     SysSlowQueries,
+    SysSnapshot,
+    SysSnapshots,
     SysStats,
     SysUnregister,
     SysWal,
@@ -77,6 +80,9 @@ class SystemExecutor:
             SysWal: self._wal,
             SysExpire: self._expire,
             SysContradictions: self._contradictions,
+            SysSnapshot: self._snapshot,
+            SysRollback: self._rollback,
+            SysSnapshots: self._snapshots,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -432,3 +438,65 @@ class SystemExecutor:
                 })
 
         return Result(kind="contradictions", data=contradictions, count=len(contradictions))
+
+    def _snapshot(self, q: SysSnapshot) -> Result:
+        """SYS SNAPSHOT: save full graph state to a named snapshot."""
+        store = self.store
+        snap = {
+            "columns": store.columns.snapshot_arrays(),
+            "node_ids": store.node_ids[:store._next_slot].copy(),
+            "node_kinds": store.node_kinds[:store._next_slot].copy(),
+            "tombstones": set(store.node_tombstones),
+            "edges_by_type": {k: list(v) for k, v in store._edges_by_type.items()},
+            "edge_keys": set(store._edge_keys),
+            "id_to_slot": dict(store.id_to_slot),
+            "next_slot": store._next_slot,
+            "count": store._count,
+            "capacity": store._capacity,
+            "active_context": store._active_context,
+        }
+        store._snapshots[q.name] = snap
+        return Result(kind="ok", data={"snapshot": q.name}, count=1)
+
+    def _rollback(self, q: SysRollback) -> Result:
+        """SYS ROLLBACK TO: restore full graph state from a named snapshot."""
+        store = self.store
+        if q.name not in store._snapshots:
+            raise GraphStoreError(f"Snapshot not found: {q.name!r}")
+
+        snap = store._snapshots[q.name]
+
+        # Restore columns
+        store.columns.restore_arrays(snap["columns"])
+
+        # Restore capacity if needed
+        saved_next_slot = snap["next_slot"]
+        if saved_next_slot > store._capacity:
+            store._grow()
+
+        # Restore node arrays
+        store.node_ids[:saved_next_slot] = snap["node_ids"]
+        store.node_kinds[:saved_next_slot] = snap["node_kinds"]
+
+        # Clear any slots beyond the saved state
+        if saved_next_slot < store._next_slot:
+            store.node_ids[saved_next_slot:store._next_slot] = -1
+            store.node_kinds[saved_next_slot:store._next_slot] = 0
+
+        store.node_tombstones = set(snap["tombstones"])
+        store._edges_by_type = {k: list(v) for k, v in snap["edges_by_type"].items()}
+        store._edge_keys = set(snap["edge_keys"])
+        store.id_to_slot = dict(snap["id_to_slot"])
+        store._next_slot = saved_next_slot
+        store._count = snap["count"]
+        store._active_context = snap.get("active_context")
+
+        # Rebuild derived state
+        store._rebuild_edges()
+
+        return Result(kind="ok", data={"rollback": q.name}, count=1)
+
+    def _snapshots(self, q: SysSnapshots) -> Result:
+        """SYS SNAPSHOTS: list all named snapshots."""
+        names = list(self.store._snapshots.keys())
+        return Result(kind="snapshots", data=names, count=len(names))
