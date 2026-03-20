@@ -286,6 +286,58 @@ class TestDeclareColumn:
         assert mask[0]
 
 
+class TestEnsureColumn:
+    def test_ensure_column_creates_on_first_call(self):
+        cs = ColumnStore(StringTable(), capacity=8)
+        cs._ensure_column("new_field", "float64")
+        assert "new_field" in cs._columns
+        assert cs._dtypes["new_field"] == "float64"
+
+    def test_ensure_column_noop_on_existing(self):
+        cs = ColumnStore(StringTable(), capacity=8)
+        cs._ensure_column("x", "int64")
+        cs._columns["x"][0] = 42
+        cs._ensure_column("x", "int64")
+        assert cs._columns["x"][0] == 42
+
+
+class TestSetReserved:
+    def test_set_reserved_int64(self):
+        cs = ColumnStore(StringTable(), capacity=8)
+        cs.set_reserved(0, "__created_at__", 1710000000000)
+        assert cs._columns["__created_at__"][0] == 1710000000000
+        assert cs._presence["__created_at__"][0] == True
+
+    def test_set_reserved_auto_interns_string(self):
+        st = StringTable()
+        cs = ColumnStore(st, capacity=8)
+        cs.set_reserved(0, "__source__", "web_search")
+        assert cs._dtypes["__source__"] == "int32_interned"
+        assert cs._presence["__source__"][0] == True
+        str_id = cs._columns["__source__"][0]
+        assert cs._string_table.lookup(int(str_id)) == "web_search"
+
+    def test_set_reserved_float64(self):
+        cs = ColumnStore(StringTable(), capacity=8)
+        cs.set_reserved(0, "__confidence__", 0.95)
+        assert cs._dtypes["__confidence__"] == "float64"
+        assert abs(cs._columns["__confidence__"][0] - 0.95) < 1e-10
+
+
+class TestSetField:
+    def test_set_field_single_value(self):
+        cs = ColumnStore(StringTable(), capacity=8)
+        cs.set_field(0, "score", 42)
+        assert cs._columns["score"][0] == 42
+        assert cs._presence["score"][0] == True
+
+    def test_set_field_string(self):
+        cs = ColumnStore(StringTable(), capacity=8)
+        cs.set_field(0, "name", "Alice")
+        assert cs._dtypes["name"] == "int32_interned"
+        assert cs._presence["name"][0] == True
+
+
 class TestGetColumn:
     def test_get_column_returns_data_and_presence(self):
         cs = ColumnStore(StringTable(), capacity=8)
