@@ -1,6 +1,9 @@
 from lark import Transformer, Token
 from graphstore.dsl.ast_nodes import (
     Condition,
+    ContainsCondition,
+    LikeCondition,
+    InCondition,
     DegreeCondition,
     NotExpr,
     AndExpr,
@@ -357,6 +360,17 @@ class DSLTransformer(Transformer):
 
     def condition(self, args):
         return Condition(field=str(args[0]), op=str(args[1]), value=args[2])
+
+    def contains_cond(self, args):
+        return ContainsCondition(field=str(args[0]), value=self._str(args[1]))
+
+    def like_cond(self, args):
+        return LikeCondition(field=str(args[0]), pattern=self._str(args[1]))
+
+    def in_cond(self, args):
+        field = str(args[0])
+        values = list(args[1:])
+        return InCondition(field=field, values=values)
 
     def degree_condition(self, args):
         degree_type = args[0]

@@ -100,7 +100,7 @@ class GraphStore:
             self._schema = SchemaRegistry()
 
         # Create executors before WAL replay so _replay_wal can use them
-        self._executor = Executor(self._store)
+        self._executor = Executor(self._store, self._schema)
         self._sys_executor = SystemExecutor(self._store, self._schema, self._conn)
 
         # Replay WAL (must happen after executor is created)
