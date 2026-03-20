@@ -797,10 +797,7 @@ class Executor:
         """
         saved_edges = {k: list(v) for k, v in self.store._edges_by_type.items()}
         saved_edge_keys = set(self.store._edge_keys)
-        saved_node_data = [
-            dict(d) if d is not None else None
-            for d in self.store.node_data[: self.store._next_slot]
-        ]
+        saved_columns = self.store.columns.snapshot_arrays()
         saved_tombstones = set(self.store.node_tombstones)
         saved_id_to_slot = dict(self.store.id_to_slot)
         saved_count = self.store._count
@@ -840,8 +837,6 @@ class Executor:
             # Rollback
             self.store._edges_by_type = saved_edges
             self.store._edge_keys = saved_edge_keys
-            for i in range(saved_next_slot):
-                self.store.node_data[i] = saved_node_data[i]
             self.store.node_tombstones = saved_tombstones
             self.store.id_to_slot = saved_id_to_slot
             self.store._count = saved_count
@@ -849,9 +844,7 @@ class Executor:
             self.store.node_ids[:saved_next_slot] = saved_node_ids
             self.store.node_kinds[:saved_next_slot] = saved_node_kinds
             self.store._rebuild_edges()
-            self.store.columns.rebuild_from(
-                self.store.node_data, self.store._next_slot
-            )
+            self.store.columns.restore_arrays(saved_columns)
             raise BatchRollback(
                 failed_statement=str(type(e).__name__), error=str(e)
             )
@@ -1087,7 +1080,7 @@ class Executor:
         return False
 
     def _references_synthetic_fields(self, expr) -> bool:
-        """Check if expression references 'kind' or 'id' (stored outside node_data)."""
+        """Check if expression references 'kind' or 'id' (stored in separate arrays)."""
         if isinstance(expr, (Condition, ContainsCondition, LikeCondition, InCondition)):
             return expr.field in ("kind", "id")
         if isinstance(expr, AndExpr):
@@ -1101,9 +1094,9 @@ class Executor:
     def _make_raw_predicate(self, expr):
         """Build a callable(raw_data_dict) -> bool for slot-level filtering.
 
-        Works against node_data[slot] directly (no id/kind fields).
+        Works against materialized data fields (no id/kind).
         Returns None if expression contains DegreeCondition or references
-        synthetic fields (kind, id) that aren't in node_data.
+        synthetic fields (kind, id) that aren't in column data.
         """
         if self._contains_degree_condition(expr):
             return None

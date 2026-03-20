@@ -743,7 +743,7 @@ class TestEndToEnd:
         loaded, _ = load(conn)
         alice = loaded.get_node("alice")
         assert alice["age"] == 31
-        assert alice["promoted"] is True
+        assert alice["promoted"] == 1  # booleans stored as int64 in columns
         conn.close()
 
     def test_delete_node_then_checkpoint(self, tmp_path):

@@ -252,13 +252,9 @@ class SystemExecutor:
 
     def _rebuild(self, q: SysRebuild) -> Result:
         self.store._rebuild_edges()
-        # Rebuild secondary indices
+        # Rebuild secondary indices from columns (sole source of truth)
         for field in list(self.store._indexed_fields):
             self.store.add_index(field)
-        # Rebuild column store from dicts
-        self.store.columns.rebuild_from(
-            self.store.node_data, self.store._next_slot
-        )
         return Result(kind="ok", data=None, count=0)
 
     def _clear(self, q: SysClear) -> Result:

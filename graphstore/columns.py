@@ -1,7 +1,7 @@
-"""Columnar acceleration layer for node properties.
+"""Columnar storage layer for node properties.
 
 Manages typed numpy arrays indexed by slot, providing vectorized
-filtering as a read-acceleration layer over the dict-based node_data.
+filtering. This is the sole source of truth for node field data.
 """
 
 from __future__ import annotations
@@ -193,7 +193,11 @@ class ColumnStore:
         self.set(slot, {field: value})
 
     def rebuild_from(self, node_data: list[dict | None], n: int) -> None:
-        """Clear all columns and re-scan node_data[:n] to repopulate."""
+        """Clear all columns and re-scan data dicts[:n] to repopulate.
+
+        Accepts a list of dicts (may be None per slot). Used for batch
+        rollback and deserialization migration.
+        """
         self._columns.clear()
         self._presence.clear()
         self._dtypes.clear()
@@ -201,6 +205,30 @@ class ColumnStore:
             data = node_data[slot]
             if data is not None:
                 self.set(slot, data)
+
+    def snapshot_arrays(self) -> dict[str, tuple]:
+        """Return deep copies of all column arrays for snapshot/rollback.
+
+        Returns dict mapping field -> (column_copy, presence_copy, dtype_str).
+        """
+        snap: dict[str, tuple] = {}
+        for field in self._columns:
+            snap[field] = (
+                self._columns[field].copy(),
+                self._presence[field].copy(),
+                self._dtypes[field],
+            )
+        return snap
+
+    def restore_arrays(self, snap: dict[str, tuple]) -> None:
+        """Restore column arrays from a snapshot created by snapshot_arrays()."""
+        self._columns.clear()
+        self._presence.clear()
+        self._dtypes.clear()
+        for field, (col, pres, dtype_str) in snap.items():
+            self._columns[field] = col
+            self._presence[field] = pres
+            self._dtypes[field] = dtype_str
 
     @property
     def memory_bytes(self) -> int:
