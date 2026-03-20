@@ -38,11 +38,23 @@ class GraphStore:
     """
 
     def __init__(self, path: str | None = None, ceiling_mb: int = 256,
-                 embedder="default", allow_system_queries: bool = True):
+                 embedder="default", allow_system_queries: bool = True,
+                 voice: bool = False):
         self._path = Path(path) if path else None
         self._ceiling_bytes = ceiling_mb * 1_000_000
         self._allow_system = allow_system_queries
         self._conn: sqlite3.Connection | None = None
+        self._stt = None
+        self._tts = None
+
+        if voice:
+            try:
+                from graphstore.voice.stt import MoonshineSTT
+                from graphstore.voice.tts import PiperTTS
+                self._stt = MoonshineSTT()
+                self._tts = PiperTTS()
+            except ImportError:
+                pass  # Voice not installed; speak/listen will raise on use
 
         # Initialize embedder
         if embedder == "default":
@@ -202,6 +214,25 @@ class GraphStore:
             return None
         from graphstore.persistence.database import get_metadata
         return get_metadata(conn, "playground_script")
+
+    def speak(self, text: str) -> None:
+        """Text-to-speech via Piper."""
+        if not self._tts:
+            raise ImportError("Voice not installed. Run: graphstore install-voice")
+        self._tts.speak(text)
+
+    def listen(self, on_text=None) -> None:
+        """Start real-time STT via Moonshine."""
+        if not self._stt:
+            raise ImportError("Voice not installed. Run: graphstore install-voice")
+        if on_text is None:
+            raise ValueError("on_text callback is required")
+        self._stt.start_listening(on_text)
+
+    def stop_listening(self) -> None:
+        """Stop real-time STT."""
+        if self._stt:
+            self._stt.stop_listening()
 
     def close(self) -> None:
         """Checkpoint + close sqlite connection."""

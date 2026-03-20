@@ -143,9 +143,10 @@ class TestRouter:
     def test_list_ingestors(self):
         from graphstore.ingest.router import list_ingestors
         ingestors = list_ingestors()
-        assert len(ingestors) == 3
+        assert len(ingestors) == 4
         names = [i["name"] for i in ingestors]
         assert "markitdown" in names
+        assert "audio" in names
 
     def test_ingest_text_file(self, tmp_path):
         f = tmp_path / "test.txt"

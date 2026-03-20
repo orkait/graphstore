@@ -48,6 +48,51 @@ def cmd_uninstall_embedder(args: argparse.Namespace) -> None:
     uninstall_embedder(args.name)
 
 
+def cmd_install_voice(args: argparse.Namespace) -> None:
+    """Install voice dependencies (Moonshine STT + Piper TTS)."""
+    import subprocess
+
+    packages = ["piper-tts", "moonshine"]
+    print(f"Installing voice dependencies: {', '.join(packages)}")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install"] + packages,
+        check=False,
+    )
+    if result.returncode == 0:
+        print("Voice dependencies installed. You can now use GraphStore(voice=True).")
+    else:
+        print("Installation failed. Check the output above for details.", file=sys.stderr)
+        sys.exit(result.returncode)
+
+
+def cmd_list_voice(args: argparse.Namespace) -> None:
+    """Show voice (STT/TTS) status."""
+    stt_status = "not installed"
+    tts_status = "not installed"
+
+    try:
+        import moonshine  # noqa: F401
+        stt_status = "installed"
+    except ImportError:
+        pass
+
+    try:
+        import piper  # noqa: F401
+        tts_status = "installed"
+    except ImportError:
+        pass
+
+    print(f"{'COMPONENT':<20} {'STATUS':<12} PACKAGE")
+    print("-" * 50)
+    print(f"{'Moonshine STT':<20} {stt_status:<12} moonshine")
+    print(f"{'Piper TTS':<20} {tts_status:<12} piper-tts")
+    print()
+    if stt_status == "installed" and tts_status == "installed":
+        print("Voice is ready. Use GraphStore(voice=True) to enable.")
+    else:
+        print("Run: graphstore install-voice")
+
+
 def cmd_playground(args: argparse.Namespace) -> None:
     """Run the playground web UI."""
     try:
@@ -121,6 +166,14 @@ def main(argv: list[str] | None = None) -> None:
     ue = sub.add_parser("uninstall-embedder", help="Remove an installed embedder model")
     ue.add_argument("name", help="Model name to uninstall")
     ue.set_defaults(func=cmd_uninstall_embedder)
+
+    # install-voice subcommand
+    iv = sub.add_parser("install-voice", help="Install voice dependencies (Moonshine STT + Piper TTS)")
+    iv.set_defaults(func=cmd_install_voice)
+
+    # list-voice subcommand
+    lv = sub.add_parser("list-voice", help="Show voice (STT/TTS) installation status")
+    lv.set_defaults(func=cmd_list_voice)
 
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
