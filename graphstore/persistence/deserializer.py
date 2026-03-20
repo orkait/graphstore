@@ -6,6 +6,7 @@ secondary indices, and tombstones.
 """
 
 import json
+from urllib.parse import unquote
 
 import numpy as np
 
@@ -45,12 +46,14 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     # Create store and set its internals
     store = CoreStore()
     store.string_table = string_table
+    store.columns._string_table = string_table
     store._next_slot = meta["next_slot"]
     store._count = meta["count"]
 
     # Ensure capacity
     capacity = meta.get("capacity", max(meta["next_slot"] * 2, 1024))
     store._capacity = capacity
+    store.columns._capacity = capacity
 
     # Load node arrays
     ids_row = conn.execute("SELECT data, dtype FROM blobs WHERE key='node_ids'").fetchone()
@@ -63,19 +66,14 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     store.node_kinds = np.zeros(capacity, dtype=np.uint8)
     store.node_kinds[:len(loaded_kinds)] = loaded_kinds
 
-    # Load node data
-    data_row = conn.execute("SELECT data FROM blobs WHERE key='node_data'").fetchone()
-    loaded_data = json.loads(data_row[0])
-    store.node_data = loaded_data + [None] * (capacity - len(loaded_data))
-
     # Load tombstones
     tomb_row = conn.execute("SELECT data FROM blobs WHERE key='tombstones'").fetchone()
     store.node_tombstones = set(json.loads(tomb_row[0]))
 
-    # Rebuild id_to_slot
+    # Rebuild id_to_slot from node_ids array
     store.id_to_slot = {}
     for slot in range(store._next_slot):
-        if slot not in store.node_tombstones and store.node_data[slot] is not None:
+        if slot not in store.node_tombstones:
             str_id = int(store.node_ids[slot])
             if str_id >= 0:
                 store.id_to_slot[str_id] = slot
@@ -98,10 +96,46 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     }
     store._rebuild_edges()
 
-    # Load indexed fields and rebuild indices
+    # Load indexed field names (indices rebuilt after columns are loaded)
     idx_row = conn.execute("SELECT data FROM blobs WHERE key='indexed_fields'").fetchone()
+    indexed_fields = json.loads(idx_row[0]) if idx_row else []
+
+    # Load column store data
+    col_rows = conn.execute(
+        "SELECT key, data, dtype FROM blobs WHERE key LIKE 'columns:%'"
+    ).fetchall()
+
+    if col_rows:
+        col_blobs: dict[str, dict] = {}
+        for key, data, dtype in col_rows:
+            parts = key.split(":", 2)
+            if len(parts) == 3:
+                field_name = unquote(parts[1])
+                sub_key = parts[2]
+                col_blobs.setdefault(field_name, {})[sub_key] = (data, dtype)
+
+        for field_name, blobs in col_blobs.items():
+            if "data" in blobs and "presence" in blobs and "dtype" in blobs:
+                data_blob, data_np_dtype = blobs["data"]
+                pres_blob, pres_np_dtype = blobs["presence"]
+                col_dtype_raw = blobs["dtype"][0]
+                col_dtype_str = col_dtype_raw.decode() if isinstance(col_dtype_raw, bytes) else col_dtype_raw
+
+                col_arr = np.frombuffer(data_blob, dtype=np.dtype(data_np_dtype)).copy()
+                pres_arr = np.frombuffer(pres_blob, dtype=np.dtype(pres_np_dtype)).copy()
+
+                full_col = store.columns._make_sentinel_array(col_dtype_str, capacity)
+                full_col[:len(col_arr)] = col_arr
+                store.columns._columns[field_name] = full_col
+
+                full_pres = np.zeros(capacity, dtype=bool)
+                full_pres[:len(pres_arr)] = pres_arr
+                store.columns._presence[field_name] = full_pres
+
+                store.columns._dtypes[field_name] = col_dtype_str
+
+    # Rebuild secondary indices now that columns are loaded
     if idx_row:
-        indexed_fields = json.loads(idx_row[0])
         for field in indexed_fields:
             store.add_index(field)
 

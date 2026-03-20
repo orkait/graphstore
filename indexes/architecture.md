@@ -1,32 +1,46 @@
 # System Architecture
 
-The overarching architecture of `graphstore` is composed of four main pillars:
+The overarching architecture of `graphstore` is composed of five main pillars:
 
-## 1. Node Storage (`store.py:CoreStore`)
-Nodes are stored in pre-allocated arrays and lists to prevent frequent memory allocations and to make data highly contiguous where possible.
+## 1. Columnar Node Storage (`store.py:CoreStore`, `columns.py:ColumnStore`)
+All node field data is stored in typed numpy arrays managed by `ColumnStore` - the sole source of truth.
 
-- `node_ids`: A NumPy array (`int32`) storing interned string IDs.
-- `node_kinds`: A NumPy array (`uint8`) storing interned kind IDs.
-- `node_data`: A standard Python list storing the properties (`dict`) of every node.
-- **Tombstones**: When nodes are deleted, their active slot is marked in a `tombstones` set. A new node insertion (`put_node`) will recycle a tombstoned slot before expanding the internal capacity.
-- **Secondary Indices**: Optional quick-lookups on fields are stored in standard dictionaries (`secondary_indices[field][val] = [slots...]`).
+- `node_ids`: NumPy array (`int32`) storing interned string IDs.
+- `node_kinds`: NumPy array (`int32`) storing interned kind IDs.
+- `ColumnStore._columns`: Dict of field name to typed numpy array (`int64`, `float64`, or `int32` interned strings).
+- `ColumnStore._presence`: Dict of field name to boolean numpy mask (tracks which slots have a value set).
+- **Reserved columns**: System-managed fields prefixed with `__` (e.g. `__created_at__`, `__updated_at__`, `__expires_at__`, `__retracted__`, `__confidence__`, `__source__`, `__context__`). Invisible in user-facing query results.
+- **Tombstones**: Deleted slots marked in a `tombstones` set. Recycled on next insertion before expanding capacity.
+- **Secondary Indices**: Optional quick-lookups on fields stored in standard dictionaries (`secondary_indices[field][val] = [slots...]`).
+- **Materialization**: User-facing dicts are built on demand from column arrays only when needed for query results (`_materialize_slot`). At LIMIT 10, this costs ~5us.
 
 ## 2. Edge Storage (`edges.py:EdgeMatrices`)
 The defining performance characteristic of `graphstore` is its usage of SciPy Compressed Sparse Row (CSR) matrices.
 
-- **Matrix Types**: For every distinct edge `kind`, a dedicated $N \times N$ SciPy `csr_matrix` is instantiated.
-- **Why CSR?**: CSR matrices allow for extremely fast queries on out-degrees and neighbor traversal without heavy object overhead.
-- **Combined & Transposed**: `edges.py` also caches a combination of all edge matrices (the *union*) and caches transposed matrices (CSC) to rapidly compute the in-degrees or follow reverse edges (`ANCESTORS OF`).
-- **Rebuilding**: Modifications to the edges are queued in an intermediate Python list. The actual matrix is fully rebuilt (from `np.ones` and source/target arrays) either automatically on demand or explicitly after a `COMMIT`.
+- **Matrix Types**: For every distinct edge `kind`, a dedicated N x N SciPy `csr_matrix` is instantiated.
+- **Why CSR?**: CSR matrices allow for extremely fast queries on out-degrees and neighbor traversal without heavy object overhead. Also enables spreading activation via sparse matrix-vector multiply (`csr.dot(activation)`).
+- **Combined & Transposed**: `edges.py` caches a combination of all edge matrices (the union) and transposed matrices (CSC) for rapid in-degree computation and reverse traversal (`ANCESTORS OF`).
+- **Rebuilding**: Modifications are queued in an intermediate Python list. The actual matrix is rebuilt on demand or explicitly after a `COMMIT`.
 
 ## 3. String Interning (`strings.py:StringTable`)
-Since text operations are slow and wasteful, node IDs and types are "interned"—mapped to unique integer IDs. This shrinks memory usage and accelerates comparative logic (e.g. `node_kinds[slot] == kind_id`).
+Node IDs, kinds, and string field values are "interned" - mapped to unique integer IDs. This shrinks memory usage and accelerates comparisons (e.g. `node_kinds[slot] == kind_id`). String columns store int32 interned IDs, not raw strings.
 
 ## 4. Persistence (`persistence/database.py`)
-To ensure recoverability across restarts, `graphstore` utilizes an SQLite backend configuered with `PRAGMA journal_mode=WAL`.
+`graphstore` uses an SQLite backend configured with `PRAGMA journal_mode=WAL`.
 
-- **Write-Ahead Log**: Rather than immediately flushing arrays to disk upon every command, statements are written to the `wal` table sequentially. 
-- **Checkpoints**: When a manual checkpoint is triggered (or upon database close), the in-memory graph is serialized into compressed SQLite blobs (storing chunks of bytes using `pickle` / `numpy`), truncating the WAL.
+- **Write-Ahead Log**: Statements are written to the `wal` table sequentially rather than immediately flushing arrays.
+- **Checkpoints**: On manual checkpoint or database close, column arrays are serialized as raw numpy byte blobs. Field names are URL-encoded to handle special characters (e.g. reserved `__` columns with colons).
+- **Migration**: The deserializer handles legacy `node_data` JSON blobs from older versions and auto-migrates to columnar-only storage.
 
 ## 5. Memory Management (`memory.py`)
-Because the database runs entirely in-memory, a strict size limit (`DEFAULT_CEILING_BYTES` = 256MB) is monitored prior to node bounds expansion, utilizing `check_ceiling` to reject queries that exceed RAM limits with a `CeilingExceeded` exception.
+A strict size limit (`DEFAULT_CEILING_BYTES` = 256MB) is enforced prior to node/edge insertion. `check_ceiling` rejects operations that would exceed the limit with `CeilingExceeded`.
+
+## 6. Visibility System (`store.py:compute_live_mask`, `executor.py:_compute_live_mask`)
+A unified boolean mask computed once per query that determines which nodes are visible:
+
+- **Tombstones**: deleted nodes excluded
+- **TTL expiry**: nodes past `__expires_at__` excluded
+- **Retracted beliefs**: nodes with `__retracted__ = 1` excluded
+- **Context isolation**: when a context is bound, only nodes tagged with `__context__ = name` are visible
+
+All query types (NODES, TRAVERSE, PATH, MATCH, RECALL, AGGREGATE, etc.) respect this mask.
