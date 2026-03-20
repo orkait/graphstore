@@ -407,6 +407,28 @@ class CoreStore:
                     result.append({"source": src_id, "target": tgt_id, "kind": etype, **data})
         return result
 
+    def compute_live_mask(self, n: int) -> np.ndarray:
+        """Unified visibility: tombstones + TTL + retracted."""
+        mask = self.node_ids[:n] >= 0
+        if self.node_tombstones:
+            tomb_arr = np.array(list(self.node_tombstones), dtype=np.int32)
+            tomb_mask = np.zeros(n, dtype=bool)
+            valid = tomb_arr[tomb_arr < n]
+            if len(valid) > 0:
+                tomb_mask[valid] = True
+            mask = mask & ~tomb_mask
+        expires = self.columns.get_column("__expires_at__", n)
+        if expires is not None:
+            col, pres, _ = expires
+            import time as _time
+            now_ms = int(_time.time() * 1000)
+            mask = mask & ~(pres & (col > 0) & (col < now_ms))
+        retracted = self.columns.get_column("__retracted__", n)
+        if retracted is not None:
+            col, pres, _ = retracted
+            mask = mask & ~(pres & (col == 1))
+        return mask
+
     def _live_slots(self, kind: str | None = None) -> np.ndarray:
         """Return numpy array of live slot indices, optionally filtered by kind."""
         n = self._next_slot
