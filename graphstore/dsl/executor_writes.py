@@ -10,6 +10,7 @@ from graphstore.dsl.ast_nodes import (
     AssertStmt,
     Batch,
     BindContext,
+    ConnectNode,
     CreateEdge,
     CreateNode,
     DeleteEdge,
@@ -130,11 +131,37 @@ class WriteExecutor(ExecutorBase):
         return Result(kind="node", data=node, count=1)
 
     def _delete_node(self, q: DeleteNode) -> Result:
-        # Remove vector before deleting the node (need slot while node still exists)
-        if self._vector_store:
-            slot = self._resolve_slot(q.id)
-            if slot is not None:
-                self._vector_store.remove(slot)
+        # Resolve slot before deletion
+        slot = self._resolve_slot(q.id)
+
+        # Cascade: if this is a document node, delete all chunks and images first
+        if slot is not None:
+            kind_str_id = int(self.store.node_kinds[slot])
+            kind_name = self.store.string_table.lookup(kind_str_id)
+            if kind_name == "document":
+                # Find and delete all outgoing chunk/image nodes
+                edges = self.store.get_edges_from(q.id)
+                for edge in edges:
+                    if edge["kind"] in ("has_chunk", "has_image"):
+                        tgt_id = edge["target"]
+                        tgt_slot = self._resolve_slot(tgt_id)
+                        if tgt_slot is not None:
+                            if self._vector_store:
+                                self._vector_store.remove(tgt_slot)
+                            if self._document_store:
+                                self._document_store.delete_document(tgt_slot)
+                            try:
+                                self.store.delete_node(tgt_id)
+                            except NodeNotFound:
+                                pass
+
+                # Clean up DocumentStore entries for this document
+                if self._document_store:
+                    self._document_store.delete_all_for_doc(slot)
+
+        # Remove vector before deleting the node
+        if self._vector_store and slot is not None:
+            self._vector_store.remove(slot)
         self.store.delete_node(q.id)
         return Result(kind="ok", data={"id": q.id}, count=1)
 
@@ -246,7 +273,11 @@ class WriteExecutor(ExecutorBase):
         return Result(kind="node", data=node, count=1)
 
     def _retract(self, q: RetractStmt) -> Result:
-        """RETRACT: mark node as retracted (invisible via live_mask)."""
+        """RETRACT: mark node as retracted (invisible via live_mask).
+
+        If the retracted node is kind='document', also retract all outgoing
+        chunk and image nodes.
+        """
         if q.id not in self.store.string_table:
             raise NodeNotFound(q.id)
         str_id = self.store.string_table.intern(q.id)
@@ -258,6 +289,24 @@ class WriteExecutor(ExecutorBase):
         self.store.columns.set_reserved(slot, "__retracted_at__", now_ms)
         if q.reason:
             self.store.columns.set_reserved(slot, "__retract_reason__", q.reason)
+
+        # Cascade: if this is a document node, retract all chunks and images
+        kind_str_id = int(self.store.node_kinds[slot])
+        kind_name = self.store.string_table.lookup(kind_str_id)
+        if kind_name == "document":
+            # Find all outgoing edges (has_chunk, has_image)
+            edges = self.store.get_edges_from(q.id)
+            for edge in edges:
+                if edge["kind"] in ("has_chunk", "has_image"):
+                    tgt_id = edge["target"]
+                    tgt_str_id = self.store.string_table.intern(tgt_id) if tgt_id in self.store.string_table else None
+                    tgt_slot = self.store.id_to_slot.get(tgt_str_id) if tgt_str_id is not None else None
+                    if tgt_slot is not None and tgt_slot not in self.store.node_tombstones:
+                        self.store.columns.set_reserved(tgt_slot, "__retracted__", 1)
+                        self.store.columns.set_reserved(tgt_slot, "__retracted_at__", now_ms)
+                        if q.reason:
+                            self.store.columns.set_reserved(tgt_slot, "__retract_reason__", q.reason)
+
         return Result(kind="ok", data={"id": q.id}, count=1)
 
     def _update_nodes(self, q: UpdateNodes) -> Result:
@@ -725,3 +774,11 @@ class WriteExecutor(ExecutorBase):
             "parser": result.parser_used,
             "confidence": result.confidence,
         }, count=len(chunks))
+
+    def _connect_node(self, q: ConnectNode) -> Result:
+        """CONNECT NODE: wire one node to similar neighbors via vector similarity."""
+        from graphstore.ingest.connector import connect_node as _connect_node_fn
+        return _connect_node_fn(
+            self.store, self._vector_store,
+            q.node_id, threshold=q.threshold,
+        )

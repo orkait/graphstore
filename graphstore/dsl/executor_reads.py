@@ -988,6 +988,11 @@ class ReadExecutor(ExecutorBase):
 
     def _similar(self, q: SimilarQuery) -> Result:
         """SIMILAR TO: vector similarity search."""
+        # Check embedder dirty flag
+        if hasattr(self, '_embedder_dirty') and self._embedder_dirty:
+            from graphstore.core.errors import GraphStoreError
+            raise GraphStoreError("Embedder changed. Run SYS REEMBED to update vectors.")
+
         # 1. Resolve query vector
         if q.target_vector is not None:
             query_vec = np.array(q.target_vector, dtype=np.float32)

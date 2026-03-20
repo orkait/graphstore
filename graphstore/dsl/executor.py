@@ -11,6 +11,7 @@ from graphstore.dsl.ast_nodes import (
     Batch,
     BindContext,
     CommonNeighborsQuery,
+    ConnectNode,
     CountQuery,
     CounterfactualQuery,
     CreateEdge,
@@ -96,6 +97,7 @@ class Executor(ReadExecutor, WriteExecutor):
             BindContext: self._bind_context,
             DiscardContext: self._discard_context,
             IngestStmt: self._ingest,
+            ConnectNode: self._connect_node,
         }
         handler = handlers.get(type(ast))
         if handler is None:

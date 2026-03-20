@@ -82,6 +82,10 @@ from graphstore.dsl.ast_nodes import (
     SysSnapshots,
     SysDuplicates,
     SysEmbedders,
+    SysConnect,
+    ConnectNode,
+    SysReembed,
+    SysStatus,
 )
 
 
@@ -809,6 +813,28 @@ class DSLTransformer(Transformer):
 
     def sys_embedders(self, args):
         return SysEmbedders()
+
+    def sys_connect(self, args):
+        where = self._find(args, WhereClause)
+        threshold = 0.85
+        for a in args:
+            if isinstance(a, tuple) and a[0] == "threshold":
+                threshold = a[1]
+        return SysConnect(where=where, threshold=threshold)
+
+    def connect_node(self, args):
+        node_id = self._str(args[0])
+        threshold = 0.8
+        for a in args[1:]:
+            if isinstance(a, tuple) and a[0] == "threshold":
+                threshold = a[1]
+        return ConnectNode(node_id=node_id, threshold=threshold)
+
+    def sys_reembed(self, args):
+        return SysReembed()
+
+    def sys_status(self, args):
+        return SysStatus()
 
     def sys_contradictions(self, args):
         where = self._find(args, WhereClause)

@@ -28,6 +28,7 @@ class ExecutorBase:
         self._vector_store = vector_store
         self._document_store = document_store
         self.cost_threshold = 100_000
+        self._embedder_dirty = False
 
     def execute(self, ast) -> Result:
         """Execute a parsed AST node and return a Result."""
