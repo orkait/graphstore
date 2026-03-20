@@ -9,15 +9,15 @@ export function CanvasControls() {
 
   return (
     <Panel position="top-right">
-      <div className="bg-card/80 backdrop-blur-sm border border-border rounded-lg p-3 space-y-3 min-w-[180px]">
+      <div className="bg-[var(--panel-bg)] backdrop-blur-sm border border-[var(--panel-border)] rounded-lg p-3 space-y-3 min-w-[180px]">
         {/* Mode toggle */}
-        <div className="flex rounded-md overflow-hidden border border-border text-[11px]">
+        <div className="flex rounded-md overflow-hidden border border-[var(--panel-border)] text-[11px]">
           <button
             onClick={() => updateConfig({ layoutMode: 'dagre' as LayoutMode })}
             className={`flex-1 px-3 py-1.5 transition-colors ${
               layoutMode === 'dagre'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-card text-muted-foreground hover:bg-accent'
+                ? 'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-text)] border-r border-[var(--btn-primary-border)]'
+                : 'bg-[var(--panel-bg)] text-[var(--panel-text)] hover:bg-[var(--panel-hover)] border-r border-[var(--panel-border)]'
             }`}
           >
             Dagre
@@ -26,8 +26,8 @@ export function CanvasControls() {
             onClick={() => updateConfig({ layoutMode: 'cluster' as LayoutMode })}
             className={`flex-1 px-3 py-1.5 transition-colors ${
               layoutMode === 'cluster'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-card text-muted-foreground hover:bg-accent'
+                ? 'bg-[var(--btn-primary-bg)] text-[var(--btn-primary-text)]'
+                : 'bg-[var(--panel-bg)] text-[var(--panel-text)] hover:bg-[var(--panel-hover)]'
             }`}
           >
             Cluster
@@ -39,8 +39,8 @@ export function CanvasControls() {
           <>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">Center force</span>
-                <span className="text-[10px] font-mono text-muted-foreground">{centerForce}</span>
+                <span className="text-[10px] text-[var(--panel-label)]">Center force</span>
+                <span className="text-[10px] font-mono text-[var(--panel-value)]">{centerForce}</span>
               </div>
               <Slider
                 value={[centerForce]}
@@ -50,8 +50,8 @@ export function CanvasControls() {
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">Repel force</span>
-                <span className="text-[10px] font-mono text-muted-foreground">{repelStrength}</span>
+                <span className="text-[10px] text-[var(--panel-label)]">Repel force</span>
+                <span className="text-[10px] font-mono text-[var(--panel-value)]">{repelStrength}</span>
               </div>
               <Slider
                 value={[repelStrength]}
@@ -61,8 +61,8 @@ export function CanvasControls() {
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">Link force</span>
-                <span className="text-[10px] font-mono text-muted-foreground">{linkForce}</span>
+                <span className="text-[10px] text-[var(--panel-label)]">Link force</span>
+                <span className="text-[10px] font-mono text-[var(--panel-value)]">{linkForce}</span>
               </div>
               <Slider
                 value={[linkForce]}
@@ -72,8 +72,8 @@ export function CanvasControls() {
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">Link distance</span>
-                <span className="text-[10px] font-mono text-muted-foreground">{linkDistance}</span>
+                <span className="text-[10px] text-[var(--panel-label)]">Link distance</span>
+                <span className="text-[10px] font-mono text-[var(--panel-value)]">{linkDistance}</span>
               </div>
               <Slider
                 value={[linkDistance]}
@@ -83,8 +83,8 @@ export function CanvasControls() {
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] text-muted-foreground">Cluster force</span>
-                <span className="text-[10px] font-mono text-muted-foreground">{clusterStrength}</span>
+                <span className="text-[10px] text-[var(--panel-label)]">Cluster force</span>
+                <span className="text-[10px] font-mono text-[var(--panel-value)]">{clusterStrength}</span>
               </div>
               <Slider
                 value={[clusterStrength]}

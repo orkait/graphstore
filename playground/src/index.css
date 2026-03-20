@@ -73,6 +73,14 @@
     --kind-fallback-2-text: #8a6020;
     --kind-fallback-2-badge: #c8a062;
 
+    /* Panel controls - light */
+    --panel-bg: rgba(255,255,255,0.85);
+    --panel-border: #d8d8de;
+    --panel-text: #5a5a68;
+    --panel-hover: #f0efe8;
+    --panel-label: #7a7a88;
+    --panel-value: #5a5a68;
+
     /* Button tones - light (warm pastels) */
     --btn-primary-bg: #e5f0e8;
     --btn-primary-hover: #d4e8d8;
@@ -190,6 +198,14 @@
     --kind-fallback-2-border: #b5924a;
     --kind-fallback-2-text: #d4c090;
     --kind-fallback-2-badge: #b5924a;
+
+    /* Panel controls - dark */
+    --panel-bg: rgba(40,40,48,0.90);
+    --panel-border: #4a4a58;
+    --panel-text: #b0b0c0;
+    --panel-hover: #383844;
+    --panel-label: #8888a0;
+    --panel-value: #a0a0b8;
 
     /* Button tones - dark (lifted from card bg, tinted) */
     --btn-primary-bg: #283e30;
