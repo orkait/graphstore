@@ -84,6 +84,7 @@ class AggregateQuery:
 @dataclass
 class NodeQuery:
     id: str
+    with_document: bool = False
 
 @dataclass
 class NodesQuery:
@@ -209,6 +210,7 @@ class CreateNode:
     expires_in: tuple[int, str] | None = None   # (amount, unit) e.g. (30, "m")
     expires_at: str | None = None                # ISO-8601 string
     vector: list[float] | None = None
+    document: str | None = None
 
 @dataclass
 class VarAssign:
@@ -306,6 +308,14 @@ class BindContext:
 @dataclass
 class DiscardContext:
     name: str
+
+@dataclass
+class IngestStmt:
+    file_path: str
+    node_id: str | None = None
+    kind: str | None = None
+    using: str | None = None
+    vision_model: str | None = None
 
 # --- Read queries (intelligence) ---
 

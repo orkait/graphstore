@@ -24,6 +24,7 @@ from graphstore.dsl.ast_nodes import (
     DistanceQuery,
     EdgesQuery,
     Increment,
+    IngestStmt,
     MatchQuery,
     MergeStmt,
     NodeQuery,
@@ -94,6 +95,7 @@ class Executor(ReadExecutor, WriteExecutor):
             PropagateStmt: self._propagate,
             BindContext: self._bind_context,
             DiscardContext: self._discard_context,
+            IngestStmt: self._ingest,
         }
         handler = handlers.get(type(ast))
         if handler is None:

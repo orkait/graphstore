@@ -165,3 +165,98 @@ class TestVisionHandler:
             assert vh.model == "smolvlm2:2.2b"
         except ImportError:
             pass  # openai not installed, skip
+
+
+# ====================================================================
+# INGEST DSL integration tests
+# ====================================================================
+
+from graphstore import GraphStore
+
+
+class TestIngestDSL:
+    def test_ingest_text_file(self, tmp_path):
+        f = tmp_path / "notes.txt"
+        f.write_text("# Meeting Notes\n\nDiscussed Q3 results.\n\n## Action Items\n\nFollow up with Alice.")
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        result = g.execute(f'INGEST "{f}"')
+        assert result.data["chunks"] >= 2
+        assert result.data["parser"] == "markitdown"
+        g.close()
+
+    def test_ingest_with_as_and_kind(self, tmp_path):
+        f = tmp_path / "report.txt"
+        f.write_text("# Report\nContent here")
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        result = g.execute(f'INGEST "{f}" AS "doc:report" KIND "report"')
+        assert result.data["doc_id"] == "doc:report"
+        node = g.execute('NODE "doc:report"')
+        assert node.data is not None
+        assert node.data["kind"] == "report"
+        g.close()
+
+    def test_ingest_creates_edges(self, tmp_path):
+        f = tmp_path / "doc.txt"
+        f.write_text("# Part 1\nContent\n\n# Part 2\nMore content")
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        g.execute(f'INGEST "{f}" AS "doc:test"')
+        edges = g.execute('EDGES FROM "doc:test"')
+        assert len(edges.data) >= 2
+        g.close()
+
+    def test_node_with_document(self, tmp_path):
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        g.execute('CREATE NODE "n1" kind = "note" name = "test" DOCUMENT "Full text here"')
+        node = g.execute('NODE "n1"')
+        assert "_document" not in node.data
+        node = g.execute('NODE "n1" WITH DOCUMENT')
+        assert node.data["_document"] == "Full text here"
+        g.close()
+
+    def test_ingest_nonexistent_raises(self, tmp_path):
+        import pytest
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        with pytest.raises(Exception):
+            g.execute('INGEST "/nonexistent/file.txt"')
+        g.close()
+
+    def test_ingest_duplicate_raises(self, tmp_path):
+        import pytest
+        f = tmp_path / "dup.txt"
+        f.write_text("content")
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        g.execute(f'INGEST "{f}" AS "doc:dup"')
+        with pytest.raises(Exception):
+            g.execute(f'INGEST "{f}" AS "doc:dup"')
+        g.close()
+
+    def test_chunks_have_summaries(self, tmp_path):
+        f = tmp_path / "doc.txt"
+        f.write_text("# Section 1\nSome detailed content about something important.")
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        g.execute(f'INGEST "{f}" AS "doc:sum"')
+        nodes = g.execute('NODES WHERE kind = "chunk"')
+        assert len(nodes.data) >= 1
+        assert "summary" in nodes.data[0]
+        g.close()
+
+    def test_ingest_stores_document_in_docstore(self, tmp_path):
+        f = tmp_path / "stored.txt"
+        f.write_text("# Hello\nThis is the full document content.")
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        g.execute(f'INGEST "{f}" AS "doc:stored"')
+        # Verify the parent node's document is in the doc store
+        node = g.execute('NODE "doc:stored" WITH DOCUMENT')
+        assert node.data["_document_type"] == "text/markdown"
+        assert "Hello" in node.data["_document"]
+        g.close()
+
+    def test_ingest_auto_id(self, tmp_path):
+        """INGEST without AS should generate a doc:hash ID."""
+        f = tmp_path / "auto.txt"
+        f.write_text("# Auto ID\nContent")
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        result = g.execute(f'INGEST "{f}"')
+        assert result.data["doc_id"].startswith("doc:")
+        assert len(result.data["doc_id"]) > 4  # doc: + hash
+        g.close()
