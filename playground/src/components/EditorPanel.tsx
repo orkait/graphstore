@@ -145,25 +145,25 @@ export function EditorPanel() {
           }}
         />
       </div>
-      <div className="px-3 py-1.5 flex items-center border-t bg-transparent flex-shrink-0 gap-1">
+      <div className="px-3 py-1.5 flex items-center border-t bg-transparent flex-shrink-0 gap-1.5">
         {results.length > 0 && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onMouseDown={(e) => { e.preventDefault(); clearResults() }}>
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 text-[var(--btn-warn-text)] bg-[var(--btn-warn-bg)] hover:bg-[var(--btn-warn-hover)] border border-[var(--btn-warn-border)]" onMouseDown={(e) => { e.preventDefault(); clearResults() }}>
             <Trash2 className="w-3.5 h-3.5" /> Clear Results
           </Button>
         )}
-        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onMouseDown={(e) => { e.preventDefault(); resetGraph() }}>
+        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 text-[var(--btn-danger-text)] bg-[var(--btn-danger-bg)] hover:bg-[var(--btn-danger-hover)] border border-[var(--btn-danger-border)]" onMouseDown={(e) => { e.preventDefault(); resetGraph() }}>
           <RotateCcw className="w-3.5 h-3.5" /> Reset DB
         </Button>
         <div className="flex-1" />
         {activeResultId && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onMouseDown={(e) => { e.preventDefault(); clearHighlights() }}>
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 text-[var(--btn-muted-text)] bg-[var(--btn-muted-bg)] hover:bg-[var(--btn-muted-hover)] border border-[var(--btn-muted-border)]" onMouseDown={(e) => { e.preventDefault(); clearHighlights() }}>
             <XCircle className="w-3.5 h-3.5" /> Clear Highlight
           </Button>
         )}
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 text-xs gap-1.5"
+          className="h-7 text-xs gap-1.5 text-[var(--btn-primary-text)] bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] border border-[var(--btn-primary-border)]"
           disabled={loading}
           onMouseDown={(e) => { e.preventDefault(); if (!loading) { if (hasSelection) executeSelected(); else executeAll() } }}
         >
