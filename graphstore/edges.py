@@ -101,8 +101,13 @@ class EdgeMatrices:
                 targets = np.array([t for s, t, d in edge_list], dtype=np.int32)
                 data = [d for s, t, d in edge_list]
 
+                # Use edge weight if available, else 1.0
+                weights = np.array(
+                    [d.get("weight", 1.0) if d else 1.0 for d in data],
+                    dtype=np.float32
+                )
                 self._typed[etype] = csr_matrix(
-                    (np.ones(len(sources), dtype=np.int8), (sources, targets)),
+                    (weights, (sources, targets)),
                     shape=(num_nodes, num_nodes)
                 )
                 self._edge_data[etype] = data
