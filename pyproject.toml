@@ -30,6 +30,7 @@ dependencies = [
     "lark>=1.1",
     "numpy>=1.24",
     "usearch>=2.0",
+    "model2vec>=0.4",
 ]
 
 [project.urls]
