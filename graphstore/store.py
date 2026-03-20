@@ -431,15 +431,29 @@ class CoreStore:
         return mask
 
     def _materialize_slot(self, slot: int) -> dict | None:
-        """Build a full node dict from a slot index."""
-        data = self.node_data[slot]
-        if data is None:
+        """Build a full node dict from column arrays at a slot index."""
+        if slot in self.node_tombstones:
             return None
-        return {
-            "id": self.string_table.lookup(int(self.node_ids[slot])),
+        str_id = int(self.node_ids[slot])
+        if str_id == -1:
+            return None
+        d = {
+            "id": self.string_table.lookup(str_id),
             "kind": self.string_table.lookup(int(self.node_kinds[slot])),
-            **data,
         }
+        for field in self.columns._columns:
+            if field.startswith("__") and field.endswith("__"):
+                continue  # skip reserved columns in user-facing output
+            if self.columns._presence[field][slot]:
+                dtype = self.columns._dtypes[field]
+                raw = self.columns._columns[field][slot]
+                if dtype == "int32_interned":
+                    d[field] = self.string_table.lookup(int(raw))
+                elif dtype == "float64":
+                    d[field] = float(raw)
+                elif dtype == "int64":
+                    d[field] = int(raw)
+        return d
 
     def get_all_nodes(self, kind: str | None = None, predicate=None) -> list[dict]:
         """Get all live nodes, optionally filtered by kind and/or predicate.
