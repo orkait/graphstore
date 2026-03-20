@@ -66,17 +66,11 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     store.node_kinds = np.zeros(capacity, dtype=np.uint8)
     store.node_kinds[:len(loaded_kinds)] = loaded_kinds
 
-    # Load legacy node_data if present (migration from old format)
-    data_row = conn.execute("SELECT data FROM blobs WHERE key='node_data'").fetchone()
-    legacy_node_data = None
-    if data_row is not None:
-        legacy_node_data = json.loads(data_row[0])
-
     # Load tombstones
     tomb_row = conn.execute("SELECT data FROM blobs WHERE key='tombstones'").fetchone()
     store.node_tombstones = set(json.loads(tomb_row[0]))
 
-    # Rebuild id_to_slot from node_ids array (no longer depends on node_data)
+    # Rebuild id_to_slot from node_ids array
     store.id_to_slot = {}
     for slot in range(store._next_slot):
         if slot not in store.node_tombstones:
@@ -139,10 +133,6 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
                 store.columns._presence[field_name] = full_pres
 
                 store.columns._dtypes[field_name] = col_dtype_str
-    elif legacy_node_data is not None:
-        # Migration: old format with node_data but no columns - rebuild columns
-        store.columns._capacity = capacity
-        store.columns.rebuild_from(legacy_node_data, store._next_slot)
 
     # Rebuild secondary indices now that columns are loaded
     if idx_row:
