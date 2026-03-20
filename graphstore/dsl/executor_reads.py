@@ -62,6 +62,15 @@ class ReadExecutor(ExecutorBase):
             if slot is not None:
                 if not self._is_slot_visible(slot):
                     data = None
+                elif q.with_document and self._document_store:
+                    doc = self._document_store.get_document(slot)
+                    if doc:
+                        content, ctype = doc
+                        if ctype.startswith("text"):
+                            data["_document"] = content.decode("utf-8")
+                        else:
+                            data["_document"] = content  # binary
+                        data["_document_type"] = ctype
         return Result(kind="node", data=data, count=1 if data else 0)
 
     def _nodes(self, q: NodesQuery) -> Result:

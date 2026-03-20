@@ -1,5 +1,6 @@
 """GraphStore - main entry point for the graphstore package."""
 
+import os
 import time
 import sqlite3
 from pathlib import Path
@@ -75,10 +76,19 @@ class GraphStore:
             self._store = CoreStore(ceiling_bytes=self._ceiling_bytes)
             self._schema = SchemaRegistry()
 
+        # DocumentStore: separate SQLite, always on disk
+        from graphstore.document.store import DocumentStore
+        if p is not None:
+            doc_db = os.path.join(str(p), "documents.db")
+        else:
+            doc_db = None  # DocumentStore uses temp file
+        self._document_store = DocumentStore(doc_db)
+
         # Create executors before WAL replay so _replay_wal can use them
         self._executor = Executor(self._store, self._schema,
                                   embedder=self._embedder,
-                                  vector_store=self._vector_store)
+                                  vector_store=self._vector_store,
+                                  document_store=self._document_store)
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
         self._sys_executor = SystemExecutor(self._store, self._schema, self._conn,
                                                embedder=self._embedder,
@@ -130,6 +140,7 @@ class GraphStore:
                     ast_nodes.AssertStmt, ast_nodes.RetractStmt,
                     ast_nodes.UpdateNodes, ast_nodes.MergeStmt,
                     ast_nodes.PropagateStmt, ast_nodes.DiscardContext,
+                    ast_nodes.IngestStmt,
                 ))
 
                 if is_write and self._conn:
@@ -188,6 +199,9 @@ class GraphStore:
             self.checkpoint()
             conn.close()
             self._conn = None
+        if self._document_store is not None:
+            self._document_store.close()
+            self._document_store = None
 
     @property
     def node_count(self) -> int:

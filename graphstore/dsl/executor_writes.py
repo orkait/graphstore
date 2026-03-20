@@ -18,6 +18,7 @@ from graphstore.dsl.ast_nodes import (
     DeleteNodes,
     DiscardContext,
     Increment,
+    IngestStmt,
     MergeStmt,
     PropagateStmt,
     RetractStmt,
@@ -102,6 +103,9 @@ class WriteExecutor(ExecutorBase):
         str_id = self.store.string_table.intern(node_id)
         slot = self.store.id_to_slot[str_id]
         self._handle_vector(slot, kind, data, q.vector)
+        # Handle DOCUMENT clause
+        if q.document and self._document_store:
+            self._document_store.put_document(slot, q.document.encode("utf-8"), "text/plain")
         node = self.store.get_node(node_id)
         return Result(kind="node", data=node, count=1)
 
@@ -601,3 +605,123 @@ class WriteExecutor(ExecutorBase):
             raise BatchRollback(
                 failed_statement=str(type(e).__name__), error=str(e)
             )
+
+    def _ingest(self, q: IngestStmt) -> Result:
+        """INGEST: parse file, chunk, create graph nodes + edges, store documents."""
+        import hashlib
+        import os as _os
+
+        from graphstore.ingest.router import ingest_file
+        from graphstore.ingest.chunker import chunk_by_heading
+
+        if not _os.path.exists(q.file_path):
+            raise GraphStoreError(f"File not found: {q.file_path}")
+
+        # 1. Parse file
+        result = ingest_file(q.file_path, using=q.using)
+
+        # 2. Chunk
+        chunks = chunk_by_heading(result.markdown)
+
+        # 3. Parent node ID
+        parent_id = q.node_id
+        if not parent_id:
+            h = hashlib.sha256(q.file_path.encode()).hexdigest()[:12]
+            parent_id = f"doc:{h}"
+
+        parent_kind = q.kind or "document"
+
+        # Check duplicate: if parent_id already exists, raise
+        existing = self.store.get_node(parent_id)
+        if existing is not None:
+            raise GraphStoreError(f"Node already exists: {parent_id}")
+
+        # 4. Create parent node with metadata
+        metadata_fields = {
+            "source": q.file_path,
+            "parser": result.parser_used,
+            "confidence": result.confidence,
+        }
+        metadata_fields.update({
+            k: v for k, v in result.metadata.items()
+            if isinstance(v, (str, int, float)) and k not in ("source",)
+        })
+
+        # Use store.put_node directly to avoid recursion
+        parent_slot = self.store.put_node(parent_id, parent_kind, metadata_fields)
+
+        # Store full markdown in DocumentStore
+        if self._document_store:
+            self._document_store.put_document(
+                parent_slot, result.markdown.encode("utf-8"), "text/markdown")
+            self._document_store.put_metadata(parent_slot, {
+                "source_path": q.file_path,
+                "pages": result.metadata.get("pages"),
+                "author": result.metadata.get("author"),
+                "title": result.metadata.get("title"),
+                "parser_used": result.parser_used,
+                "confidence": result.confidence,
+                "ingested_at": int(time.time() * 1000),
+            })
+
+        # 5. Create chunk nodes
+        chunk_ids = []
+        for chunk in chunks:
+            chunk_id = f"{parent_id}:chunk:{chunk.index}"
+            chunk_fields = {"summary": chunk.summary}
+            if chunk.heading:
+                chunk_fields["heading"] = chunk.heading
+            if chunk.page is not None:
+                chunk_fields["page"] = chunk.page
+
+            chunk_slot = self.store.put_node(chunk_id, "chunk", chunk_fields)
+            chunk_ids.append(chunk_id)
+
+            # Store full chunk text in DocumentStore
+            if self._document_store:
+                self._document_store.put_document(
+                    chunk_slot, chunk.text.encode("utf-8"), "text/markdown")
+                self._document_store.put_summary(
+                    chunk_slot, chunk.summary, chunk.heading,
+                    chunk.page, chunk.index, parent_slot)
+
+            # Auto-embed summary
+            if self._embedder and self._vector_store is not None:
+                vec = self._embedder.encode_documents([chunk.summary])[0]
+                self._vector_store.add(chunk_slot, vec)
+            elif self._embedder and self._vector_store is None:
+                if hasattr(self, '_ensure_vector_store_cb') and self._ensure_vector_store_cb:
+                    vec = self._embedder.encode_documents([chunk.summary])[0]
+                    self._ensure_vector_store_cb(len(vec))
+                    self._vector_store.add(chunk_slot, vec)
+
+            # Edge: parent -> chunk
+            self.store.put_edge(parent_id, chunk_id, "has_chunk")
+
+        # 6. Handle images
+        image_count = 0
+        for i, img in enumerate(result.images):
+            img_id = f"{parent_id}:image:{i}"
+            img_fields = {}
+            if img.page is not None:
+                img_fields["page"] = img.page
+            if img.description:
+                img_fields["description"] = img.description
+
+            img_slot = self.store.put_node(img_id, "image", img_fields)
+
+            if self._document_store:
+                self._document_store.put_image(
+                    img_slot, img.data, img.mime_type,
+                    img.page, img.description)
+
+            self.store.put_edge(parent_id, img_id, "has_image")
+            image_count += 1
+
+        return Result(kind="ok", data={
+            "doc_id": parent_id,
+            "chunks": len(chunks),
+            "images": image_count,
+            "parser": result.parser_used,
+            "confidence": result.confidence,
+        }, count=len(chunks))

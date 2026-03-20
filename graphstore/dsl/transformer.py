@@ -56,6 +56,7 @@ from graphstore.dsl.ast_nodes import (
     PropagateStmt,
     BindContext,
     DiscardContext,
+    IngestStmt,
     RecallQuery,
     CounterfactualQuery,
     SimilarQuery,
@@ -153,7 +154,12 @@ class DSLTransformer(Transformer):
 
     # --- Read queries ---
     def node_q(self, args):
-        return NodeQuery(id=self._str(args[0]))
+        node_id = self._str(args[0])
+        with_document = any(isinstance(a, str) and a == "_with_doc" for a in args[1:])
+        return NodeQuery(id=node_id, with_document=with_document)
+
+    def with_doc(self, args):
+        return "_with_doc"
 
     def nodes_q(self, args):
         where = self._find(args, WhereClause)
@@ -292,18 +298,21 @@ class DSLTransformer(Transformer):
         fields = args[1] if isinstance(args[1], list) else []
         vec = self._find_vector(args[2:])
         exp_in, exp_at = self._find_expires(args[2:])
+        doc = self._find_document(args[2:])
         return CreateNode(
             id=self._str(args[0]),
             fields=fields,
             expires_in=exp_in,
             expires_at=exp_at,
             vector=vec,
+            document=doc,
         )
 
     def create_node_auto(self, args):
         fields = args[0] if isinstance(args[0], list) else []
         vec = self._find_vector(args[1:])
         exp_in, exp_at = self._find_expires(args[1:])
+        doc = self._find_document(args[1:])
         return CreateNode(
             id=None,
             fields=fields,
@@ -311,7 +320,11 @@ class DSLTransformer(Transformer):
             expires_in=exp_in,
             expires_at=exp_at,
             vector=vec,
+            document=doc,
         )
+
+    def document_clause(self, args):
+        return ("document", self._str(args[0]))
 
     def var_assign(self, args):
         var_name = str(args[0])
@@ -657,6 +670,40 @@ class DSLTransformer(Transformer):
     def discard_context(self, args):
         return DiscardContext(name=self._str(args[0]))
 
+    def ingest_stmt(self, args):
+        file_path = self._str(args[0])
+        node_id = None
+        kind = None
+        using = None
+        vision_model = None
+        for a in args[1:]:
+            if isinstance(a, tuple):
+                if a[0] == "ingest_as":
+                    node_id = a[1]
+                elif a[0] == "ingest_kind":
+                    kind = a[1]
+                elif a[0] == "using_clause":
+                    using = a[1]
+                elif a[0] == "vision_clause":
+                    vision_model = a[1]
+        return IngestStmt(file_path=file_path, node_id=node_id, kind=kind,
+                          using=using, vision_model=vision_model)
+
+    def ingest_as(self, args):
+        return ("ingest_as", self._str(args[0]))
+
+    def ingest_kind(self, args):
+        return ("ingest_kind", self._str(args[0]))
+
+    def ingest_using(self, args):
+        return args[0]  # pass through the using_clause or vision_clause tuple
+
+    def using_clause(self, args):
+        return ("using_clause", str(args[0]))
+
+    def vision_clause(self, args):
+        return ("vision_clause", self._str(args[0]))
+
     # --- System queries ---
     def sys_stats(self, args):
         target = str(args[0]) if args else None
@@ -827,5 +874,12 @@ class DSLTransformer(Transformer):
         """Extract vector from args. Returns list[float] or None."""
         for a in args:
             if isinstance(a, tuple) and a[0] == "vector":
+                return a[1]
+        return None
+
+    def _find_document(self, args):
+        """Extract document text from args. Returns str or None."""
+        for a in args:
+            if isinstance(a, tuple) and a[0] == "document":
                 return a[1]
         return None

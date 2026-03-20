@@ -18,7 +18,7 @@ start: statement
            | counterfactual
            | similar_q
 
-node_q:        "NODE" STRING
+node_q:        "NODE" STRING with_doc?
 nodes_q:       "NODES" where_clause? order_clause? limit_clause? offset_clause?
 edges_q:       "EDGES" direction STRING where_clause? limit_clause?
 traverse_q:    "TRAVERSE" "FROM" STRING "DEPTH" NUMBER where_clause? limit_clause?
@@ -79,9 +79,12 @@ arrow: "-[" expr "]->"
             | assert_stmt | retract_stmt | update_nodes | merge_stmt
             | propagate_stmt
             | bind_context | discard_context
+            | ingest_stmt
 
-create_node:  "CREATE" "NODE" STRING field_pairs vector_clause? expires_clause?
-            | "CREATE" "NODE" "AUTO" field_pairs vector_clause? expires_clause? -> create_node_auto
+create_node:  "CREATE" "NODE" STRING field_pairs vector_clause? expires_clause? document_clause?
+            | "CREATE" "NODE" "AUTO" field_pairs vector_clause? expires_clause? document_clause? -> create_node_auto
+document_clause: "DOCUMENT" STRING
+with_doc: "WITH" "DOCUMENT"
 update_node:  "UPDATE" "NODE" STRING "SET" field_pairs
 upsert_node:  "UPSERT" "NODE" STRING field_pairs vector_clause? expires_clause?
 vector_clause: "VECTOR" vector_literal
@@ -103,6 +106,13 @@ propagate_stmt: "PROPAGATE" STRING "FIELD" IDENTIFIER "DEPTH" NUMBER
 
 bind_context: "BIND" "CONTEXT" STRING
 discard_context: "DISCARD" "CONTEXT" STRING
+
+ingest_stmt: "INGEST" STRING ingest_as? ingest_kind? ingest_using?
+ingest_as: "AS" STRING
+ingest_kind: "KIND" STRING
+ingest_using: vision_clause | using_clause
+using_clause: "USING" IDENTIFIER
+vision_clause: "USING" "VISION" STRING
 
 expires_clause: "EXPIRES" "IN" NUMBER TIME_UNIT -> expires_in
               | "EXPIRES" "AT" STRING           -> expires_at
