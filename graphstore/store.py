@@ -1,6 +1,6 @@
 """Core in-memory graph engine.
 
-Manages nodes (numpy arrays + dicts) and edges (EdgeMatrices with CSR)
+Manages nodes (numpy arrays + ColumnStore) and edges (EdgeMatrices with CSR)
 with secondary indices, tombstone-based deletion, and memory ceiling
 enforcement.
 """
@@ -30,7 +30,6 @@ class CoreStore:
         self._next_slot = 0  # next slot to fill
         self.node_ids = np.full(self._capacity, -1, dtype=np.int32)
         self.node_kinds = np.zeros(self._capacity, dtype=np.int32)
-        self.node_data: list[dict | None] = [None] * self._capacity
         self.node_tombstones: set[int] = set()
         self.id_to_slot: dict[int, int] = {}
 
@@ -71,7 +70,6 @@ class CoreStore:
         new_kinds[: self._capacity] = self.node_kinds
         self.node_kinds = new_kinds
 
-        self.node_data.extend([None] * self._capacity)
         self.columns.grow(new_cap)
         self._capacity = new_cap
 
@@ -111,7 +109,6 @@ class CoreStore:
 
         self.node_ids[slot] = str_id
         self.node_kinds[slot] = kind_id
-        self.node_data[slot] = dict(data)  # copy
         self.columns.set(slot, data)
         self.id_to_slot[str_id] = slot
         self._count += 1
@@ -132,12 +129,7 @@ class CoreStore:
         slot = self.id_to_slot.get(str_id)
         if slot is None or slot in self.node_tombstones:
             return None
-        kind_id = self.node_kinds[slot]
-        return {
-            "id": id,
-            "kind": self.string_table.lookup(kind_id),
-            **self.node_data[slot],
-        }
+        return self._materialize_slot(slot)
 
     def update_node(self, id: str, data: dict):
         """Update node data. Raises NodeNotFound if missing."""
@@ -148,24 +140,28 @@ class CoreStore:
         if slot is None or slot in self.node_tombstones:
             raise NodeNotFound(id)
 
-        old_data = self.node_data[slot]
-        # Remove old values from indices
+        # Remove old values from secondary indices
         for field in self._indexed_fields:
-            if field in old_data:
-                old_val = old_data[field]
+            if self.columns.has_column(field) and self.columns._presence[field][slot]:
+                dtype = self.columns._dtypes[field]
+                raw = self.columns._columns[field][slot]
+                if dtype == "int32_interned":
+                    old_val = self.string_table.lookup(int(raw))
+                elif dtype == "float64":
+                    old_val = float(raw)
+                else:
+                    old_val = int(raw)
                 idx_list = self.secondary_indices[field].get(old_val, [])
                 if slot in idx_list:
                     idx_list.remove(slot)
 
-        # Update data
-        self.node_data[slot].update(data)
+        # Update columns
         self.columns.set(slot, data)
 
-        # Add new values to indices
+        # Add new values to secondary indices
         for field in self._indexed_fields:
             if field in data:
-                val = self.node_data[slot][field]
-                self.secondary_indices[field].setdefault(val, []).append(slot)
+                self.secondary_indices[field].setdefault(data[field], []).append(slot)
 
     def upsert_node(self, id: str, kind: str, data: dict) -> int:
         """Create or update node."""
@@ -188,8 +184,15 @@ class CoreStore:
 
         # Remove from indices
         for field in self._indexed_fields:
-            if field in self.node_data[slot]:
-                val = self.node_data[slot][field]
+            if self.columns.has_column(field) and self.columns._presence[field][slot]:
+                dtype = self.columns._dtypes[field]
+                raw = self.columns._columns[field][slot]
+                if dtype == "int32_interned":
+                    val = self.string_table.lookup(int(raw))
+                elif dtype == "float64":
+                    val = float(raw)
+                else:
+                    val = int(raw)
                 idx_list = self.secondary_indices[field].get(val, [])
                 if slot in idx_list:
                     idx_list.remove(slot)
@@ -197,7 +200,6 @@ class CoreStore:
         # Tombstone
         self.columns.clear(slot)
         self.node_tombstones.add(slot)
-        self.node_data[slot] = None
         del self.id_to_slot[str_id]
         self._count -= 1
 
@@ -359,11 +361,20 @@ class CoreStore:
         """Build secondary index on a field."""
         self._indexed_fields.add(field)
         index: dict = {}
+        if not self.columns.has_column(field):
+            self.secondary_indices[field] = index
+            return
         for slot in range(self._next_slot):
-            if slot not in self.node_tombstones and self.node_data[slot] is not None:
-                val = self.node_data[slot].get(field)
-                if val is not None:
-                    index.setdefault(val, []).append(slot)
+            if slot not in self.node_tombstones and self.columns._presence[field][slot]:
+                dtype = self.columns._dtypes[field]
+                raw = self.columns._columns[field][slot]
+                if dtype == "int32_interned":
+                    val = self.string_table.lookup(int(raw))
+                elif dtype == "float64":
+                    val = float(raw)
+                else:
+                    val = int(raw)
+                index.setdefault(val, []).append(slot)
         self.secondary_indices[field] = index
 
     def query_by_index(self, field: str, value) -> list[int]:
@@ -460,9 +471,8 @@ class CoreStore:
 
         Args:
             kind: Optional kind string for numpy-accelerated filtering.
-            predicate: Optional callable(raw_data_dict) -> bool for late
-                materialization. Evaluated against node_data[slot] BEFORE
-                constructing the full merged dict.
+            predicate: Optional callable(raw_data_dict) -> bool. When provided,
+                the predicate receives a dict of data fields (no id/kind).
         """
         slots = self._live_slots(kind)
         if len(slots) == 0:
@@ -471,17 +481,18 @@ class CoreStore:
         result = []
         for slot in slots:
             slot = int(slot)
-            data = self.node_data[slot]
-            if data is None:
-                continue
-            # Late materialization: test predicate on raw data before dict construction
-            if predicate is not None and not predicate(data):
-                continue
-            result.append({
-                "id": self.string_table.lookup(int(self.node_ids[slot])),
-                "kind": self.string_table.lookup(int(self.node_kinds[slot])),
-                **data,
-            })
+            if predicate is not None:
+                node = self._materialize_slot(slot)
+                if node is None:
+                    continue
+                raw = {k: v for k, v in node.items() if k not in ("id", "kind")}
+                if not predicate(raw):
+                    continue
+                result.append(node)
+            else:
+                node = self._materialize_slot(slot)
+                if node is not None:
+                    result.append(node)
         return result
 
     def count_nodes(self, kind: str | None = None, predicate=None) -> int:
@@ -490,37 +501,43 @@ class CoreStore:
         Args:
             kind: Optional kind string for numpy-accelerated filtering.
             predicate: Optional callable(raw_data_dict) -> bool. When provided,
-                counts only nodes whose raw data passes the predicate, still
-                without constructing the full merged dict.
+                counts only nodes whose raw data passes the predicate.
         """
         slots = self._live_slots(kind)
         if predicate is None:
             return len(slots)
         count = 0
         for slot in slots:
-            data = self.node_data[int(slot)]
-            if data is not None and predicate(data):
-                count += 1
+            node = self._materialize_slot(int(slot))
+            if node is not None:
+                raw = {k: v for k, v in node.items() if k not in ("id", "kind")}
+                if predicate(raw):
+                    count += 1
         return count
 
     def query_node_ids(self, kind: str | None = None, predicate=None) -> list[str]:
         """Return node IDs matching criteria without full dict construction.
 
-        Useful for DELETE NODES WHERE — only the ID is needed to delete.
+        Useful for DELETE NODES WHERE - only the ID is needed to delete.
         """
         slots = self._live_slots(kind)
         if len(slots) == 0:
             return []
         result = []
-        ids = self.node_ids
         for slot in slots:
             slot = int(slot)
-            data = self.node_data[slot]
-            if data is None:
-                continue
-            if predicate is not None and not predicate(data):
-                continue
-            result.append(self.string_table.lookup(int(ids[slot])))
+            if predicate is not None:
+                node = self._materialize_slot(slot)
+                if node is None:
+                    continue
+                raw = {k: v for k, v in node.items() if k not in ("id", "kind")}
+                if not predicate(raw):
+                    continue
+                result.append(node["id"])
+            else:
+                str_id = int(self.node_ids[slot])
+                if str_id >= 0:
+                    result.append(self.string_table.lookup(str_id))
         return result
 
     # -- field operations ----------------------------------------------------
@@ -534,11 +551,14 @@ class CoreStore:
         if slot is None or slot in self.node_tombstones:
             raise NodeNotFound(id)
 
-        data = self.node_data[slot]
-        current = data.get(field, 0)
-        if not isinstance(current, (int, float)):
-            raise TypeError(
-                f"Field '{field}' is not numeric: {type(current).__name__}"
-            )
-        data[field] = current + amount
-        self.columns.set(slot, {field: data[field]})
+        if not self.columns.has_column(field) or not self.columns._presence[field][slot]:
+            current = 0
+        else:
+            dtype = self.columns._dtypes[field]
+            if dtype not in ("int64", "float64"):
+                raise TypeError(f"Field '{field}' is not numeric: {dtype}")
+            raw = self.columns._columns[field][slot]
+            current = float(raw) if dtype == "float64" else int(raw)
+
+        new_val = current + amount
+        self.columns.set_field(slot, field, new_val)

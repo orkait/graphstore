@@ -143,22 +143,29 @@ COMMIT''')
 
 
 class TestSysRebuildColumns:
-    def test_rebuild_restores_columns(self):
+    def test_rebuild_restores_secondary_indices(self):
+        """REBUILD should restore secondary indices from columns (source of truth)."""
         store = CoreStore()
         store.put_node("n1", "fn", {"score": 42})
+        store.add_index("score")
         schema = SchemaRegistry()
         sys_exec = SystemExecutor(store, schema)
 
-        store.columns._columns.clear()
-        store.columns._presence.clear()
-        store.columns._dtypes.clear()
-        assert not store.columns.has_column("score")
+        # Corrupt secondary indices
+        store.secondary_indices["score"] = {}
+        assert store.query_by_index("score", 42) == []
 
         ast = parse("SYS REBUILD INDICES")
         sys_exec.execute(ast)
+
+        # Columns still intact (they are the source of truth)
         assert store.columns.has_column("score")
         mask = store.columns.get_mask("score", "=", 42, store._next_slot)
         assert mask[0]
+
+        # Secondary index rebuilt from columns
+        slots = store.query_by_index("score", 42)
+        assert len(slots) == 1
 
 
 class TestColumnMemoryStats:
