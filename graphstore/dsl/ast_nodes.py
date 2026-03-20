@@ -437,3 +437,21 @@ class SysDuplicates:
 @dataclass
 class SysEmbedders:
     pass
+
+@dataclass
+class SysConnect:
+    where: WhereClause | None = None
+    threshold: float = 0.85
+
+@dataclass
+class ConnectNode:
+    node_id: str
+    threshold: float = 0.8
+
+@dataclass
+class SysReembed:
+    pass
+
+@dataclass
+class SysStatus:
+    pass

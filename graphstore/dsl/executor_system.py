@@ -18,6 +18,7 @@ from graphstore.dsl.ast_nodes import (
     NodesQuery,
     SysCheckpoint,
     SysClear,
+    SysConnect,
     SysContradictions,
     SysDescribe,
     SysDuplicates,
@@ -29,6 +30,7 @@ from graphstore.dsl.ast_nodes import (
     SysFrequentQueries,
     SysKinds,
     SysRebuild,
+    SysReembed,
     SysRegisterEdgeKind,
     SysRegisterNodeKind,
     SysRollback,
@@ -36,6 +38,7 @@ from graphstore.dsl.ast_nodes import (
     SysSnapshot,
     SysSnapshots,
     SysStats,
+    SysStatus,
     SysUnregister,
     SysWal,
     TraverseQuery,
@@ -53,12 +56,14 @@ class SystemExecutor:
         conn: sqlite3.Connection | None = None,
         embedder=None,
         vector_store=None,
+        document_store=None,
     ):
         self.store = store
         self.schema = schema
         self.conn = conn
         self._embedder = embedder
         self._vector_store = vector_store
+        self._document_store = document_store
         self._start_time = time.time()
 
     def execute(self, ast) -> Result:
@@ -91,6 +96,9 @@ class SystemExecutor:
             SysSnapshots: self._snapshots,
             SysDuplicates: self._duplicates,
             SysEmbedders: self._embedders,
+            SysConnect: self._connect,
+            SysReembed: self._reembed,
+            SysStatus: self._status,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -551,6 +559,15 @@ class SystemExecutor:
         # Rebuild derived state
         store._rebuild_edges()
 
+        # Orphan cleanup in DocumentStore
+        if self._document_store:
+            live = store.compute_live_mask(store._next_slot)
+            live_slots = set(int(s) for s in np.nonzero(live)[0])
+            try:
+                self._document_store.orphan_cleanup(live_slots)
+            except Exception:
+                pass
+
         return Result(kind="ok", data={"rollback": q.name}, count=1)
 
     def _snapshots(self, q: SysSnapshots) -> Result:
@@ -632,3 +649,99 @@ class SystemExecutor:
         else:
             info.append({"name": "none", "status": "no embedder configured"})
         return Result(kind="embedders", data=info, count=len(info))
+
+    def _connect(self, q: SysConnect) -> Result:
+        """SYS CONNECT: auto-wire cross-document relationships via vector similarity."""
+        from graphstore.ingest.connector import connect_all
+        return connect_all(
+            self.store, self._vector_store,
+            threshold=q.threshold, where_expr=q.where,
+        )
+
+    def _reembed(self, q: SysReembed) -> Result:
+        """SYS REEMBED: re-embed all summaries with current embedder, replace vectors."""
+        if not self._embedder:
+            raise GraphStoreError("No embedder configured")
+
+        vs = self._vector_store
+        if vs is None:
+            raise GraphStoreError("No vector store initialized")
+
+        store = self.store
+        n = store._next_slot
+        live = store.compute_live_mask(n)
+
+        reembedded = 0
+        for slot in range(n):
+            if not live[slot]:
+                continue
+            # Try to get summary text from columns
+            text = None
+            if store.columns.has_column("summary") and store.columns._presence["summary"][slot]:
+                raw = store.columns._columns["summary"][slot]
+                dtype = store.columns._dtypes["summary"]
+                if dtype == "int32_interned":
+                    text = store.string_table.lookup(int(raw))
+            if text:
+                vec = self._embedder.encode_documents([text])[0]
+                vs.add(slot, vec)
+                reembedded += 1
+
+        # Clear dirty flag on the GraphStore (set by caller after return)
+        return Result(kind="ok", data={"reembedded": reembedded}, count=reembedded)
+
+    def _status(self, q: SysStatus) -> Result:
+        """SYS STATUS: comprehensive system state."""
+        store = self.store
+        data = {
+            "nodes": store.node_count,
+            "edges": store.edge_count,
+            "memory_bytes": estimate_memory(store.node_count, store.edge_count),
+            "ceiling_bytes": store._ceiling_bytes,
+            "column_memory_bytes": store.columns.memory_bytes,
+        }
+
+        # Vector store info
+        vs = self._vector_store
+        if vs is not None:
+            data["vectors"] = {
+                "count": vs.count(),
+                "dims": vs.dims,
+                "memory_bytes": vs.memory_bytes,
+            }
+        else:
+            data["vectors"] = {"count": 0, "dims": 0, "memory_bytes": 0}
+
+        # Embedder info
+        if self._embedder:
+            data["embedder"] = {
+                "name": getattr(self._embedder, "name", "unknown"),
+                "dims": getattr(self._embedder, "dims", 0),
+                "status": "active",
+            }
+        else:
+            data["embedder"] = {"name": "none", "status": "inactive"}
+
+        # Document store info
+        if self._document_store:
+            try:
+                data["documents"] = self._document_store.stats()
+            except Exception:
+                data["documents"] = {}
+        else:
+            data["documents"] = {}
+
+        # Edge types
+        data["edge_types"] = {
+            etype: len(edges)
+            for etype, edges in store._edges_by_type.items()
+        }
+
+        # Schema info
+        data["registered_kinds"] = self.schema.list_node_kinds()
+        data["registered_edge_kinds"] = self.schema.list_edge_kinds()
+
+        # Uptime
+        data["uptime_seconds"] = time.time() - self._start_time
+
+        return Result(kind="status", data=data, count=1)

@@ -84,6 +84,9 @@ class GraphStore:
             doc_db = None  # DocumentStore uses temp file
         self._document_store = DocumentStore(doc_db)
 
+        # Embedder dirty flag (set when SYS SET EMBEDDER changes the embedder)
+        self._embedder_dirty = False
+
         # Create executors before WAL replay so _replay_wal can use them
         self._executor = Executor(self._store, self._schema,
                                   embedder=self._embedder,
@@ -92,7 +95,8 @@ class GraphStore:
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
         self._sys_executor = SystemExecutor(self._store, self._schema, self._conn,
                                                embedder=self._embedder,
-                                               vector_store=self._vector_store)
+                                               vector_store=self._vector_store,
+                                               document_store=self._document_store)
 
         # Replay WAL (must happen after executor is created)
         if self._path and self._conn:
@@ -108,6 +112,9 @@ class GraphStore:
                 self._executor._vector_store = self._vector_store
             if self._sys_executor._vector_store is not self._vector_store:
                 self._sys_executor._vector_store = self._vector_store
+
+        # Sync embedder dirty flag
+        self._executor._embedder_dirty = self._embedder_dirty
 
         try:
             ast = parse(query)
@@ -130,6 +137,10 @@ class GraphStore:
                     if self._sys_executor._vector_store is not self._vector_store:
                         self._vector_store = self._sys_executor._vector_store
                         self._executor._vector_store = self._vector_store
+                    # Clear dirty flag after successful SYS REEMBED
+                    if isinstance(ast, ast_nodes.SysReembed):
+                        self._embedder_dirty = False
+                        self._executor._embedder_dirty = False
             else:
                 # Check if it's a write - log to WAL before executing
                 is_write = isinstance(ast, (
@@ -140,7 +151,7 @@ class GraphStore:
                     ast_nodes.AssertStmt, ast_nodes.RetractStmt,
                     ast_nodes.UpdateNodes, ast_nodes.MergeStmt,
                     ast_nodes.PropagateStmt, ast_nodes.DiscardContext,
-                    ast_nodes.IngestStmt,
+                    ast_nodes.IngestStmt, ast_nodes.ConnectNode,
                 ))
 
                 if is_write and self._conn:
