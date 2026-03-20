@@ -743,7 +743,7 @@ class TestEndToEnd:
         loaded, _ = load(conn)
         alice = loaded.get_node("alice")
         assert alice["age"] == 31
-        assert alice["promoted"] is True
+        assert alice["promoted"] == 1  # booleans stored as int64 in columns
         conn.close()
 
     def test_delete_node_then_checkpoint(self, tmp_path):
@@ -761,4 +761,63 @@ class TestEndToEnd:
         assert loaded.node_count == 2
         assert loaded.get_node("bob") is None
         assert loaded.edge_count == 1  # only alice->acme remains
+        conn.close()
+
+
+# ── Column persistence ──────────────────────────────────────────────
+
+
+class TestColumnPersistence:
+    def test_checkpoint_and_load_preserves_columns(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        conn = open_database(db_path)
+
+        store = CoreStore()
+        schema = SchemaRegistry()
+        store.put_node("n1", "fn", {"score": 42, "name": "main"})
+        store.put_node("n2", "fn", {"score": 99, "name": "helper"})
+
+        checkpoint(store, schema, conn)
+        store2, schema2 = load(conn)
+
+        assert store2.columns.has_column("score")
+        assert store2.columns.has_column("name")
+        mask = store2.columns.get_mask("score", "=", 42, store2._next_slot)
+        assert mask[0] and not mask[1]
+        mask2 = store2.columns.get_mask("name", "=", "main", store2._next_slot)
+        assert mask2[0] and not mask2[1]
+        conn.close()
+
+    def test_backward_compat_no_column_data(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        conn = open_database(db_path)
+
+        store = CoreStore()
+        schema = SchemaRegistry()
+        store.put_node("n1", "fn", {"score": 42})
+
+        checkpoint(store, schema, conn)
+        conn.execute("DELETE FROM blobs WHERE key LIKE 'columns:%'")
+        conn.commit()
+
+        store2, schema2 = load(conn)
+        assert not store2.columns.has_column("score")
+        store2.put_node("n2", "fn", {"score": 99})
+        assert store2.columns.has_column("score")
+        conn.close()
+
+    def test_column_dtypes_preserved(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        conn = open_database(db_path)
+
+        store = CoreStore()
+        schema = SchemaRegistry()
+        store.put_node("n1", "fn", {"line": 42, "weight": 3.14, "name": "x"})
+
+        checkpoint(store, schema, conn)
+        store2, _ = load(conn)
+
+        assert store2.columns._dtypes["line"] == "int64"
+        assert store2.columns._dtypes["weight"] == "float64"
+        assert store2.columns._dtypes["name"] == "int32_interned"
         conn.close()

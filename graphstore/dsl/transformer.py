@@ -1,3 +1,6 @@
+import time as _time
+from datetime import datetime, timedelta
+
 from lark import Transformer, Token
 from graphstore.dsl.ast_nodes import (
     Condition,
@@ -28,6 +31,8 @@ from graphstore.dsl.ast_nodes import (
     PatternArrow,
     MatchPattern,
     MatchQuery,
+    AggFunc,
+    AggregateQuery,
     FieldPair,
     CreateNode,
     VarAssign,
@@ -44,6 +49,15 @@ from graphstore.dsl.ast_nodes import (
     CountQuery,
     Increment,
     Batch,
+    AssertStmt,
+    RetractStmt,
+    UpdateNodes,
+    MergeStmt,
+    PropagateStmt,
+    BindContext,
+    DiscardContext,
+    RecallQuery,
+    CounterfactualQuery,
     SysStats,
     SysKinds,
     SysEdgeKinds,
@@ -59,6 +73,11 @@ from graphstore.dsl.ast_nodes import (
     SysRebuild,
     SysClear,
     SysWal,
+    SysExpire,
+    SysContradictions,
+    SysSnapshot,
+    SysRollback,
+    SysSnapshots,
 )
 
 
@@ -98,6 +117,27 @@ class DSLTransformer(Transformer):
 
     def val_null(self, args):
         return None
+
+    # --- Time expressions ---
+    def time_now(self, _items):
+        return int(_time.time() * 1000)
+
+    def time_offset(self, items):
+        n = int(float(str(items[0])))
+        unit = str(items[1])
+        ms = {"s": 1000, "m": 60000, "h": 3600000, "d": 86400000}[unit]
+        return int(_time.time() * 1000) - n * ms
+
+    def time_today(self, _items):
+        midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(midnight.timestamp() * 1000)
+
+    def time_yesterday(self, _items):
+        midnight = (datetime.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(midnight.timestamp() * 1000)
+
+    def time_expr(self, items):
+        return items[0]  # unwrap - the inner rule already returns the int value
 
     def STRING(self, token):
         return token
@@ -240,16 +280,24 @@ class DSLTransformer(Transformer):
 
     # --- Writes ---
     def create_node(self, args):
+        fields = args[1] if isinstance(args[1], list) else []
+        exp_in, exp_at = self._find_expires(args[2:])
         return CreateNode(
             id=self._str(args[0]),
-            fields=args[1] if isinstance(args[1], list) else [],
+            fields=fields,
+            expires_in=exp_in,
+            expires_at=exp_at,
         )
 
     def create_node_auto(self, args):
+        fields = args[0] if isinstance(args[0], list) else []
+        exp_in, exp_at = self._find_expires(args[1:])
         return CreateNode(
             id=None,
-            fields=args[0] if isinstance(args[0], list) else [],
+            fields=fields,
             auto_id=True,
+            expires_in=exp_in,
+            expires_at=exp_at,
         )
 
     def var_assign(self, args):
@@ -275,10 +323,57 @@ class DSLTransformer(Transformer):
         )
 
     def upsert_node(self, args):
+        fields = args[1] if isinstance(args[1], list) else []
+        exp_in, exp_at = self._find_expires(args[2:])
         return UpsertNode(
             id=self._str(args[0]),
-            fields=args[1] if isinstance(args[1], list) else [],
+            fields=fields,
+            expires_in=exp_in,
+            expires_at=exp_at,
         )
+
+    def expires_in(self, args):
+        return ("expires_in", self._num(args[0]), str(args[1]))
+
+    def expires_at(self, args):
+        return ("expires_at", self._str(args[0]))
+
+    def assert_stmt(self, args):
+        node_id = self._str(args[0])
+        fields = args[1] if isinstance(args[1], list) else []
+        confidence = None
+        source = None
+        for a in args[2:]:
+            if isinstance(a, tuple) and a[0] == "confidence":
+                confidence = a[1]
+            elif isinstance(a, tuple) and a[0] == "source":
+                source = a[1]
+        return AssertStmt(id=node_id, fields=fields, confidence=confidence, source=source)
+
+    def confidence_clause(self, args):
+        return ("confidence", self._num(args[0]))
+
+    def source_clause(self, args):
+        return ("source", self._str(args[0]))
+
+    def retract_stmt(self, args):
+        node_id = self._str(args[0])
+        reason = None
+        for a in args[1:]:
+            if isinstance(a, tuple) and a[0] == "reason":
+                reason = a[1]
+        return RetractStmt(id=node_id, reason=reason)
+
+    def reason_clause(self, args):
+        return ("reason", self._str(args[0]))
+
+    def update_nodes(self, args):
+        where = args[0]
+        fields = args[1] if isinstance(args[1], list) else []
+        return UpdateNodes(where=where, fields=fields)
+
+    def merge_stmt(self, args):
+        return MergeStmt(source_id=self._str(args[0]), target_id=self._str(args[1]))
 
     def delete_node(self, args):
         return DeleteNode(id=self._str(args[0]))
@@ -424,6 +519,75 @@ class DSLTransformer(Transformer):
     def count_edges(self, args):
         return "EDGES"
 
+    # --- Aggregate queries ---
+    def aggregate_q(self, items):
+        where = None
+        group_by = []
+        select = []
+        having = None
+        order_by = None
+        order_desc = False
+        limit = None
+        for item in items:
+            if isinstance(item, WhereClause):
+                where = item
+            elif isinstance(item, list) and item and isinstance(item[0], str):
+                group_by = item
+            elif isinstance(item, list) and item and isinstance(item[0], AggFunc):
+                select = item
+            elif isinstance(item, LimitClause):
+                limit = item
+            elif isinstance(item, AggFunc):
+                order_by = item
+            elif isinstance(item, tuple) and len(item) == 2:
+                order_by, order_desc = item
+            # having is an expression (Condition, AndExpr, etc.)
+            elif item is not None and not isinstance(item, (WhereClause, LimitClause, AggFunc, list)):
+                having = item
+        return AggregateQuery(where=where, group_by=group_by, select=select,
+                              having=having, order_by=order_by, order_desc=order_desc, limit=limit)
+
+    def group_clause(self, items):
+        return [str(i) for i in items]
+
+    def select_clause(self, items):
+        return list(items)
+
+    def having_clause(self, items):
+        return items[0]  # the having_expr (a Condition)
+
+    def having_expr(self, items):
+        agg = items[0]  # AggFunc
+        op = str(items[1])
+        val = items[2]
+        return Condition(field=agg.label(), op=op, value=val)
+
+    def order_agg_clause(self, items):
+        agg = items[0]
+        desc = len(items) > 1 and items[1] == "DESC"
+        return (agg, desc)
+
+    def agg_func_ref(self, items):
+        return items[0]
+
+    def agg_count(self, _items):
+        return AggFunc("COUNT", None)
+
+    def agg_count_distinct(self, items):
+        return AggFunc("COUNT_DISTINCT", str(items[0]))
+
+    def agg_sum(self, items):
+        return AggFunc("SUM", str(items[0]))
+
+    def agg_avg(self, items):
+        return AggFunc("AVG", str(items[0]))
+
+    def agg_min(self, items):
+        return AggFunc("MIN", str(items[0]))
+
+    def agg_max(self, items):
+        return AggFunc("MAX", str(items[0]))
+
     def update_edge(self, args):
         return UpdateEdge(
             source=self._str(args[0]),
@@ -431,6 +595,30 @@ class DSLTransformer(Transformer):
             fields=args[2] if len(args) > 2 and isinstance(args[2], list) else [],
             where=self._find(args[2:], WhereClause),
         )
+
+    # --- Intelligence queries ---
+    def recall_q(self, args):
+        node_id = self._str(args[0])
+        depth = self._num(args[1])
+        limit = self._find(args[2:], LimitClause)
+        where = self._find(args[2:], WhereClause)
+        return RecallQuery(node_id=node_id, depth=depth, limit=limit, where=where)
+
+    def counterfactual(self, args):
+        return CounterfactualQuery(node_id=self._str(args[0]))
+
+    def propagate_stmt(self, args):
+        return PropagateStmt(
+            node_id=self._str(args[0]),
+            field=str(args[1]),
+            depth=self._num(args[2]),
+        )
+
+    def bind_context(self, args):
+        return BindContext(name=self._str(args[0]))
+
+    def discard_context(self, args):
+        return DiscardContext(name=self._str(args[0]))
 
     # --- System queries ---
     def sys_stats(self, args):
@@ -504,8 +692,44 @@ class DSLTransformer(Transformer):
         action = str(args[0])
         return SysWal(action=action)
 
+    def sys_expire(self, args):
+        where = self._find(args, WhereClause)
+        return SysExpire(where=where)
+
+    def sys_snapshot(self, args):
+        return SysSnapshot(name=self._str(args[0]))
+
+    def sys_rollback(self, args):
+        return SysRollback(name=self._str(args[0]))
+
+    def sys_snapshots(self, args):
+        return SysSnapshots()
+
+    def sys_contradictions(self, args):
+        where = self._find(args, WhereClause)
+        # The last two args are IDENTIFIER tokens: field, group_by
+        identifiers = [str(a) for a in args if isinstance(a, str) and not isinstance(a, Token)]
+        # Actually, IDENTIFIER tokens are strings after transformation
+        # Filter out WhereClause and collect remaining string identifiers
+        idents = []
+        for a in args:
+            if isinstance(a, WhereClause):
+                continue
+            if isinstance(a, (str, Token)) and not isinstance(a, WhereClause):
+                idents.append(str(a))
+        # idents should be [field, group_by_field]
+        field = idents[0] if len(idents) >= 1 else ""
+        group_by = idents[1] if len(idents) >= 2 else ""
+        return SysContradictions(where=where, field=field, group_by=group_by)
+
+    def typed_ident_with_type(self, args):
+        return (str(args[0]), str(args[1]))
+
+    def typed_ident_bare(self, args):
+        return (str(args[0]), None)
+
     def ident_list(self, args):
-        return [str(a) for a in args]
+        return list(args)
 
     def string_list(self, args):
         return [self._str(a) for a in args]
@@ -528,3 +752,15 @@ class DSLTransformer(Transformer):
             if isinstance(a, cls):
                 return a
         return None
+
+    def _find_expires(self, args):
+        """Extract expires_in or expires_at from args. Returns (exp_in, exp_at)."""
+        exp_in = None
+        exp_at = None
+        for a in args:
+            if isinstance(a, tuple):
+                if a[0] == "expires_in":
+                    exp_in = (int(a[1]), a[2])
+                elif a[0] == "expires_at":
+                    exp_at = a[1]
+        return exp_in, exp_at

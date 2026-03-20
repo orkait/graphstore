@@ -33,6 +33,7 @@ from graphstore.errors import (
     CeilingExceeded,
     VersionMismatch,
     SchemaError,
+    AggregationError,
     CostThresholdExceeded,
     BatchRollback,
 )
@@ -55,6 +56,7 @@ __all__ = [
     "CeilingExceeded",
     "VersionMismatch",
     "SchemaError",
+    "AggregationError",
     "CostThresholdExceeded",
     "BatchRollback",
     "DEFAULT_CEILING_BYTES",
@@ -135,6 +137,9 @@ class GraphStore:
                     ast_nodes.DeleteNode, ast_nodes.DeleteNodes,
                     ast_nodes.CreateEdge, ast_nodes.UpdateEdge, ast_nodes.DeleteEdge, ast_nodes.DeleteEdges,
                     ast_nodes.Increment, ast_nodes.Batch,
+                    ast_nodes.AssertStmt, ast_nodes.RetractStmt,
+                    ast_nodes.UpdateNodes, ast_nodes.MergeStmt,
+                    ast_nodes.PropagateStmt, ast_nodes.DiscardContext,
                 ))
 
                 if is_write and self._conn:

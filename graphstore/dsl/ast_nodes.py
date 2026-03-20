@@ -60,6 +60,26 @@ class OrderClause:
     field: str
     direction: str = "ASC"  # "ASC" or "DESC"
 
+@dataclass
+class AggFunc:
+    func: str       # "COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MIN", "MAX"
+    field: str | None  # None for COUNT()
+
+    def label(self) -> str:
+        if self.field is None:
+            return f"{self.func}()"
+        return f"{self.func}({self.field})"
+
+@dataclass
+class AggregateQuery:
+    where: WhereClause | None = None
+    group_by: list[str] | None = None
+    select: list[AggFunc] | None = None
+    having: Any | None = None
+    order_by: AggFunc | None = None
+    order_desc: bool = False
+    limit: LimitClause | None = None
+
 # --- Read queries ---
 @dataclass
 class NodeQuery:
@@ -186,6 +206,8 @@ class CreateNode:
     id: str | None  # None for AUTO ID
     fields: list[FieldPair]
     auto_id: bool = False
+    expires_in: tuple[int, str] | None = None   # (amount, unit) e.g. (30, "m")
+    expires_at: str | None = None                # ISO-8601 string
 
 @dataclass
 class VarAssign:
@@ -201,6 +223,8 @@ class UpdateNode:
 class UpsertNode:
     id: str
     fields: list[FieldPair]
+    expires_in: tuple[int, str] | None = None
+    expires_at: str | None = None
 
 @dataclass
 class DeleteNode:
@@ -245,6 +269,55 @@ class Increment:
 class Batch:
     statements: list  # list of write queries
 
+@dataclass
+class AssertStmt:
+    id: str
+    fields: list[FieldPair]
+    confidence: float | None = None
+    source: str | None = None
+
+@dataclass
+class RetractStmt:
+    id: str
+    reason: str | None = None
+
+@dataclass
+class UpdateNodes:
+    where: WhereClause
+    fields: list[FieldPair]
+
+@dataclass
+class MergeStmt:
+    source_id: str
+    target_id: str
+
+@dataclass
+class PropagateStmt:
+    node_id: str
+    field: str
+    depth: int
+
+@dataclass
+class BindContext:
+    name: str
+
+@dataclass
+class DiscardContext:
+    name: str
+
+# --- Read queries (intelligence) ---
+
+@dataclass
+class RecallQuery:
+    node_id: str
+    depth: int
+    limit: LimitClause | None = None
+    where: WhereClause | None = None
+
+@dataclass
+class CounterfactualQuery:
+    node_id: str
+
 # --- System queries ---
 @dataclass
 class SysStats:
@@ -283,8 +356,8 @@ class SysExplain:
 @dataclass
 class SysRegisterNodeKind:
     kind: str
-    required: list[str]
-    optional: list[str]
+    required: list[tuple[str, str | None]]  # [(field_name, type_name_or_none), ...]
+    optional: list[tuple[str, str | None]]
 
 @dataclass
 class SysRegisterEdgeKind:
@@ -312,3 +385,25 @@ class SysClear:
 @dataclass
 class SysWal:
     action: str  # "STATUS" or "REPLAY"
+
+@dataclass
+class SysExpire:
+    where: WhereClause | None = None
+
+@dataclass
+class SysContradictions:
+    where: WhereClause | None = None
+    field: str = ""
+    group_by: str = ""
+
+@dataclass
+class SysSnapshot:
+    name: str
+
+@dataclass
+class SysRollback:
+    name: str
+
+@dataclass
+class SysSnapshots:
+    pass

@@ -10,14 +10,18 @@ import sqlite3
 from graphstore.store import CoreStore
 from graphstore.schema import SchemaRegistry
 from graphstore.types import Result
+import numpy as np
+
 from graphstore.dsl.ast_nodes import (
     Condition,
     MatchQuery,
     NodesQuery,
     SysCheckpoint,
     SysClear,
+    SysContradictions,
     SysDescribe,
     SysEdgeKinds,
+    SysExpire,
     SysExplain,
     SysFailedQueries,
     SysFrequentQueries,
@@ -25,7 +29,10 @@ from graphstore.dsl.ast_nodes import (
     SysRebuild,
     SysRegisterEdgeKind,
     SysRegisterNodeKind,
+    SysRollback,
     SysSlowQueries,
+    SysSnapshot,
+    SysSnapshots,
     SysStats,
     SysUnregister,
     SysWal,
@@ -33,7 +40,7 @@ from graphstore.dsl.ast_nodes import (
 )
 from graphstore.dsl.cost_estimator import estimate_match_cost, estimate_traverse_cost
 from graphstore.memory import estimate as estimate_memory
-from graphstore.errors import GraphStoreError
+from graphstore.errors import GraphStoreError, NodeNotFound
 
 
 class SystemExecutor:
@@ -71,6 +78,11 @@ class SystemExecutor:
             SysRebuild: self._rebuild,
             SysClear: self._clear,
             SysWal: self._wal,
+            SysExpire: self._expire,
+            SysContradictions: self._contradictions,
+            SysSnapshot: self._snapshot,
+            SysRollback: self._rollback,
+            SysSnapshots: self._snapshots,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -93,6 +105,7 @@ class SystemExecutor:
                 self.store.node_count, self.store.edge_count
             )
             data["ceiling_bytes"] = self.store._ceiling_bytes
+            data["column_memory_bytes"] = self.store.columns.memory_bytes
         if q.target is None or q.target == "WAL":
             if self.conn:
                 row = self.conn.execute("SELECT COUNT(*) FROM wal").fetchone()
@@ -223,6 +236,15 @@ class SystemExecutor:
 
     def _register_node_kind(self, q: SysRegisterNodeKind) -> Result:
         self.schema.register_node_kind(q.kind, q.required, q.optional)
+        # Pre-create columns for typed fields
+        type_map = {"string": "int32_interned", "int": "int64", "float": "float64"}
+        for item in q.required + q.optional:
+            if isinstance(item, tuple):
+                name, type_name = item
+            else:
+                name, type_name = item, None
+            if type_name and type_name in type_map:
+                self.store.columns.declare_column(name, type_map[type_name])
         return Result(kind="ok", data=None, count=0)
 
     def _register_edge_kind(self, q: SysRegisterEdgeKind) -> Result:
@@ -242,7 +264,7 @@ class SystemExecutor:
 
     def _rebuild(self, q: SysRebuild) -> Result:
         self.store._rebuild_edges()
-        # Rebuild secondary indices
+        # Rebuild secondary indices from columns (sole source of truth)
         for field in list(self.store._indexed_fields):
             self.store.add_index(field)
         return Result(kind="ok", data=None, count=0)
@@ -281,3 +303,229 @@ class SystemExecutor:
             # Will be wired up by GraphStore
             return Result(kind="ok", data=None, count=0)
         return Result(kind="ok", data=None, count=0)
+
+    def _expire(self, q: SysExpire) -> Result:
+        """SYS EXPIRE: tombstone nodes whose __expires_at__ has passed."""
+        n = self.store._next_slot
+        if n == 0:
+            return Result(kind="ok", data={"expired": 0}, count=0)
+
+        # Build live mask (non-tombstoned only, don't filter by expiry since we want to find expired)
+        mask = self.store.node_ids[:n] >= 0
+        if self.store.node_tombstones:
+            tomb_arr = np.array(list(self.store.node_tombstones), dtype=np.int32)
+            tomb_mask = np.zeros(n, dtype=bool)
+            valid = tomb_arr[tomb_arr < n]
+            if len(valid) > 0:
+                tomb_mask[valid] = True
+            mask = mask & ~tomb_mask
+
+        # Apply optional WHERE filter (kind filter)
+        if q.where:
+            from graphstore.dsl.executor import Executor
+            kind_filter = None
+            expr = q.where.expr
+            if isinstance(expr, Condition) and expr.field == "kind" and expr.op == "=":
+                kind_filter = expr.value
+            if kind_filter:
+                kind_mask = self.store._live_mask(kind_filter)
+                mask = mask & kind_mask
+
+        # Find expired nodes
+        expires = self.store.columns.get_column("__expires_at__", n)
+        if expires is None:
+            return Result(kind="ok", data={"expired": 0}, count=0)
+
+        col, pres, _ = expires
+        now_ms = int(time.time() * 1000)
+        expired_mask = mask & pres & (col > 0) & (col < now_ms)
+
+        expired_slots = np.nonzero(expired_mask)[0]
+        if len(expired_slots) == 0:
+            return Result(kind="ok", data={"expired": 0}, count=0)
+
+        # Batch tombstone: clear columns, remove from id_to_slot, add to tombstones
+        expired_count = 0
+        expired_slot_set = set()
+        for slot_idx in expired_slots:
+            slot = int(slot_idx)
+            nid_str_id = int(self.store.node_ids[slot])
+            if nid_str_id == -1:
+                continue
+
+            # Remove from secondary indices
+            for field in self.store._indexed_fields:
+                if self.store.columns.has_column(field) and self.store.columns._presence[field][slot]:
+                    dtype = self.store.columns._dtypes[field]
+                    raw = self.store.columns._columns[field][slot]
+                    if dtype == "int32_interned":
+                        val = self.store.string_table.lookup(int(raw))
+                    elif dtype == "float64":
+                        val = float(raw)
+                    else:
+                        val = int(raw)
+                    idx_list = self.store.secondary_indices.get(field, {}).get(val, [])
+                    if slot in idx_list:
+                        idx_list.remove(slot)
+
+            self.store.columns.clear(slot)
+            self.store.node_tombstones.add(slot)
+            if nid_str_id in self.store.id_to_slot:
+                del self.store.id_to_slot[nid_str_id]
+            self.store._count -= 1
+            expired_slot_set.add(slot)
+            expired_count += 1
+
+        # Single pass: remove all expired slots from all edge lists at once
+        if expired_slot_set:
+            any_removed = False
+            for etype in list(self.store._edges_by_type.keys()):
+                old_len = len(self.store._edges_by_type[etype])
+                self.store._edges_by_type[etype] = [
+                    (s, t, d) for s, t, d in self.store._edges_by_type[etype]
+                    if s not in expired_slot_set and t not in expired_slot_set
+                ]
+                if not self.store._edges_by_type[etype]:
+                    del self.store._edges_by_type[etype]
+                if len(self.store._edges_by_type.get(etype, [])) != old_len:
+                    any_removed = True
+
+            if any_removed:
+                # Rebuild edge_keys from scratch once
+                self.store._edge_keys = {
+                    (s, t, k)
+                    for k, edges in self.store._edges_by_type.items()
+                    for s, t, _d in edges
+                }
+            self.store._edges_dirty = True
+            self.store._ensure_edges_built()
+
+        return Result(kind="ok", data={"expired": expired_count}, count=expired_count)
+
+    def _contradictions(self, q: SysContradictions) -> Result:
+        """SYS CONTRADICTIONS: find groups with >1 distinct value for a field."""
+        n = self.store._next_slot
+        if n == 0:
+            return Result(kind="contradictions", data=[], count=0)
+
+        # Build live mask (tombstones + TTL + retracted)
+        mask = self.store.compute_live_mask(n)
+
+        # Apply WHERE filter (kind filter)
+        if q.where:
+            expr = q.where.expr
+            if isinstance(expr, Condition) and expr.field == "kind" and expr.op == "=":
+                kind_mask = self.store._live_mask(expr.value)
+                mask = mask & kind_mask
+
+        filtered_count = int(np.sum(mask))
+        if filtered_count == 0:
+            return Result(kind="contradictions", data=[], count=0)
+
+        # Get group_by and field columns
+        group_field = q.group_by
+        value_field = q.field
+
+        if not self.store.columns.has_column(group_field):
+            return Result(kind="contradictions", data=[], count=0)
+        if not self.store.columns.has_column(value_field):
+            return Result(kind="contradictions", data=[], count=0)
+
+        group_col = self.store.columns._columns[group_field][:n][mask]
+        value_col = self.store.columns._columns[value_field][:n][mask]
+        group_dtype = self.store.columns._dtypes[group_field]
+        value_dtype = self.store.columns._dtypes[value_field]
+
+        # Group by group_col, find groups with >1 distinct value
+        unique_groups = np.unique(group_col)
+        contradictions = []
+        for gkey in unique_groups:
+            group_mask = group_col == gkey
+            values_in_group = value_col[group_mask]
+            unique_vals = np.unique(values_in_group)
+            if len(unique_vals) > 1:
+                # Resolve group key
+                if group_dtype == "int32_interned":
+                    group_name = self.store.string_table.lookup(int(gkey))
+                elif group_dtype == "float64":
+                    group_name = float(gkey)
+                else:
+                    group_name = int(gkey)
+                # Resolve values
+                resolved_vals = []
+                for v in unique_vals:
+                    if value_dtype == "int32_interned":
+                        resolved_vals.append(self.store.string_table.lookup(int(v)))
+                    elif value_dtype == "float64":
+                        resolved_vals.append(float(v))
+                    else:
+                        resolved_vals.append(int(v))
+                contradictions.append({
+                    "group": group_name,
+                    "values": resolved_vals,
+                    "count": len(unique_vals),
+                })
+
+        return Result(kind="contradictions", data=contradictions, count=len(contradictions))
+
+    def _snapshot(self, q: SysSnapshot) -> Result:
+        """SYS SNAPSHOT: save full graph state to a named snapshot."""
+        store = self.store
+        snap = {
+            "columns": store.columns.snapshot_arrays(),
+            "node_ids": store.node_ids[:store._next_slot].copy(),
+            "node_kinds": store.node_kinds[:store._next_slot].copy(),
+            "tombstones": set(store.node_tombstones),
+            "edges_by_type": {k: list(v) for k, v in store._edges_by_type.items()},
+            "edge_keys": set(store._edge_keys),
+            "id_to_slot": dict(store.id_to_slot),
+            "next_slot": store._next_slot,
+            "count": store._count,
+            "capacity": store._capacity,
+            "active_context": store._active_context,
+        }
+        store._snapshots[q.name] = snap
+        return Result(kind="ok", data={"snapshot": q.name}, count=1)
+
+    def _rollback(self, q: SysRollback) -> Result:
+        """SYS ROLLBACK TO: restore full graph state from a named snapshot."""
+        store = self.store
+        if q.name not in store._snapshots:
+            raise GraphStoreError(f"Snapshot not found: {q.name!r}")
+
+        snap = store._snapshots[q.name]
+
+        # Restore columns
+        store.columns.restore_arrays(snap["columns"])
+
+        # Restore capacity if needed
+        saved_next_slot = snap["next_slot"]
+        if saved_next_slot > store._capacity:
+            store._grow()
+
+        # Restore node arrays
+        store.node_ids[:saved_next_slot] = snap["node_ids"]
+        store.node_kinds[:saved_next_slot] = snap["node_kinds"]
+
+        # Clear any slots beyond the saved state
+        if saved_next_slot < store._next_slot:
+            store.node_ids[saved_next_slot:store._next_slot] = -1
+            store.node_kinds[saved_next_slot:store._next_slot] = 0
+
+        store.node_tombstones = set(snap["tombstones"])
+        store._edges_by_type = {k: list(v) for k, v in snap["edges_by_type"].items()}
+        store._edge_keys = set(snap["edge_keys"])
+        store.id_to_slot = dict(snap["id_to_slot"])
+        store._next_slot = saved_next_slot
+        store._count = snap["count"]
+        store._active_context = snap.get("active_context")
+
+        # Rebuild derived state
+        store._rebuild_edges()
+
+        return Result(kind="ok", data={"rollback": q.name}, count=1)
+
+    def _snapshots(self, q: SysSnapshots) -> Result:
+        """SYS SNAPSHOTS: list all named snapshots."""
+        names = list(self.store._snapshots.keys())
+        return Result(kind="snapshots", data=names, count=len(names))

@@ -8,6 +8,9 @@ _grammar_path = Path(__file__).parent / "grammar.lark"
 _grammar = _grammar_path.read_text()
 _parser = Lark(_grammar, parser="lalr", start="start")
 
+# Keywords that resolve to the current time - must bypass LRU cache
+_TIME_KEYWORDS = {"NOW()", "TODAY", "YESTERDAY"}
+
 
 class PlanCache:
     def __init__(self, maxsize: int = 256):
@@ -15,6 +18,9 @@ class PlanCache:
         self._maxsize = maxsize
 
     def get_or_parse(self, query: str):
+        # Bypass cache for queries with time expressions so timestamps are fresh
+        if any(kw in query for kw in _TIME_KEYWORDS):
+            return _parse_internal(query)
         key = " ".join(query.split())  # normalize whitespace
         if key in self._cache:
             self._cache.move_to_end(key)

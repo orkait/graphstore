@@ -6,7 +6,7 @@ tables within a single transaction.
 
 import json
 import time
-
+from urllib.parse import quote
 
 from graphstore.persistence.database import SCHEMA_VERSION
 from graphstore.store import CoreStore
@@ -30,10 +30,19 @@ def checkpoint(store: CoreStore, schema: SchemaRegistry, conn):
         conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
                      ("node_ids", ids_data.tobytes(), str(ids_data.dtype)))
 
-        # Node data (json)
-        node_data_list = store.node_data[:store._next_slot]
-        conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                     ("node_data", json.dumps(node_data_list).encode(), "json"))
+        # Column store data (sole source of truth for node fields)
+        conn.execute("DELETE FROM blobs WHERE key LIKE 'columns:%'")
+        for field in store.columns._columns:
+            col_data = store.columns._columns[field][:store._next_slot]
+            pres_data = store.columns._presence[field][:store._next_slot]
+            dtype_str = store.columns._dtypes[field]
+            safe_field = quote(field, safe="")
+            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                         (f"columns:{safe_field}:data", col_data.tobytes(), str(col_data.dtype)))
+            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                         (f"columns:{safe_field}:presence", pres_data.tobytes(), str(pres_data.dtype)))
+            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                         (f"columns:{safe_field}:dtype", dtype_str.encode(), "text"))
 
         # Edge matrices: one set of blobs per type
         # First, clear old edge blobs
