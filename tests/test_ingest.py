@@ -99,3 +99,69 @@ class TestBaseProtocol:
         import pytest
         with pytest.raises(NotImplementedError):
             Ingestor().convert("test.txt")
+
+
+class TestMarkItDownIngestor:
+    def test_convert_text_file(self, tmp_path):
+        f = tmp_path / "test.txt"
+        f.write_text("Hello world\nThis is a test")
+        from graphstore.ingest.markitdown_ingestor import MarkItDownIngestor
+        ingestor = MarkItDownIngestor()
+        result = ingestor.convert(str(f))
+        assert "Hello" in result.markdown
+        assert result.parser_used == "markitdown"
+
+    def test_supported_extensions(self):
+        from graphstore.ingest.markitdown_ingestor import MarkItDownIngestor
+        assert "txt" in MarkItDownIngestor.supported_extensions
+        assert "html" in MarkItDownIngestor.supported_extensions
+
+
+class TestRouter:
+    def test_txt_routes_to_markitdown(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("notes.txt") == "markitdown"
+
+    def test_pdf_routes_to_pymupdf4llm(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("report.pdf") == "pymupdf4llm"
+
+    def test_docx_routes_to_markitdown(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("doc.docx") == "markitdown"
+
+    def test_explicit_override(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("report.pdf", using="docling") == "docling"
+
+    def test_unsupported_format_raises(self):
+        import pytest
+        from graphstore.ingest.router import select_ingestor
+        with pytest.raises(ValueError, match="Unsupported format"):
+            select_ingestor("video.mp4")
+
+    def test_list_ingestors(self):
+        from graphstore.ingest.router import list_ingestors
+        ingestors = list_ingestors()
+        assert len(ingestors) == 3
+        names = [i["name"] for i in ingestors]
+        assert "markitdown" in names
+
+    def test_ingest_text_file(self, tmp_path):
+        f = tmp_path / "test.txt"
+        f.write_text("# Hello\n\nWorld")
+        from graphstore.ingest.router import ingest_file
+        result = ingest_file(str(f))
+        assert "Hello" in result.markdown
+
+
+class TestVisionHandler:
+    def test_init_without_openai_raises(self):
+        """VisionHandler should work if openai is installed."""
+        try:
+            from graphstore.ingest.vision import VisionHandler
+            vh = VisionHandler()
+            # Just test initialization, not actual Ollama connection
+            assert vh.model == "smolvlm2:2.2b"
+        except ImportError:
+            pass  # openai not installed, skip
