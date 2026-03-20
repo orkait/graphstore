@@ -2,36 +2,53 @@
 
 # graphstore
 
-**Agentic brain DB - in-memory graph database built for AI agent memory**
+**Agentic brain DB - the cognitive layer for AI agents**
 
 [![CI](https://github.com/orkait/graphstore/actions/workflows/ci.yml/badge.svg)](https://github.com/orkait/graphstore/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?logo=python&logoColor=white)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e?logo=opensourceinitiative&logoColor=white)](https://github.com/orkait/graphstore/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-f59e0b?logo=semver&logoColor=white)](https://github.com/orkait/graphstore)
+[![Version](https://img.shields.io/badge/version-0.3.0-f59e0b?logo=semver&logoColor=white)](https://github.com/orkait/graphstore)
 [![NumPy](https://img.shields.io/badge/numpy-%23013243?logo=numpy&logoColor=white)](https://numpy.org)
 [![SciPy](https://img.shields.io/badge/scipy-%238CAAE6?logo=scipy&logoColor=white)](https://scipy.org)
-[![FastAPI](https://img.shields.io/badge/fastapi-%23009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![usearch](https://img.shields.io/badge/usearch-%23FF6B35?logo=data:image/svg+xml;base64,&logoColor=white)](https://github.com/unum-cloud/usearch)
 
 </div>
 
 ---
 
-A graph database designed as a memory substrate for AI agents. Columnar numpy storage, sparse matrix traversal, spreading activation recall, belief management, and a human-readable DSL - no Cypher, no SPARQL, just queries that read like sentences.
+Five engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vector search, document ingestion, and a human-readable query language - everything an AI agent needs to remember, recall, reason, and speak.
 
-## 🧩 Why graphstore?
+## 🧩 What agents get
 
-| What agents need | How graphstore solves it |
-|---|---|
-| Fast recall by association | `RECALL FROM "concept:paris" DEPTH 3 LIMIT 10` - spreading activation via sparse matmul |
-| Memory summarization | `AGGREGATE NODES GROUP BY topic SELECT COUNT(), AVG(importance)` - numpy vectorized |
-| Belief tracking | `ASSERT "fact:x" CONFIDENCE 0.9 SOURCE "tool"` / `RETRACT "fact:x" REASON "outdated"` |
-| Working memory cleanup | `CREATE NODE "tmp" ... EXPIRES IN 30m` + `SYS EXPIRE` |
-| Contradiction detection | `SYS CONTRADICTIONS WHERE kind = "belief" FIELD value GROUP BY topic` |
-| Hypothesis testing | `SYS SNAPSHOT "before"` ... explore ... `SYS ROLLBACK TO "before"` |
-| Temporal reasoning | `NODES WHERE __created_at__ > NOW() - 7d` |
-| Isolated reasoning | `BIND CONTEXT "session-1"` ... `DISCARD CONTEXT "session-1"` |
+| Need | graphstore solves it | Speed (100k nodes) |
+|---|---|---|
+| **Recall by meaning** | `SIMILAR TO "Paris travel" LIMIT 10` | 127 μs |
+| **Recall by association** | `RECALL FROM "concept:paris" DEPTH 3` | 983 μs |
+| **Memory summarization** | `AGGREGATE NODES GROUP BY topic SELECT COUNT(), AVG(importance)` | 788 μs |
+| **Belief tracking** | `ASSERT "fact:x" CONFIDENCE 0.9` / `RETRACT "fact:x"` | 9 μs |
+| **Contradiction detection** | `SYS CONTRADICTIONS WHERE kind = "belief" FIELD value GROUP BY topic` | 981 μs |
+| **Hypothesis testing** | `SYS SNAPSHOT "before"` ... `SYS ROLLBACK TO "before"` | 1.8 ms |
+| **Document ingestion** | `INGEST "report.pdf"` (auto-parse, chunk, embed, wire) | < 2 sec |
+| **Cross-doc connections** | `SYS CONNECT` (auto-wire similar chunks across documents) | < 5 sec |
+| **Working memory** | `CREATE NODE ... EXPIRES IN 30m` + `SYS EXPIRE` | 9 μs |
+| **Temporal queries** | `NODES WHERE __created_at__ > NOW() - 7d` | 102 μs |
+| **Isolated reasoning** | `BIND CONTEXT "session"` ... `DISCARD CONTEXT "session"` | 72 μs |
+| **Point lookup** | `NODE "memory:42"` | 4 μs |
 
-**Performance at 100k nodes:** COUNT in 34us, GROUP BY in 744us, 14x less memory than dict storage. Everything runs on numpy arrays - no Python loops in the hot path.
+## 🏗️ Five Engines
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    DSL (one language)                         │
+└──────┬──────────┬──────────┬──────────┬──────────┬──────────┘
+       ▼          ▼          ▼          ▼          ▼
+ ColumnStore    Graph    VectorStore  DocStore   Ingestor
+  (numpy)    (scipy CSR) (usearch)   (SQLite)
+ structured  relationships meaning   raw docs   PDF/Word/text
+ WHERE       RECALL       SIMILAR    WITH DOC   → markdown
+ GROUP BY    TRAVERSE     TO                    → chunks
+ ORDER BY    PATH, MATCH                        → images
+```
 
 ## 📦 Install
 
@@ -39,83 +56,99 @@ A graph database designed as a memory substrate for AI agents. Columnar numpy st
 pip install graphstore
 ```
 
+Core includes: numpy, scipy, lark, usearch, model2vec (~85 MB)
+
+<details>
+<summary><strong>Opt-in upgrades</strong></summary>
+
+```bash
+# Higher quality embeddings (EmbeddingGemma-300M via ONNX)
+graphstore install-embedder embeddinggemma
+
+# Image understanding in documents (SmolVLM2 / Qwen3-VL via Ollama)
+graphstore install-vision smolvlm2
+graphstore install-vision qwen3-vl
+
+# Voice: speech-to-text + text-to-speech (Moonshine + Piper)
+graphstore install-voice
+```
+
+</details>
+
 ## 🚀 Quick Start
 
 ```python
 from graphstore import GraphStore
 
-g = GraphStore()  # in-memory, or GraphStore(path="./brain") for persistence
+g = GraphStore(path="./brain")
 
 # Store memories
 g.execute('CREATE NODE "memory:paris" kind = "memory" topic = "travel" importance = 0.9')
 g.execute('CREATE NODE "memory:eiffel" kind = "memory" topic = "travel" importance = 0.8')
-g.execute('CREATE NODE "fact:capital" kind = "fact" topic = "geography" importance = 1.0')
-
-# Connect them
 g.execute('CREATE EDGE "memory:paris" -> "memory:eiffel" kind = "associated"')
-g.execute('CREATE EDGE "fact:capital" -> "memory:paris" kind = "supports"')
 
-# Recall by association (spreading activation)
-result = g.execute('RECALL FROM "fact:capital" DEPTH 2 LIMIT 5')
-for node in result.data:
-    print(f"{node['id']} (score: {node['_activation_score']:.3f})")
+# Recall by meaning (vector similarity)
+result = g.execute('SIMILAR TO "European architecture" LIMIT 5')
 
-# Summarize what the agent knows
-result = g.execute('AGGREGATE NODES GROUP BY topic SELECT COUNT(), AVG(importance)')
-for row in result.data:
-    print(f"{row['topic']}: {row['COUNT()']} memories, avg importance {row['AVG(importance)']:.2f}")
+# Recall by association (graph activation)
+result = g.execute('RECALL FROM "memory:paris" DEPTH 2 LIMIT 10')
+
+# Ingest a document (auto-parse, chunk, embed, wire)
+g.execute('INGEST "report.pdf" AS "doc:q3" KIND "report"')
+g.execute('SYS CONNECT')  # auto-wire similar chunks across documents
+
+# Search document contents by meaning
+result = g.execute('SIMILAR TO "Q3 revenue growth" LIMIT 5')
+doc = g.execute('NODE "doc:q3:chunk:3" WITH DOCUMENT')  # fetch full text
 ```
 
 ## 🧠 Agent Memory Features
 
 <details>
-<summary><strong>Belief Management</strong> - assert facts, retract outdated beliefs, detect contradictions</summary>
+<summary><strong>Belief Management</strong> - assert, retract, detect contradictions</summary>
 
 ```sql
--- Assert a fact with confidence and source
 ASSERT "fact:earth-radius" value = 6371 kind = "fact" CONFIDENCE 0.99 SOURCE "physics-tool"
-
--- Retract when outdated (node becomes invisible but kept for audit)
 RETRACT "fact:old-preference" REASON "user corrected this"
-
--- Bulk update confidence when a source is discredited
 UPDATE NODES WHERE kind = "fact" AND source = "unreliable" SET confidence = 0.1
-
--- Find contradicting beliefs automatically
 SYS CONTRADICTIONS WHERE kind = "belief" FIELD value GROUP BY topic
 ```
 
 </details>
 
 <details>
-<summary><strong>Associative Recall</strong> - spreading activation, importance/recency weighted</summary>
+<summary><strong>Semantic Search</strong> - find memories by meaning</summary>
 
 ```sql
--- Recall memories associated with a concept (sparse matrix-vector multiply)
-RECALL FROM "concept:paris" DEPTH 3 LIMIT 10
-RECALL FROM "concept:paris" DEPTH 3 LIMIT 10 WHERE kind = "memory"
-
--- Results include activation scores
--- [{"id": "memory:eiffel", "_activation_score": 0.72, ...}, ...]
-
--- Propagate confidence through the knowledge graph
-PROPAGATE "belief:user-is-expert" FIELD confidence DEPTH 3
+SIMILAR TO "European travel" LIMIT 10
+SIMILAR TO "revenue growth" LIMIT 10 WHERE kind = "chunk" AND confidence > 0.5
+SIMILAR TO NODE "concept:paris" LIMIT 10
+SIMILAR TO [0.12, -0.34, 0.56, ...] LIMIT 10
+SYS DUPLICATES THRESHOLD 0.95
+SYS CONNECT THRESHOLD 0.85
 ```
 
 </details>
 
 <details>
-<summary><strong>Working Memory + TTL</strong> - auto-expiring scratch space</summary>
+<summary><strong>Document Ingestion</strong> - PDF, Word, text, images, audio</summary>
 
 ```sql
--- Create with expiry
-CREATE NODE "scratch:123" kind = "working" content = "..." EXPIRES IN 30m
-CREATE NODE "ctx:456" kind = "context" data = "..." EXPIRES AT "2026-04-01T00:00:00"
+-- Tiered parsing: MarkItDown → PyMuPDF4LLM → Docling → VLM
+INGEST "report.pdf" AS "doc:q3" KIND "report"
+INGEST "notes.docx" USING markitdown
+INGEST "financials.pdf" USING docling
+INGEST "slides.pptx" USING VISION "smolvlm2"
 
--- Expired nodes are automatically invisible to all queries
--- Flush to reclaim memory
-SYS EXPIRE
-SYS EXPIRE WHERE kind = "working"
+-- Fetch full document text (from disk, on demand)
+NODE "doc:q3:chunk:7" WITH DOCUMENT
+
+-- Auto-wire similar chunks across all documents
+SYS CONNECT
+
+-- System info
+SYS INGESTORS
+SYS STATS DOCUMENTS
 ```
 
 </details>
@@ -124,69 +157,69 @@ SYS EXPIRE WHERE kind = "working"
 <summary><strong>Hypothesis Testing</strong> - snapshot, explore, rollback</summary>
 
 ```sql
--- Save state before exploring a reasoning branch
 SYS SNAPSHOT "before-hypothesis"
-
--- ... agent explores, creates nodes, draws conclusions ...
-
--- Didn't work out? Undo everything
+-- ... explore reasoning branch ...
 SYS ROLLBACK TO "before-hypothesis"
 
--- Or just check what would happen without committing
 WHAT IF RETRACT "belief:earth-is-flat"
--- Returns: {affected_nodes: [...], affected_count: 14}
+-- Returns affected nodes without committing
 ```
 
 </details>
 
 <details>
-<summary><strong>Context Isolation</strong> - isolated reasoning sessions</summary>
+<summary><strong>Temporal + Working Memory</strong></summary>
 
 ```sql
--- Start an isolated context
+CREATE NODE "scratch:123" kind = "working" data = "..." EXPIRES IN 30m
+NODES WHERE __created_at__ > NOW() - 7d
+NODES WHERE __updated_at__ > TODAY ORDER BY __created_at__ DESC
+SYS EXPIRE WHERE kind = "working"
+MERGE NODE "memory:old" INTO "memory:canonical"
+```
+
+</details>
+
+<details>
+<summary><strong>Aggregations</strong> - GROUP BY with numpy-vectorized ops</summary>
+
+```sql
+AGGREGATE NODES WHERE kind = "memory"
+  GROUP BY topic
+  SELECT COUNT(), AVG(importance)
+  HAVING COUNT() > 2
+  ORDER BY AVG(importance) DESC
+```
+
+</details>
+
+<details>
+<summary><strong>Context Isolation</strong></summary>
+
+```sql
 BIND CONTEXT "reasoning-session-42"
-
--- All creates are auto-tagged, all reads are scoped
 CREATE NODE "hyp:1" kind = "hypothesis" content = "maybe X"
-RECALL FROM "hyp:1" DEPTH 3 LIMIT 10  -- only searches within context
-
--- Done? Cleanup everything in the context
+RECALL FROM "hyp:1" DEPTH 3 LIMIT 10
 DISCARD CONTEXT "reasoning-session-42"
 ```
 
 </details>
 
 <details>
-<summary><strong>Aggregations</strong> - GROUP BY with numpy-vectorized SUM/AVG/MIN/MAX/COUNT</summary>
+<summary><strong>Voice</strong> (opt-in: graphstore install-voice)</summary>
 
-```sql
--- How many memories per topic?
-AGGREGATE NODES WHERE kind = "memory"
-  GROUP BY topic
-  SELECT COUNT(), AVG(importance)
-  HAVING COUNT() > 2
-  ORDER BY AVG(importance) DESC
+```python
+g = GraphStore(path="./brain", voice=True)
 
--- Global summary (no GROUP BY)
-AGGREGATE NODES SELECT COUNT(), SUM(importance), MAX(__updated_at__)
+# Agent speaks
+g.speak("The Q3 revenue grew 15%")
 
--- Columnar-only: all fields must be declared via SYS REGISTER for aggregation
-SYS REGISTER NODE KIND "memory" REQUIRED topic:string, importance:float
-```
+# Agent listens (real-time streaming)
+g.listen(on_text=lambda text: agent.process(text))
+g.stop_listening()
 
-</details>
-
-<details>
-<summary><strong>Temporal Queries</strong> - auto-timestamps + relative time</summary>
-
-```sql
--- Every node gets __created_at__ and __updated_at__ automatically (Unix ms)
-NODES WHERE __created_at__ > NOW() - 7d
-NODES WHERE __updated_at__ > TODAY
-NODES WHERE __created_at__ > YESTERDAY ORDER BY __created_at__ DESC LIMIT 20
-
--- Consolidate old memories
-MERGE NODE "memory:old-paris" INTO "memory:paris-canonical"
+# Ingest audio files
+g.execute('INGEST "meeting.wav"')  # Moonshine transcribes → chunks → embeds
 ```
 
 </details>
@@ -194,214 +227,107 @@ MERGE NODE "memory:old-paris" INTO "memory:paris-canonical"
 ## 📖 DSL Reference
 
 <details>
-<summary><strong>Reads</strong> - queries, traversals, path finding, pattern matching</summary>
+<summary><strong>Reads</strong> - queries, traversals, path finding, pattern matching, semantic search</summary>
 
 ```sql
--- Single node
 NODE "node_id"
-
--- Filter nodes
+NODE "node_id" WITH DOCUMENT
 NODES WHERE kind = "function" AND file = "app.py" LIMIT 10
-
--- Edges
 EDGES FROM "node_id" WHERE kind = "calls"
-EDGES TO "node_id"
-
--- Traversal (BFS)
 TRAVERSE FROM "node_id" DEPTH 3 WHERE kind = "calls"
 SUBGRAPH FROM "node_id" DEPTH 2
-
--- Path finding
-PATH FROM "a" TO "b" MAX_DEPTH 5 WHERE kind = "calls"
-PATHS FROM "a" TO "b" MAX_DEPTH 5
+PATH FROM "a" TO "b" MAX_DEPTH 5
 SHORTEST PATH FROM "a" TO "b"
-DISTANCE FROM "a" TO "b" MAX_DEPTH 10
-
--- Weighted paths (Dijkstra)
 WEIGHTED SHORTEST PATH FROM "a" TO "b"
-WEIGHTED DISTANCE FROM "a" TO "b"
-
--- Ancestry
 ANCESTORS OF "node_id" DEPTH 3
 DESCENDANTS OF "node_id" DEPTH 3
 COMMON NEIGHBORS OF "a" AND "b"
-
--- Pattern matching (sparse matrix-vector multiply)
-MATCH ("fn_main") -[kind = "calls"]-> (callee) -[kind = "calls"]-> (transitive)
-
--- Counting
+MATCH ("fn_main") -[kind = "calls"]-> (callee)
 COUNT NODES WHERE kind = "function"
-COUNT EDGES WHERE kind = "calls"
-
--- Degree filters
-NODES WHERE OUTDEGREE calls > 5
-NODES WHERE INDEGREE > 10
+AGGREGATE NODES GROUP BY kind SELECT COUNT()
+RECALL FROM "concept:x" DEPTH 3 LIMIT 10
+SIMILAR TO "search text" LIMIT 10
+SIMILAR TO [0.1, 0.2, ...] LIMIT 10 WHERE kind = "memory"
+WHAT IF RETRACT "belief:x"
 ```
 
 </details>
 
 <details>
-<summary><strong>Writes</strong> - create, update, delete, beliefs, batch operations</summary>
+<summary><strong>Writes</strong> - create, update, delete, beliefs, documents, voice</summary>
 
 ```sql
--- Nodes
-CREATE NODE "id" kind = "function" name = "foo" file = "bar.py"
-CREATE NODE "id" kind = "working" name = "tmp" EXPIRES IN 1h
-UPDATE NODE "id" SET name = "new_name"
-UPSERT NODE "id" kind = "function" name = "foo"
+CREATE NODE "id" kind = "x" name = "foo"
+CREATE NODE "id" kind = "x" DOCUMENT "full text..." EXPIRES IN 1h
+UPDATE NODE "id" SET name = "new"
+UPSERT NODE "id" kind = "x" name = "foo"
 DELETE NODE "id"
 DELETE NODES WHERE kind = "test"
 UPDATE NODES WHERE kind = "fact" SET confidence = 0.5
-
--- Beliefs
+CREATE EDGE "source" -> "target" kind = "calls"
+INCREMENT NODE "id" hits BY 1
 ASSERT "fact:x" kind = "fact" value = 42 CONFIDENCE 0.9 SOURCE "tool"
 RETRACT "fact:x" REASON "outdated"
-
--- Memory consolidation
-MERGE NODE "memory:old" INTO "memory:canonical"
-
--- Edges
-CREATE EDGE "source" -> "target" kind = "calls"
-DELETE EDGE "source" -> "target" WHERE kind = "calls"
-DELETE EDGES FROM "node_id" WHERE kind = "calls"
-
--- Counters
-INCREMENT NODE "id" hits BY 1
-
--- Belief propagation
+MERGE NODE "old" INTO "canonical"
 PROPAGATE "belief:x" FIELD confidence DEPTH 3
-
--- Context isolation
+INGEST "report.pdf" AS "doc:q3" KIND "report"
+CONNECT NODE "chunk:7" THRESHOLD 0.8
 BIND CONTEXT "session-1"
 DISCARD CONTEXT "session-1"
-
--- Batch (atomic with rollback)
-BEGIN
-CREATE NODE "a" kind = "x" name = "alpha"
-CREATE NODE "b" kind = "x" name = "beta"
-CREATE EDGE "a" -> "b" kind = "link"
-COMMIT
+BEGIN ... COMMIT
 ```
 
 </details>
 
 <details>
-<summary><strong>System</strong> - stats, schema, query analysis, maintenance, snapshots</summary>
+<summary><strong>System</strong> - stats, schema, maintenance, model management</summary>
 
 ```sql
--- Statistics
-SYS STATS
-SYS STATS NODES
-SYS STATS MEMORY
-
--- Schema (with typed fields for columnar acceleration)
-SYS REGISTER NODE KIND "memory" REQUIRED topic:string, importance:float OPTIONAL tag:string
-SYS REGISTER EDGE KIND "calls" FROM "function" TO "function"
-SYS UNREGISTER NODE KIND "function"
-SYS KINDS
-SYS EDGE KINDS
-SYS DESCRIBE NODE "memory"
-
--- Belief consistency
+SYS STATUS
+SYS STATS / SYS STATS NODES / SYS STATS MEMORY / SYS STATS DOCUMENTS
+SYS REGISTER NODE KIND "memory" REQUIRED topic:string, importance:float EMBED content
+SYS KINDS / SYS EDGE KINDS / SYS DESCRIBE NODE "memory"
 SYS CONTRADICTIONS WHERE kind = "belief" FIELD value GROUP BY topic
-
--- TTL management
-SYS EXPIRE
-SYS EXPIRE WHERE kind = "working"
-
--- Snapshots (hypothesis testing)
-SYS SNAPSHOT "before-experiment"
-SYS ROLLBACK TO "before-experiment"
-SYS SNAPSHOTS
-
--- Counterfactual analysis
-WHAT IF RETRACT "belief:x"
-
--- Query analysis
-SYS EXPLAIN TRAVERSE FROM "a" DEPTH 5 WHERE kind = "calls"
-SYS SLOW QUERIES LIMIT 10
-SYS FREQUENT QUERIES LIMIT 5
-SYS FAILED QUERIES LIMIT 10
-
--- Maintenance
-SYS CHECKPOINT
-SYS REBUILD INDICES
-SYS CLEAR CACHE
-SYS CLEAR LOG
-SYS WAL STATUS
+SYS CONNECT / SYS CONNECT THRESHOLD 0.9
+SYS DUPLICATES THRESHOLD 0.95
+SYS EXPIRE / SYS EXPIRE WHERE kind = "working"
+SYS SNAPSHOT "name" / SYS ROLLBACK TO "name" / SYS SNAPSHOTS
+SYS EMBEDDERS / SYS SET EMBEDDER "embeddinggemma-300m" / SYS REEMBED
+SYS INGESTORS
+SYS CHECKPOINT / SYS REBUILD INDICES / SYS CLEAR CACHE
+SYS EXPLAIN TRAVERSE FROM "a" DEPTH 5
+SYS SLOW QUERIES LIMIT 10 / SYS FAILED QUERIES LIMIT 10
 ```
 
 </details>
 
-## 💾 Persistence
-
-```python
-# Data is persisted to sqlite when a path is provided
-with GraphStore(path="./data") as g:
-    g.execute('CREATE NODE "a" kind = "x" name = "alpha"')
-    # Auto-checkpoints on close
-
-# Reopen - data survives
-with GraphStore(path="./data") as g:
-    r = g.execute('NODE "a"')
-    assert r.data["name"] == "alpha"
-
-# Manual checkpoint
-g.checkpoint()
-```
-
-Writes are logged to a WAL (write-ahead log) for crash recovery. On restart, uncommitted WAL entries are replayed automatically.
-
-## 🛡️ Schema Validation
-
-```python
-g = GraphStore()
-
-# Register node kinds with required/optional typed fields
-g.execute('SYS REGISTER NODE KIND "memory" REQUIRED topic:string, importance:float OPTIONAL tag:string')
-g.execute('SYS REGISTER EDGE KIND "associated" FROM "memory" TO "memory"')
-
-# Typed fields are automatically columnarized for fast filtering + aggregation
-result = g.execute('AGGREGATE NODES WHERE kind = "memory" GROUP BY topic SELECT AVG(importance)')
-```
-
-## 🧠 Memory Management
-
-```python
-# Set a memory ceiling (default: 256 MB)
-g = GraphStore(ceiling_mb=512)
-
-# Columnar storage: ~35 bytes/node (vs ~1.2KB with dicts)
-# 8GB budget = ~200M nodes
-print(g.memory_usage)  # bytes
-
-r = g.execute('SYS STATS MEMORY')
-print(r.data)
-```
-
-Operations that would exceed the ceiling raise `CeilingExceeded` before modifying state.
-
-## ⚡ Performance
-
-Measured at 100k nodes, 5 columnarized fields:
+## ⚡ Performance (100k nodes)
 
 | Operation | Time |
 |---|---|
-| COUNT WHERE score > X | 34 us |
-| GROUP BY + AVG | 744 us |
-| WHERE field = value | 50 us |
-| ORDER BY LIMIT 10 | 200 us |
-| Batch rollback (100k) | 75 us |
-| RECALL DEPTH 3 | ~1-3 ms |
-| Memory per node | ~35 bytes |
+| Point lookup | 4 μs |
+| Filtered scan LIMIT 10 | 68 μs |
+| COUNT | 41 μs |
+| ORDER BY LIMIT 10 | 168 μs |
+| GROUP BY + AVG | 788 μs |
+| SIMILAR TO LIMIT 10 | 127 μs |
+| RECALL DEPTH 3 | 983 μs |
+| ASSERT / RETRACT | 4-9 μs |
+| UPDATE NODES 50k bulk | 171 μs |
+| SYS SNAPSHOT | 1.8 ms |
+| Memory per node | 66 bytes (columns) + 1 KB (vector) |
 
 ## ⚙️ Configuration
 
-| Parameter | Default | Description |
-|---|---|---|
-| `path` | `None` | Directory for sqlite persistence. `None` = in-memory only |
-| `ceiling_mb` | `256` | Memory ceiling in MB |
-| `allow_system_queries` | `True` | Enable/disable `SYS` queries |
+```python
+g = GraphStore(
+    path="./brain",          # persistence directory (None = in-memory)
+    ceiling_mb=256,          # graph memory ceiling
+    embedder="default",      # "default" (model2vec) or custom Embedder
+    vision_model=None,       # "smolvlm2" or "qwen3-vl" (opt-in)
+    voice=False,             # True to enable STT/TTS (opt-in)
+)
+```
 
 ## 🏗️ Architecture
 
@@ -410,45 +336,73 @@ Measured at 100k nodes, 5 columnarized fields:
 
 ```
 graphstore/
-├── __init__.py             # GraphStore public API
-├── store.py                # CoreStore: numpy columnar arrays + node/edge CRUD
-├── columns.py              # ColumnStore: typed numpy arrays (source of truth)
-├── edges.py                # EdgeMatrices: per-type scipy CSR matrices
-├── strings.py              # StringTable: interned string <-> int mapping
-├── types.py                # Result, Edge, NodeData dataclasses
-├── errors.py               # Error hierarchy
-├── memory.py               # Memory estimation + ceiling enforcement
-├── path.py                 # Bidirectional BFS, multi-path, Dijkstra
-├── snapshot.py             # GraphSnapshot + SnapshotManager
-├── schema.py               # SchemaRegistry: kind validation
-├── dsl/
-│   ├── grammar.lark        # Lark LALR(1) grammar (60+ productions)
-│   ├── parser.py           # Parser wrapper + LRU plan cache
-│   ├── transformer.py      # Parse tree -> typed AST nodes
-│   ├── ast_nodes.py        # 50+ AST dataclasses
-│   ├── executor.py         # User query executor (reads + writes + recall)
-│   ├── executor_system.py  # System query executor
-│   └── cost_estimator.py   # Frontier-based cost rejection
-└── persistence/
-    ├── database.py         # sqlite setup + table creation
-    ├── serializer.py       # Columns -> sqlite blobs
-    └── deserializer.py     # sqlite blobs -> columns (with legacy migration)
+├── __init__.py               # Thin re-exports
+├── graphstore.py             # GraphStore facade + WAL + routing
+├── core/                     # Graph engine
+│   ├── store.py              # CoreStore: columnar node CRUD
+│   ├── columns.py            # ColumnStore: typed numpy arrays
+│   ├── edges.py              # EdgeMatrices: scipy CSR
+│   ├── strings.py            # StringTable: string interning
+│   ├── schema.py             # SchemaRegistry + EMBED field
+│   ├── path.py               # BFS, Dijkstra, common neighbors
+│   ├── memory.py             # Ceiling enforcement
+│   ├── types.py              # Result, Edge dataclasses
+│   └── errors.py             # Error hierarchy
+├── dsl/                      # Query language
+│   ├── grammar.lark          # Lark LALR(1) grammar
+│   ├── parser.py             # Parser + LRU cache
+│   ├── transformer.py        # Parse tree → AST
+│   ├── ast_nodes.py          # 60+ AST dataclasses
+│   ├── executor_base.py      # Shared: live_mask, eval_where, column filters
+│   ├── executor_reads.py     # NODES, RECALL, SIMILAR TO, AGGREGATE, MATCH
+│   ├── executor_writes.py    # CREATE, ASSERT, RETRACT, INGEST, MERGE, BATCH
+│   ├── executor_system.py    # SYS commands
+│   ├── executor.py           # Unified dispatcher
+│   └── cost_estimator.py     # Frontier-based cost rejection
+├── embedding/                # Text → vectors
+│   ├── base.py               # Embedder protocol
+│   ├── model2vec_embedder.py # Default (30MB, CPU)
+│   ├── onnx_hf_embedder.py   # EmbeddingGemma ONNX (opt-in)
+│   └── postprocess.py        # L2 normalize, Matryoshka truncation
+├── vector/                   # Semantic search
+│   ├── index.py              # usearch HNSW wrapper
+│   └── store.py              # VectorStore: slot ↔ vector
+├── document/                 # Document storage
+│   └── store.py              # DocumentStore: SQLite multi-table
+├── ingest/                   # File → graph
+│   ├── base.py               # Ingestor protocol
+│   ├── markitdown_ingestor.py  # Tier 1: general files
+│   ├── pymupdf4llm_ingestor.py # Tier 2: PDF structure
+│   ├── docling_ingestor.py   # Tier 3: hard PDFs (lazy)
+│   ├── chunker.py            # Text splitting + summaries
+│   ├── vision.py             # SmolVLM2/Qwen3-VL via Ollama
+│   ├── router.py             # Tiered routing
+│   └── connector.py          # SYS CONNECT cross-doc wiring
+├── voice/                    # Speech (opt-in)
+│   ├── stt.py                # Moonshine STT
+│   └── tts.py                # Piper TTS
+├── registry/                 # Model management
+│   ├── models.py             # Supported models config
+│   ├── installer.py          # Download + verify + smoke test
+│   └── manifest.py           # Model manifest schema
+├── persistence/              # SQLite checkpoints
+│   ├── database.py
+│   ├── serializer.py
+│   └── deserializer.py
+├── server.py                 # FastAPI playground
+└── cli.py                    # CLI commands
 ```
 
 </details>
 
 ## 🎮 Playground
 
-An interactive browser-based workbench for exploring the DSL:
-
 ```bash
 pip install graphstore[playground]
 graphstore playground
 ```
 
-Three-panel UI with a CodeMirror editor (DSL syntax highlighting), React Flow graph visualization, and stacked query results. Includes 4 pre-loaded example scripts, two layout engines (dagre hierarchy + force-directed cluster), configurable graph settings, and light/dark theme support.
-
-See [`playground/README.md`](playground/README.md) for details.
+Three-panel UI: CodeMirror editor, React Flow graph visualization, stacked query results.
 
 ## 🛠️ Development
 
