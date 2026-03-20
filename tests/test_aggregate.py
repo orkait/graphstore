@@ -1,7 +1,7 @@
 """Tests for AGGREGATE NODES queries."""
 import pytest
 from graphstore import GraphStore
-from graphstore.errors import AggregationError
+from graphstore.core.errors import AggregationError
 
 
 def make_graph():

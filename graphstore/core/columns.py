@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from graphstore.strings import StringTable
+from graphstore.core.strings import StringTable
 
 
 class ColumnStore:

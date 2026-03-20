@@ -7,9 +7,9 @@ for stats, schema management, query logs, WAL, and diagnostics.
 import time
 import sqlite3
 
-from graphstore.store import CoreStore
-from graphstore.schema import SchemaRegistry
-from graphstore.types import Result
+from graphstore.core.store import CoreStore
+from graphstore.core.schema import SchemaRegistry
+from graphstore.core.types import Result
 import numpy as np
 
 from graphstore.dsl.ast_nodes import (
@@ -39,8 +39,8 @@ from graphstore.dsl.ast_nodes import (
     TraverseQuery,
 )
 from graphstore.dsl.cost_estimator import estimate_match_cost, estimate_traverse_cost
-from graphstore.memory import estimate as estimate_memory
-from graphstore.errors import GraphStoreError, NodeNotFound
+from graphstore.core.memory import estimate as estimate_memory
+from graphstore.core.errors import GraphStoreError, NodeNotFound
 
 
 class SystemExecutor:

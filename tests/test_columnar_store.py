@@ -1,6 +1,6 @@
 """Tests for columnar source-of-truth store operations."""
 import time
-from graphstore.store import CoreStore
+from graphstore.core.store import CoreStore
 from graphstore import GraphStore
 
 

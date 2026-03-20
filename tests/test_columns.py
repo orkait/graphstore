@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from graphstore.columns import ColumnStore
-from graphstore.strings import StringTable
+from graphstore.core.columns import ColumnStore
+from graphstore.core.strings import StringTable
 
 
 class TestSetAndPresence:
@@ -346,7 +346,7 @@ class TestMemoryBytes:
 
 # -- CoreStore integration tests --
 
-from graphstore.store import CoreStore
+from graphstore.core.store import CoreStore
 
 
 class TestCoreStoreColumnIntegration:

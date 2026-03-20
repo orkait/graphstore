@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from graphstore.edges import EdgeMatrices
+from graphstore.core.edges import EdgeMatrices
 
 
 # ── Helpers ─────────────────────────────────────────────────────────

@@ -10,11 +10,11 @@ from urllib.parse import unquote
 
 import numpy as np
 
-from graphstore.store import CoreStore
-from graphstore.strings import StringTable
-from graphstore.schema import SchemaRegistry
+from graphstore.core.store import CoreStore
+from graphstore.core.strings import StringTable
+from graphstore.core.schema import SchemaRegistry
 from graphstore.persistence.database import SCHEMA_VERSION
-from graphstore.errors import VersionMismatch
+from graphstore.core.errors import VersionMismatch
 
 
 def load(conn) -> tuple[CoreStore, SchemaRegistry]:

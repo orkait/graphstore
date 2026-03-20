@@ -9,8 +9,8 @@ import time
 from urllib.parse import quote
 
 from graphstore.persistence.database import SCHEMA_VERSION
-from graphstore.store import CoreStore
-from graphstore.schema import SchemaRegistry
+from graphstore.core.store import CoreStore
+from graphstore.core.schema import SchemaRegistry
 
 
 def checkpoint(store: CoreStore, schema: SchemaRegistry, conn):

@@ -2,7 +2,7 @@
 
 import pytest
 
-from graphstore.strings import StringTable
+from graphstore.core.strings import StringTable
 
 
 class TestIntern:

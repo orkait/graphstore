@@ -2,8 +2,8 @@
 
 import json
 
-from graphstore.types import Edge, NodeData, Result
-from graphstore.errors import (
+from graphstore.core.types import Edge, NodeData, Result
+from graphstore.core.errors import (
     BatchRollback,
     CeilingExceeded,
     CostThresholdExceeded,

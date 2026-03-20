@@ -4,7 +4,7 @@ import pytest
 
 import graphstore.server as server_module
 from graphstore.server import app
-from graphstore.store import CoreStore
+from graphstore.core.store import CoreStore
 
 from fastapi.testclient import TestClient
 

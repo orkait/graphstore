@@ -1,10 +1,10 @@
 """End-to-end tests for DSL write operations: DSL string -> parse -> execute -> verify Result."""
 
 import pytest
-from graphstore.store import CoreStore
+from graphstore.core.store import CoreStore
 from graphstore.dsl.parser import parse
 from graphstore.dsl.executor import Executor
-from graphstore.errors import NodeExists, NodeNotFound, BatchRollback
+from graphstore.core.errors import NodeExists, NodeNotFound, BatchRollback
 
 
 @pytest.fixture

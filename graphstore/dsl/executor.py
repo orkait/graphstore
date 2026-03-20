@@ -63,23 +63,23 @@ from graphstore.dsl.ast_nodes import (
     UpsertNode,
 )
 from graphstore.dsl.cost_estimator import estimate_match_cost, estimate_traverse_cost
-from graphstore.errors import (
+from graphstore.core.errors import (
     AggregationError,
     BatchRollback,
     CostThresholdExceeded,
     GraphStoreError,
     NodeNotFound,
 )
-from graphstore.path import (
+from graphstore.core.path import (
     bfs_traverse,
     bidirectional_bfs,
     common_neighbors,
     dijkstra,
     find_all_paths,
 )
-from graphstore.schema import SchemaRegistry
-from graphstore.store import CoreStore
-from graphstore.types import Result
+from graphstore.core.schema import SchemaRegistry
+from graphstore.core.store import CoreStore
+from graphstore.core.types import Result
 
 
 class Executor:

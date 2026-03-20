@@ -15,9 +15,9 @@ import time
 import sqlite3
 from pathlib import Path
 
-from graphstore.store import CoreStore
-from graphstore.schema import SchemaRegistry
-from graphstore.types import Result, Edge
+from graphstore.core.store import CoreStore
+from graphstore.core.schema import SchemaRegistry
+from graphstore.core.types import Result, Edge
 from graphstore.dsl.parser import parse, clear_cache
 from graphstore.dsl.executor import Executor
 from graphstore.dsl.executor_system import SystemExecutor
@@ -25,7 +25,7 @@ from graphstore.dsl import ast_nodes
 from graphstore.persistence.database import open_database
 from graphstore.persistence.serializer import checkpoint as _checkpoint_fn
 from graphstore.persistence.deserializer import load as _load_fn
-from graphstore.errors import (
+from graphstore.core.errors import (
     GraphStoreError,
     QueryError,
     NodeNotFound,
@@ -37,7 +37,7 @@ from graphstore.errors import (
     CostThresholdExceeded,
     BatchRollback,
 )
-from graphstore.memory import estimate as _estimate_memory, DEFAULT_CEILING_BYTES
+from graphstore.core.memory import estimate as _estimate_memory, DEFAULT_CEILING_BYTES
 
 __all__ = [
     "GraphStore",
