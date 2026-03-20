@@ -41,18 +41,31 @@ Every node optionally has a vector. The VectorStore manages a usearch HNSW index
 ```toml
 [project.dependencies]
 # Existing: scipy, lark, numpy
-usearch = ">=2.0"           # HNSW index, 5MB, MIT, incremental insert
+usearch = ">=2.0"          # HNSW index, 5MB, MIT, incremental insert
+model2vec = ">=0.4"        # default embedder, 30MB, numpy-only, CPU
 
 [project.optional-dependencies]
-embeddings = ["model2vec>=0.4"]                    # 30MB, numpy-only, CPU, 50k/sec
-embeddings-gpu = ["sentence-transformers>=3.0"]    # For EmbeddingGemma/MiniLM on GPU
+onnx = [
+    "onnxruntime>=1.24",       # ~17MB CPU, runs ONNX models without torch
+    "transformers>=4.57",      # tokenizer + model loading (no torch needed for tokenizer)
+    "huggingface_hub>=0.34",   # model download
+]
+onnx-gpu = [
+    "onnxruntime-gpu>=1.24",   # ~250MB, CUDA-accelerated ONNX inference
+    "transformers>=4.57",
+    "huggingface_hub>=0.34",
+]
 ```
 
-- `usearch` is a core dependency (like scipy) - always installed, always available
-- `model2vec` is optional - for auto-embedding from text fields
-- `sentence-transformers` is optional - for GPU users who want higher quality
+- `usearch` + `model2vec` are core dependencies - always installed, always available
+- `onnxruntime` is optional - for EmbeddingGemma-300M (~17MB CPU / ~250MB GPU, no torch)
+- `sentence-transformers` is NOT a dependency - torch is too heavy (5.5GB)
+
+Note: `transformers` is needed for `AutoTokenizer` only (tokenization + prompt formatting), not for model inference. ONNX Runtime handles inference. The `transformers` package without torch is ~500MB but does not pull in torch unless explicitly requested.
 
 ## 5. Embedder Interface
+
+The embedder contract distinguishes between **queries** and **documents**. This matters because EmbeddingGemma (and other asymmetric models) use different prompt prefixes for queries vs stored documents. Symmetric models (like model2vec) can use the same method for both.
 
 ```python
 # graphstore/embedder.py
@@ -61,20 +74,38 @@ import numpy as np
 
 
 class Embedder:
-    """Interface. Any object with encode(texts) -> np.ndarray works."""
+    """Base interface for text embedding models.
+
+    Subclasses must implement encode_documents (for storage) and
+    encode_queries (for search). Models with asymmetric prefixes
+    (like EmbeddingGemma) override both. Symmetric models can
+    implement encode() and have both delegate to it.
+    """
 
     @property
     def dims(self) -> int:
-        """Embedding dimensionality."""
+        """Output embedding dimensionality."""
         raise NotImplementedError
 
-    def encode(self, texts: list[str]) -> np.ndarray:
-        """Encode texts to float32 vectors. Shape: (len(texts), dims)."""
+    def encode_documents(self, texts: list[str], titles: list[str | None] | None = None) -> np.ndarray:
+        """Encode texts for storage. Shape: (len(texts), dims).
+
+        Args:
+            texts: document texts to embed
+            titles: optional per-document titles (used by EmbeddingGemma prefix)
+        """
+        raise NotImplementedError
+
+    def encode_queries(self, texts: list[str]) -> np.ndarray:
+        """Encode texts for search/retrieval. Shape: (len(texts), dims)."""
         raise NotImplementedError
 
 
 class Model2VecEmbedder(Embedder):
-    """Default embedder. 30MB, numpy-only, 50k texts/sec on CPU."""
+    """Default embedder. 30MB, numpy-only, 50k texts/sec on CPU.
+
+    Symmetric model - queries and documents use the same encoding.
+    """
 
     def __init__(self, model_name: str = "minishlab/M2V_base_output"):
         from model2vec import StaticModel
@@ -84,17 +115,111 @@ class Model2VecEmbedder(Embedder):
     def dims(self) -> int:
         return self._model.dim
 
-    def encode(self, texts: list[str]) -> np.ndarray:
+    def encode_documents(self, texts: list[str], titles: list[str | None] | None = None) -> np.ndarray:
+        return self._model.encode(texts).astype(np.float32)
+
+    def encode_queries(self, texts: list[str]) -> np.ndarray:
         return self._model.encode(texts).astype(np.float32)
 
 
-def load_default_embedder() -> Embedder | None:
-    """Try to load model2vec. Returns None if not installed."""
-    try:
-        return Model2VecEmbedder()
-    except ImportError:
-        return None
+class EmbeddingGemmaONNX(Embedder):
+    """EmbeddingGemma-300M via ONNX Runtime. No torch required.
+
+    Supports Matryoshka truncation: 768 (full), 512, 256, 128 dims.
+    Uses asymmetric prefixes for queries vs documents per Google's spec.
+    ONNX model from: onnx-community/embeddinggemma-300m-ONNX
+    Precision options: fp32, q8, q4 (not fp16).
+    Max input: 2048 tokens.
+    """
+
+    QUERY_PREFIX = "task: search result | query: "
+    DOC_PREFIX_TEMPLATE = "title: {title} | text: "
+
+    def __init__(
+        self,
+        model_id: str = "onnx-community/embeddinggemma-300m-ONNX",
+        output_dims: int = 256,
+        cache_dir: str | None = None,
+    ):
+        import onnxruntime as ort
+        from transformers import AutoTokenizer
+        from huggingface_hub import hf_hub_download
+
+        self._output_dims = output_dims
+        self._tokenizer = AutoTokenizer.from_pretrained(model_id, cache_dir=cache_dir)
+
+        # Download ONNX model file
+        model_path = hf_hub_download(model_id, "model.onnx", cache_dir=cache_dir)
+        self._session = ort.InferenceSession(model_path)
+
+    @property
+    def dims(self) -> int:
+        return self._output_dims
+
+    def encode_documents(self, texts: list[str], titles: list[str | None] | None = None) -> np.ndarray:
+        prefixed = []
+        for i, text in enumerate(texts):
+            title = titles[i] if titles and i < len(titles) and titles[i] else "none"
+            prefixed.append(f"{self.DOC_PREFIX_TEMPLATE.format(title=title)}{text}")
+        return self._encode(prefixed)
+
+    def encode_queries(self, texts: list[str]) -> np.ndarray:
+        prefixed = [f"{self.QUERY_PREFIX}{t}" for t in texts]
+        return self._encode(prefixed)
+
+    def _encode(self, texts: list[str]) -> np.ndarray:
+        inputs = self._tokenizer(texts, padding=True, truncation=True,
+                                 max_length=2048, return_tensors="np")
+        outputs = self._session.run(None, {
+            "input_ids": inputs["input_ids"],
+            "attention_mask": inputs["attention_mask"],
+        })
+        embeddings = outputs[0]  # (batch, seq_len, hidden_dim)
+        # Mean pooling
+        mask = inputs["attention_mask"][:, :, np.newaxis]
+        pooled = (embeddings * mask).sum(axis=1) / mask.sum(axis=1)
+        # Matryoshka truncation
+        truncated = pooled[:, :self._output_dims]
+        # L2 renormalize after truncation
+        norms = np.linalg.norm(truncated, axis=1, keepdims=True)
+        norms = np.maximum(norms, 1e-12)
+        return (truncated / norms).astype(np.float32)
+
+
+# --- Model registry ---
+
+EMBEDDER_REGISTRY = {
+    "model2vec": {
+        "class": "Model2VecEmbedder",
+        "deps": [],
+        "description": "Default. 30MB, numpy-only, CPU, 50k/sec.",
+    },
+    "embeddinggemma-300m": {
+        "class": "EmbeddingGemmaONNX",
+        "deps": ["onnxruntime", "transformers", "huggingface_hub"],
+        "description": "Google EmbeddingGemma via ONNX. 768d Matryoshka, 2048 tokens. Requires: pip install graphstore[onnx]",
+    },
+}
+
+
+def load_embedder(name: str = "model2vec", **kwargs) -> Embedder:
+    """Load an embedder by registry name."""
+    if name == "model2vec":
+        return Model2VecEmbedder(**kwargs)
+    elif name == "embeddinggemma-300m":
+        return EmbeddingGemmaONNX(**kwargs)
+    else:
+        raise ValueError(f"Unknown embedder: {name!r}. Available: {list(EMBEDDER_REGISTRY.keys())}")
 ```
+
+### 5.1 Embedder Responsibilities
+
+The embedder wrapper owns four responsibilities:
+
+1. **Tokenizer loading** - `AutoTokenizer.from_pretrained()` for ONNX models
+2. **Query/document prefixing** - EmbeddingGemma requires `"task: search result | query: "` for queries and `"title: {title} | text: "` for documents
+3. **Truncation/padding** - max 2048 tokens for EmbeddingGemma, tokenizer handles this
+4. **Post-processing** - Matryoshka dimension truncation (768/512/256/128) with L2 renormalization after truncation
 
 ## 6. VectorStore
 
@@ -467,7 +592,9 @@ If `embed_field` is declared but no embedder is available:
 - `SIMILAR TO "text"` raises: `"Text similarity requires an embedder. Install: pip install graphstore[embeddings]"`
 - `SIMILAR TO [0.12, ...]` works (raw vector search, no embedder needed)
 
-## 15. GraphStore Constructor Update
+## 15. GraphStore Constructor + Model Management
+
+### 15.1 Constructor
 
 ```python
 class GraphStore:
@@ -476,17 +603,75 @@ class GraphStore:
         path: str | None = None,
         ceiling_mb: int = 256,
         vector_ceiling_mb: int = 2048,
-        embedder: Embedder | str | None = None,
+        embedder: Embedder | str | None = "default",
         allow_system_queries: bool = True,
     ):
         # ...
         if embedder == "default":
-            self._embedder = load_default_embedder()  # model2vec or None
+            self._embedder = load_embedder("model2vec")
+        elif isinstance(embedder, str):
+            self._embedder = load_embedder(embedder)
         elif isinstance(embedder, Embedder):
             self._embedder = embedder
         elif embedder is None:
             self._embedder = None  # no auto-embedding, VECTOR [...] only
 ```
+
+Default is `"default"` which loads model2vec automatically. model2vec is a core dependency so this always works.
+
+### 15.2 Model Management DSL
+
+Agents and developers can manage embedders via DSL commands:
+
+```sql
+-- List available embedders and their status
+SYS EMBEDDERS
+-- Returns: [{name: "model2vec", status: "active", dims: 256},
+--           {name: "embeddinggemma-300m", status: "available", deps: "pip install graphstore[onnx]"}]
+
+-- Download and install a model (downloads ONNX weights to ~/.graphstore/models/)
+SYS INSTALL EMBEDDER "embeddinggemma-300m"
+
+-- Switch active embedder for this graph (persisted in sqlite metadata)
+SYS SET EMBEDDER "embeddinggemma-300m"
+-- Optional: set output dims for Matryoshka models
+SYS SET EMBEDDER "embeddinggemma-300m" DIMS 256
+
+-- Switch back to default
+SYS SET EMBEDDER "model2vec"
+
+-- Check current embedder
+SYS STATS EMBEDDER
+-- Returns: {name: "model2vec", dims: 256, vectors_stored: 12345}
+```
+
+The active embedder name is persisted in the sqlite `metadata` table. On next `GraphStore(path=...)` open, the saved embedder is loaded automatically.
+
+**Important:** Changing embedders invalidates existing vectors (different models produce incompatible embedding spaces). `SYS SET EMBEDDER` warns and requires re-embedding:
+
+```sql
+SYS SET EMBEDDER "embeddinggemma-300m"
+-- Warning: changing embedder invalidates 12345 existing vectors.
+-- Run SYS REEMBED to re-encode all documents with the new model.
+
+SYS REEMBED
+-- Re-embeds all nodes that have an EMBED field declared in their schema.
+-- Progress: 12345/12345 nodes re-embedded.
+```
+
+### 15.3 Model Cache
+
+Downloaded models are stored in `~/.graphstore/models/`:
+
+```
+~/.graphstore/models/
+  embeddinggemma-300m-onnx/
+    model.onnx        # ONNX weights
+    tokenizer.json    # HuggingFace tokenizer
+    config.json       # Model config
+```
+
+This directory is managed by `huggingface_hub` download utilities. Models are downloaded once and reused across all GraphStore instances.
 
 ## 16. New Error Types
 
@@ -526,18 +711,34 @@ class VectorNotFound(VectorError):
 
 ## 18. Performance Targets
 
+Targets based on usearch benchmarks and numpy baselines. Embedding throughput must be benchmarked on actual hardware before publishing claims.
+
 | Operation | Scale | Target | Notes |
 |---|---|---|---|
 | Vector add (single) | any | < 100 μs | usearch incremental insert |
 | SIMILAR TO LIMIT 10 | 100k vectors | < 500 μs | HNSW search + materialize |
 | SIMILAR TO LIMIT 10 | 1M vectors | < 1 ms | HNSW logarithmic scaling |
 | SIMILAR TO + WHERE | 100k vectors | < 1 ms | HNSW + column mask filter |
-| Auto-embed (model2vec) | per text | ~20 μs | 50k/sec on CPU |
+| Auto-embed (model2vec) | per text | benchmark needed | model2vec claims ~50k/sec on CPU |
+| Auto-embed (EmbeddingGemma ONNX) | per text | benchmark needed | depends on CPU/GPU, batch size, precision |
 | Vector persistence save | 1M vectors | < 2 sec | usearch serialization |
 | Vector persistence load | 1M vectors | < 2 sec | usearch deserialization |
 | SYS DUPLICATES | 100k vectors | < 5 sec | O(n) nearest-neighbor scan |
 | Memory per vector (256d) | per node | ~1.1 KB | 256*4 + 64 bytes HNSW overhead |
 | 1M vectors storage | 256 dims | ~1.1 GB | Fits in 2GB default ceiling |
+
+### 18.1 ONNX Model Provenance
+
+The ONNX export of EmbeddingGemma-300M is hosted at `onnx-community/embeddinggemma-300m-ONNX` on HuggingFace. The original model is by Google DeepMind (`google/embeddinggemma-300m`). The ONNX conversion is maintained by the onnx-community, not Google directly. The ONNX model card documents fp32, q8, and q4 precision options (not fp16).
+
+### 18.2 EmbeddingGemma Specifications
+
+- **Parameters:** 308M
+- **Max input tokens:** 2048
+- **Full embedding dims:** 768
+- **Matryoshka truncation:** 512, 256, 128 (with L2 renormalization after truncation)
+- **Asymmetric prefixes:** queries use `"task: search result | query: "`, documents use `"title: {title} | text: "`
+- **ONNX precision:** fp32, q8, q4
 
 ## 19. DSL Summary
 
