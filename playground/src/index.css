@@ -191,23 +191,23 @@
     --kind-fallback-2-text: #d4c090;
     --kind-fallback-2-badge: #b5924a;
 
-    /* Button tones - dark (muted jewel) */
-    --btn-primary-bg: #1a2e22;
-    --btn-primary-hover: #243828;
-    --btn-primary-border: #3a5a42;
-    --btn-primary-text: #8ec4a0;
-    --btn-warn-bg: #2a2418;
-    --btn-warn-hover: #342e20;
-    --btn-warn-border: #5a4a30;
-    --btn-warn-text: #d4bc88;
-    --btn-danger-bg: #2a1a1a;
-    --btn-danger-hover: #342020;
-    --btn-danger-border: #5a3838;
-    --btn-danger-text: #d4a0a0;
-    --btn-muted-bg: #20202a;
-    --btn-muted-hover: #2a2a34;
-    --btn-muted-border: #3a3a4a;
-    --btn-muted-text: #a0a0b8;
+    /* Button tones - dark (lifted from card bg, tinted) */
+    --btn-primary-bg: #283e30;
+    --btn-primary-hover: #304838;
+    --btn-primary-border: #4a6e52;
+    --btn-primary-text: #a0d8b0;
+    --btn-warn-bg: #3a3220;
+    --btn-warn-hover: #443c28;
+    --btn-warn-border: #6a5a38;
+    --btn-warn-text: #e0cc98;
+    --btn-danger-bg: #3a2424;
+    --btn-danger-hover: #442c2c;
+    --btn-danger-border: #6a4444;
+    --btn-danger-text: #e0b0b0;
+    --btn-muted-bg: #2e2e3a;
+    --btn-muted-hover: #383844;
+    --btn-muted-border: #505060;
+    --btn-muted-text: #b8b8d0;
 
     /* Graph interaction tokens - dark */
     --graph-dimmed-opacity: 0.4;
