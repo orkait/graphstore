@@ -659,15 +659,26 @@ class WriteExecutor(ExecutorBase):
         """INGEST: parse file, chunk, create graph nodes + edges, store documents."""
         import hashlib
         import os as _os
+        from pathlib import Path as _Path
 
         from graphstore.ingest.router import ingest_file
         from graphstore.ingest.chunker import chunk_by_heading
 
-        if not _os.path.exists(q.file_path):
+        # Security: validate file path against ingest_root to prevent path traversal
+        resolved = _Path(q.file_path).resolve()
+        if self._ingest_root:
+            root = _Path(self._ingest_root).resolve()
+            if not str(resolved).startswith(str(root)):
+                raise GraphStoreError(
+                    f"Path traversal not allowed: {q.file_path} "
+                    f"is outside ingest root {self._ingest_root}"
+                )
+        if not resolved.exists():
             raise GraphStoreError(f"File not found: {q.file_path}")
 
-        # 1. Parse file
-        result = ingest_file(q.file_path, using=q.using)
+        # 1. Parse file (use resolved path, not raw user input)
+        safe_path = str(resolved)
+        result = ingest_file(safe_path, using=q.using)
 
         # 2. Chunk
         chunks = chunk_by_heading(result.markdown)

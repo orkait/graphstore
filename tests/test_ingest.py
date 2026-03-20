@@ -261,3 +261,40 @@ class TestIngestDSL:
         assert result.data["doc_id"].startswith("doc:")
         assert len(result.data["doc_id"]) > 4  # doc: + hash
         g.close()
+
+
+class TestIngestSecurity:
+    def test_path_traversal_blocked_by_ingest_root(self, tmp_path):
+        """INGEST with ingest_root should block paths outside the allowed directory."""
+        import pytest
+        allowed_dir = tmp_path / "allowed"
+        allowed_dir.mkdir()
+        (allowed_dir / "safe.txt").write_text("safe content")
+
+        outside_file = tmp_path / "secret.txt"
+        outside_file.write_text("secret data")
+
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None, ingest_root=str(allowed_dir))
+
+        # Safe path works
+        result = g.execute(f'INGEST "{allowed_dir / "safe.txt"}" AS "doc:safe"')
+        assert result.data["chunks"] >= 1
+
+        # Path traversal blocked
+        with pytest.raises(Exception, match="Path traversal not allowed"):
+            g.execute(f'INGEST "{outside_file}" AS "doc:secret"')
+
+        # Absolute path outside root blocked
+        with pytest.raises(Exception, match="Path traversal not allowed"):
+            g.execute('INGEST "/etc/passwd" AS "doc:passwd"')
+
+        g.close()
+
+    def test_no_ingest_root_allows_any_path(self, tmp_path):
+        """Without ingest_root, INGEST works on any valid path (library mode)."""
+        f = tmp_path / "anywhere.txt"
+        f.write_text("content")
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        result = g.execute(f'INGEST "{f}" AS "doc:any"')
+        assert result.data["chunks"] >= 1
+        g.close()

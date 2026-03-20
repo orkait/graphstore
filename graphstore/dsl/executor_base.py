@@ -21,12 +21,14 @@ from graphstore.core.types import Result
 
 class ExecutorBase:
     def __init__(self, store: CoreStore, schema: SchemaRegistry | None = None,
-                 embedder=None, vector_store=None, document_store=None):
+                 embedder=None, vector_store=None, document_store=None,
+                 ingest_root: str | None = None):
         self.store = store
         self.schema = schema or SchemaRegistry()
         self._embedder = embedder
         self._vector_store = vector_store
         self._document_store = document_store
+        self._ingest_root = ingest_root
         self.cost_threshold = 100_000
         self._embedder_dirty = False
 
