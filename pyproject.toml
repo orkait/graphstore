@@ -28,6 +28,8 @@ classifiers = [
 dependencies = [
     "scipy>=1.10",
     "lark>=1.1",
+    "numpy>=1.24",
+    "usearch>=2.0",
 ]
 
 [project.urls]
