@@ -52,6 +52,13 @@ playground = [
     "fastapi>=0.100",
     "uvicorn>=0.20",
 ]
+ingest = [
+    "markitdown>=0.1",
+    "pymupdf4llm>=0.1",
+    "pymupdf>=1.20",
+    "docling>=2.0",
+    "openai>=1.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["graphstore*"]
