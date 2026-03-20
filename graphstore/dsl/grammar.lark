@@ -95,6 +95,14 @@ OP: "!=" | ">=" | "<=" | "=" | ">" | "<"
 ?value: STRING -> val_string
       | NUMBER -> val_number
       | "NULL" -> val_null
+      | time_expr
+
+time_expr: "NOW" "(" ")" "-" NUMBER TIME_UNIT -> time_offset
+         | "NOW" "(" ")"                       -> time_now
+         | "TODAY"                              -> time_today
+         | "YESTERDAY"                          -> time_yesterday
+
+TIME_UNIT: /[smhd]/
 limit_clause: "LIMIT" NUMBER
 offset_clause: "OFFSET" NUMBER
 order_clause: "ORDER" "BY" IDENTIFIER order_dir?

@@ -659,3 +659,44 @@ class TestPlanCache:
         assert len(_plan_cache) > 0
         clear_cache()
         assert len(_plan_cache) == 0
+
+
+# =============================================
+# Task 5: Relative time expressions
+# =============================================
+
+import time as _time
+
+
+class TestRelativeTimeExpressions:
+    def test_parse_now(self):
+        ast = parse('NODES WHERE __created_at__ > NOW()')
+        assert ast.where is not None
+        cond = ast.where.expr
+        assert isinstance(cond.value, (int, float))
+        assert cond.value > 0
+
+    def test_parse_now_minus_7d(self):
+        ast = parse('NODES WHERE __created_at__ > NOW() - 7d')
+        cond = ast.where.expr
+        assert isinstance(cond.value, (int, float))
+        # Should be approximately 7 days ago in milliseconds
+        now_ms = int(_time.time() * 1000)
+        seven_days_ms = 7 * 86400000
+        assert abs(cond.value - (now_ms - seven_days_ms)) < 2000  # 2s tolerance
+
+    def test_parse_today(self):
+        ast = parse('NODES WHERE __created_at__ > TODAY')
+        cond = ast.where.expr
+        assert isinstance(cond.value, (int, float))
+
+    def test_parse_yesterday(self):
+        ast = parse('NODES WHERE __updated_at__ > YESTERDAY')
+        cond = ast.where.expr
+        assert isinstance(cond.value, (int, float))
+
+    def test_parse_now_minus_30m(self):
+        ast = parse('NODES WHERE __updated_at__ > NOW() - 30m')
+        cond = ast.where.expr
+        now_ms = int(_time.time() * 1000)
+        assert abs(cond.value - (now_ms - 30 * 60000)) < 2000

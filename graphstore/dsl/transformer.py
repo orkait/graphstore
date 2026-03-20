@@ -1,3 +1,6 @@
+import time as _time
+from datetime import datetime, timedelta
+
 from lark import Transformer, Token
 from graphstore.dsl.ast_nodes import (
     Condition,
@@ -98,6 +101,27 @@ class DSLTransformer(Transformer):
 
     def val_null(self, args):
         return None
+
+    # --- Time expressions ---
+    def time_now(self, _items):
+        return int(_time.time() * 1000)
+
+    def time_offset(self, items):
+        n = int(float(str(items[0])))
+        unit = str(items[1])
+        ms = {"s": 1000, "m": 60000, "h": 3600000, "d": 86400000}[unit]
+        return int(_time.time() * 1000) - n * ms
+
+    def time_today(self, _items):
+        midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(midnight.timestamp() * 1000)
+
+    def time_yesterday(self, _items):
+        midnight = (datetime.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(midnight.timestamp() * 1000)
+
+    def time_expr(self, items):
+        return items[0]  # unwrap - the inner rule already returns the int value
 
     def STRING(self, token):
         return token
