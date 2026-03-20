@@ -36,6 +36,15 @@ class WhereClause:
 class LimitClause:
     value: int
 
+@dataclass
+class OffsetClause:
+    value: int
+
+@dataclass
+class OrderClause:
+    field: str
+    direction: str = "ASC"  # "ASC" or "DESC"
+
 # --- Read queries ---
 @dataclass
 class NodeQuery:
@@ -44,12 +53,20 @@ class NodeQuery:
 @dataclass
 class NodesQuery:
     where: WhereClause | None = None
+    order: OrderClause | None = None
     limit: LimitClause | None = None
+    offset: OffsetClause | None = None
 
 @dataclass
 class EdgesQuery:
     direction: str   # "FROM" or "TO"
     node_id: str
+    where: WhereClause | None = None
+    limit: LimitClause | None = None
+
+@dataclass
+class CountQuery:
+    target: str  # "NODES" or "EDGES"
     where: WhereClause | None = None
 
 @dataclass
@@ -57,6 +74,7 @@ class TraverseQuery:
     start_id: str
     depth: int
     where: WhereClause | None = None
+    limit: LimitClause | None = None
 
 @dataclass
 class SubgraphQuery:
@@ -182,6 +200,13 @@ class CreateEdge:
     source: str  # literal ID or "$variable"
     target: str  # literal ID or "$variable"
     fields: list[FieldPair]
+
+@dataclass
+class UpdateEdge:
+    source: str
+    target: str
+    fields: list[FieldPair]
+    where: WhereClause | None = None
 
 @dataclass
 class DeleteEdge:

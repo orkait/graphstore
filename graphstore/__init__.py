@@ -133,7 +133,7 @@ class GraphStore:
                 is_write = isinstance(ast, (
                     ast_nodes.CreateNode, ast_nodes.UpdateNode, ast_nodes.UpsertNode,
                     ast_nodes.DeleteNode, ast_nodes.DeleteNodes,
-                    ast_nodes.CreateEdge, ast_nodes.DeleteEdge, ast_nodes.DeleteEdges,
+                    ast_nodes.CreateEdge, ast_nodes.UpdateEdge, ast_nodes.DeleteEdge, ast_nodes.DeleteEdges,
                     ast_nodes.Increment, ast_nodes.Batch,
                 ))
 
