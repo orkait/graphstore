@@ -139,6 +139,7 @@ class GraphStore:
                     ast_nodes.Increment, ast_nodes.Batch,
                     ast_nodes.AssertStmt, ast_nodes.RetractStmt,
                     ast_nodes.UpdateNodes, ast_nodes.MergeStmt,
+                    ast_nodes.PropagateStmt, ast_nodes.DiscardContext,
                 ))
 
                 if is_write and self._conn:

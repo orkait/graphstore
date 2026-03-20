@@ -4,9 +4,12 @@ Handles all user read and write queries. System queries are handled
 separately by the server layer.
 """
 
+import copy
 import time
+from collections import deque
 
 import numpy as np
+from scipy.sparse import csr_matrix
 
 from graphstore.dsl.ast_nodes import (
     AggFunc,
@@ -15,9 +18,12 @@ from graphstore.dsl.ast_nodes import (
     AndExpr,
     AssertStmt,
     Batch,
+    BindContext,
     CommonNeighborsQuery,
     Condition,
     ContainsCondition,
+    CounterfactualQuery,
+    DiscardContext,
     LikeCondition,
     InCondition,
     CreateEdge,
@@ -25,6 +31,8 @@ from graphstore.dsl.ast_nodes import (
     DegreeCondition,
     DeleteEdge,
     MergeStmt,
+    PropagateStmt,
+    RecallQuery,
     RetractStmt,
     UpdateNodes,
     VarAssign,
@@ -124,6 +132,11 @@ class Executor:
             RetractStmt: self._retract,
             UpdateNodes: self._update_nodes,
             MergeStmt: self._merge,
+            RecallQuery: self._recall,
+            CounterfactualQuery: self._counterfactual,
+            PropagateStmt: self._propagate,
+            BindContext: self._bind_context,
+            DiscardContext: self._discard_context,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -667,6 +680,11 @@ class Executor:
         self.store.put_node(node_id, kind, data)
         # Handle TTL
         self._apply_ttl(node_id, q.expires_in, q.expires_at)
+        # Auto-tag context if bound
+        if self.store._active_context:
+            str_id = self.store.string_table.intern(node_id)
+            slot = self.store.id_to_slot[str_id]
+            self.store.columns.set_reserved(slot, "__context__", self.store._active_context)
         node = self.store.get_node(node_id)
         return Result(kind="node", data=node, count=1)
 
@@ -1134,6 +1152,299 @@ class Executor:
             count=1,
         )
 
+    # --- Intelligence handlers ---
+
+    def _recall(self, q: RecallQuery) -> Result:
+        """RECALL: spreading activation from a cue node."""
+        cue_slot = self._resolve_slot(q.node_id)
+        if cue_slot is None:
+            raise NodeNotFound(q.node_id)
+
+        n = self.store._next_slot
+        if n == 0:
+            return Result(kind="nodes", data=[], count=0)
+
+        # Get combined CSR matrix (sum of all edge types)
+        combined = self.store.edge_matrices.get(None)
+        if combined is None:
+            return Result(kind="nodes", data=[], count=0)
+
+        # Resize CSR matrix if needed (may be smaller than n)
+        mat = combined
+        if mat.shape[0] < n:
+            mat = csr_matrix((mat.data, mat.indices, mat.indptr), shape=(n, n))
+
+        # Seed activation
+        activation = np.zeros(n, dtype=np.float64)
+        activation[cue_slot] = 1.0
+
+        # Build importance weights
+        importance = np.ones(n, dtype=np.float64)
+        imp_col = self.store.columns.get_column("importance", n)
+        if imp_col is not None:
+            col_data, col_pres, _ = imp_col
+            importance[col_pres] = col_data[col_pres].astype(np.float64)
+        conf_col = self.store.columns.get_column("__confidence__", n)
+        if conf_col is not None:
+            col_data, col_pres, _ = conf_col
+            mask = col_pres
+            importance[mask] *= col_data[mask].astype(np.float64)
+
+        # Recency weighting: 1.0 / (1.0 + age_in_days)
+        recency = np.ones(n, dtype=np.float64)
+        updated_col = self.store.columns.get_column("__updated_at__", n)
+        if updated_col is not None:
+            col_data, col_pres, _ = updated_col
+            now_ms = int(time.time() * 1000)
+            age_days = np.where(col_pres, (now_ms - col_data.astype(np.float64)) / 86400000.0, 0.0)
+            recency = np.where(col_pres, 1.0 / (1.0 + age_days), 1.0)
+
+        # Compute live mask
+        live_mask = self._compute_live_mask(n)
+
+        # Spreading activation over hops
+        # mat[i,j] = edge from i to j
+        # mat.T.dot(v) propagates activation from sources to targets
+        mat_t = mat.T.tocsr()
+        for _ in range(q.depth):
+            activation = mat_t.dot(activation)
+            # Weight by importance and recency
+            activation *= importance[:len(activation)]
+            activation *= recency[:len(activation)]
+
+        # Apply live mask (zero out non-live nodes)
+        activation[:n] *= live_mask
+
+        # Zero out the cue node itself
+        activation[cue_slot] = 0.0
+
+        # Apply WHERE filter (kind filter)
+        if q.where:
+            kind_filter = self._extract_kind_from_where(q.where)
+            if kind_filter:
+                kind_mask = self.store._live_mask(kind_filter)
+                activation[:n] *= kind_mask
+
+        # Find activated nodes
+        active_indices = np.nonzero(activation > 0)[0]
+        if len(active_indices) == 0:
+            return Result(kind="nodes", data=[], count=0)
+
+        # Top-K via argpartition
+        limit = q.limit.value if q.limit else len(active_indices)
+        k = min(limit, len(active_indices))
+
+        if k < len(active_indices):
+            top_k_idx = np.argpartition(-activation[active_indices], k)[:k]
+        else:
+            top_k_idx = np.arange(len(active_indices))
+
+        # Sort by activation descending
+        top_k_slots = active_indices[top_k_idx]
+        sorted_order = np.argsort(-activation[top_k_slots])
+        top_k_slots = top_k_slots[sorted_order]
+
+        # Materialize results
+        results = []
+        for slot in top_k_slots:
+            slot = int(slot)
+            node = self.store._materialize_slot(slot)
+            if node is not None:
+                # Apply WHERE if it's more than a kind filter
+                if q.where and not self._is_simple_kind_filter(q.where):
+                    remaining = self._strip_kind_from_expr(q.where.expr)
+                    if remaining is not None:
+                        if not self._eval_where(remaining, node):
+                            continue
+                node["_activation_score"] = float(activation[slot])
+                results.append(node)
+
+        return Result(kind="nodes", data=results, count=len(results))
+
+    def _propagate(self, q: PropagateStmt) -> Result:
+        """PROPAGATE: BFS forward belief chaining."""
+        src_slot = self._resolve_slot(q.node_id)
+        if src_slot is None:
+            raise NodeNotFound(q.node_id)
+
+        n = self.store._next_slot
+        field = q.field
+
+        # Get source field value
+        if not self.store.columns.has_column(field):
+            return Result(kind="ok", data={"updated": 0}, count=0)
+        if not self.store.columns._presence[field][src_slot]:
+            return Result(kind="ok", data={"updated": 0}, count=0)
+
+        # BFS from source
+        combined = self.store.edge_matrices.get(None)
+        if combined is None:
+            return Result(kind="ok", data={"updated": 0}, count=0)
+
+        mat = combined
+        if mat.shape[0] < n:
+            mat = csr_matrix((mat.data, mat.indices, mat.indptr), shape=(n, n))
+
+        visited = set()
+        visited.add(src_slot)
+        frontier = deque()
+
+        # Get source value
+        dtype = self.store.columns._dtypes[field]
+        raw = self.store.columns._columns[field][src_slot]
+        if dtype == "float64":
+            source_value = float(raw)
+        elif dtype == "int64":
+            source_value = int(raw)
+        else:
+            return Result(kind="ok", data={"updated": 0}, count=0)
+
+        # Push initial neighbors with (slot, parent_value)
+        frontier.append((src_slot, source_value, 0))
+        updated_count = 0
+        now_ms = int(time.time() * 1000)
+
+        while frontier:
+            current_slot, parent_value, depth = frontier.popleft()
+            if depth >= q.depth:
+                continue
+
+            # Get outgoing neighbors from CSR
+            start = mat.indptr[current_slot]
+            end = mat.indptr[current_slot + 1]
+            neighbors = mat.indices[start:end]
+            weights = mat.data[start:end]
+
+            for i, nb in enumerate(neighbors):
+                nb = int(nb)
+                if nb in visited:
+                    continue
+                visited.add(nb)
+
+                if nb in self.store.node_tombstones:
+                    continue
+
+                # Get current value or default
+                if self.store.columns._presence[field][nb]:
+                    if dtype == "float64":
+                        current_val = float(self.store.columns._columns[field][nb])
+                    else:
+                        current_val = int(self.store.columns._columns[field][nb])
+                else:
+                    current_val = 0.0
+
+                # Propagated value = parent * edge_weight
+                edge_weight = float(weights[i]) if i < len(weights) else 1.0
+                propagated = parent_value * edge_weight
+
+                # Update the field
+                self.store.columns.set(nb, {field: propagated})
+                self.store.columns.set_reserved(nb, "__updated_at__", now_ms)
+                updated_count += 1
+
+                frontier.append((nb, propagated, depth + 1))
+
+        return Result(kind="ok", data={"updated": updated_count}, count=updated_count)
+
+    def _counterfactual(self, q: CounterfactualQuery) -> Result:
+        """WHAT IF RETRACT: simulate retraction without committing."""
+        src_slot = self._resolve_slot(q.node_id)
+        if src_slot is None:
+            raise NodeNotFound(q.node_id)
+
+        # Save full state
+        saved_columns = self.store.columns.snapshot_arrays()
+        saved_tombstones = set(self.store.node_tombstones)
+        saved_edges = {k: list(v) for k, v in self.store._edges_by_type.items()}
+        saved_edge_keys = set(self.store._edge_keys)
+        saved_id_to_slot = dict(self.store.id_to_slot)
+        saved_count = self.store._count
+        saved_next_slot = self.store._next_slot
+        saved_node_ids = self.store.node_ids[:self.store._next_slot].copy()
+        saved_node_kinds = self.store.node_kinds[:self.store._next_slot].copy()
+
+        try:
+            # Find all descendants via BFS on edge matrices
+            combined = self.store.edge_matrices.get(None)
+            n = self.store._next_slot
+            affected_slots = set()
+            affected_slots.add(src_slot)
+
+            if combined is not None:
+                mat = combined
+                if mat.shape[0] < n:
+                    mat = csr_matrix((mat.data, mat.indices, mat.indptr), shape=(n, n))
+
+                frontier = deque([src_slot])
+                visited = {src_slot}
+                while frontier:
+                    current = frontier.popleft()
+                    if current < mat.shape[0]:
+                        start = mat.indptr[current]
+                        end = mat.indptr[current + 1]
+                        for nb in mat.indices[start:end]:
+                            nb = int(nb)
+                            if nb not in visited:
+                                visited.add(nb)
+                                affected_slots.add(nb)
+                                frontier.append(nb)
+
+            # Materialize affected nodes before restore
+            affected_nodes = []
+            for slot in affected_slots:
+                node = self.store._materialize_slot(int(slot))
+                if node is not None:
+                    affected_nodes.append(node)
+
+            return Result(
+                kind="counterfactual",
+                data={
+                    "retracted": q.node_id,
+                    "affected_nodes": affected_nodes,
+                    "affected_count": len(affected_nodes),
+                },
+                count=len(affected_nodes),
+            )
+        finally:
+            # Restore state completely
+            self.store.columns.restore_arrays(saved_columns)
+            self.store.node_tombstones = saved_tombstones
+            self.store._edges_by_type = saved_edges
+            self.store._edge_keys = saved_edge_keys
+            self.store.id_to_slot = saved_id_to_slot
+            self.store._count = saved_count
+            self.store._next_slot = saved_next_slot
+            self.store.node_ids[:saved_next_slot] = saved_node_ids
+            self.store.node_kinds[:saved_next_slot] = saved_node_kinds
+            self.store._rebuild_edges()
+
+    def _bind_context(self, q: BindContext) -> Result:
+        """BIND CONTEXT: set active context on store."""
+        self.store._active_context = q.name
+        return Result(kind="ok", data={"context": q.name}, count=0)
+
+    def _discard_context(self, q: DiscardContext) -> Result:
+        """DISCARD CONTEXT: delete all nodes with matching __context__ and unbind."""
+        n = self.store._next_slot
+        if n > 0 and self.store.columns.has_column("__context__"):
+            ctx_col = self.store.columns.get_column("__context__", n)
+            if ctx_col is not None:
+                col_data, col_pres, _ = ctx_col
+                ctx_id = self.store.string_table.intern(q.name)
+                ctx_mask = col_pres & (col_data == ctx_id)
+                slots_to_delete = np.nonzero(ctx_mask)[0]
+                for slot in slots_to_delete:
+                    nid = self.store._slot_to_id(int(slot))
+                    if nid:
+                        try:
+                            self.store.delete_node(nid)
+                        except Exception:
+                            pass
+
+        # Unbind context
+        self.store._active_context = None
+        return Result(kind="ok", data={"discarded": q.name}, count=0)
+
     def _apply_ttl(self, node_id: str, expires_in: tuple | None, expires_at: str | None):
         """Set __expires_at__ on a node based on TTL clauses."""
         if expires_in is None and expires_at is None:
@@ -1213,7 +1524,7 @@ class Executor:
     # --- Helpers ---
 
     def _compute_live_mask(self, n: int) -> np.ndarray:
-        """Unified visibility filter: tombstones + TTL + retracted."""
+        """Unified visibility filter: tombstones + TTL + retracted + context."""
         mask = self.store.node_ids[:n] >= 0
 
         # Tombstones
@@ -1238,6 +1549,17 @@ class Executor:
             col, pres, _ = retracted
             mask = mask & ~(pres & (col == 1))
 
+        # Context filtering: when bound, only show nodes tagged with active context
+        if self.store._active_context is not None:
+            ctx_col = self.store.columns.get_column("__context__", n)
+            if ctx_col is not None:
+                col_data, col_pres, _ = ctx_col
+                ctx_id = self.store.string_table.intern(self.store._active_context)
+                mask = mask & (col_pres & (col_data[:n] == ctx_id))
+            else:
+                # No context column exists yet, so no nodes match
+                mask = np.zeros(n, dtype=bool)
+
         return mask
 
     def _resolve_slot(self, node_id: str) -> int | None:
@@ -1251,7 +1573,7 @@ class Executor:
         return slot
 
     def _is_slot_visible(self, slot: int) -> bool:
-        """Check if a slot passes TTL and retraction checks."""
+        """Check if a slot passes TTL, retraction, and context checks."""
         # Check retracted
         if self.store.columns.has_column("__retracted__"):
             if self.store.columns._presence["__retracted__"][slot]:
@@ -1263,12 +1585,27 @@ class Executor:
                 expire_ms = int(self.store.columns._columns["__expires_at__"][slot])
                 if expire_ms > 0 and expire_ms < int(time.time() * 1000):
                     return False
+        # Check context
+        if self.store._active_context is not None:
+            if self.store.columns.has_column("__context__"):
+                if self.store.columns._presence["__context__"][slot]:
+                    ctx_id = self.store.string_table.intern(self.store._active_context)
+                    if int(self.store.columns._columns["__context__"][slot]) != ctx_id:
+                        return False
+                else:
+                    # Node has no context tag but context is active - invisible
+                    return False
+            else:
+                # No context column at all - nothing has context
+                return False
         return True
 
     def _filter_visible(self, nodes: list[dict]) -> list[dict]:
-        """Filter out retracted and expired nodes from a node list."""
-        if not self.store.columns.has_column("__retracted__") and \
-           not self.store.columns.has_column("__expires_at__"):
+        """Filter out retracted, expired, and out-of-context nodes."""
+        has_retracted = self.store.columns.has_column("__retracted__")
+        has_expires = self.store.columns.has_column("__expires_at__")
+        has_context = self.store._active_context is not None
+        if not has_retracted and not has_expires and not has_context:
             return nodes
         result = []
         for node in nodes:

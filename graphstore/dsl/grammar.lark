@@ -14,6 +14,8 @@ start: statement
            | ancestors_q | descendants_q | common_q | match_q
            | count_q
            | aggregate_q
+           | recall_q
+           | counterfactual
 
 node_q:        "NODE" STRING
 nodes_q:       "NODES" where_clause? order_clause? limit_clause? offset_clause?
@@ -35,6 +37,9 @@ count_target:  "NODES" -> count_nodes
              | "EDGES" -> count_edges
 
 aggregate_q: "AGGREGATE" "NODES" where_clause? group_clause? select_clause having_clause? order_agg_clause? limit_clause?
+
+recall_q: "RECALL" "FROM" STRING "DEPTH" NUMBER limit_clause? where_clause?
+counterfactual: "WHAT" "IF" "RETRACT" STRING
 group_clause: "GROUP" "BY" IDENTIFIER ("," IDENTIFIER)*
 select_clause: "SELECT" agg_func ("," agg_func)*
 having_clause: "HAVING" having_expr
@@ -65,6 +70,8 @@ arrow: "-[" expr "]->"
             | create_edge | update_edge | delete_edge | delete_edges
             | increment
             | assert_stmt | retract_stmt | update_nodes | merge_stmt
+            | propagate_stmt
+            | bind_context | discard_context
 
 create_node:  "CREATE" "NODE" STRING field_pairs expires_clause?
             | "CREATE" "NODE" "AUTO" field_pairs expires_clause? -> create_node_auto
@@ -83,6 +90,11 @@ reason_clause: "REASON" STRING
 update_nodes: "UPDATE" "NODES" where_clause "SET" field_pairs
 
 merge_stmt:   "MERGE" "NODE" STRING "INTO" STRING
+
+propagate_stmt: "PROPAGATE" STRING "FIELD" IDENTIFIER "DEPTH" NUMBER
+
+bind_context: "BIND" "CONTEXT" STRING
+discard_context: "DISCARD" "CONTEXT" STRING
 
 expires_clause: "EXPIRES" "IN" NUMBER TIME_UNIT -> expires_in
               | "EXPIRES" "AT" STRING           -> expires_at
@@ -153,6 +165,7 @@ system_query: "SYS" sys_command
             | sys_unregister | sys_checkpoint | sys_rebuild
             | sys_clear | sys_wal
             | sys_expire | sys_contradictions
+            | sys_snapshot | sys_rollback | sys_snapshots
 
 sys_stats:      "STATS" STATS_TARGET?
 STATS_TARGET:   "NODES" | "EDGES" | "MEMORY" | "WAL"
@@ -182,6 +195,10 @@ sys_wal:        "WAL" WAL_ACTION
 
 sys_expire:          "EXPIRE" where_clause?
 sys_contradictions:  "CONTRADICTIONS" where_clause? "FIELD" IDENTIFIER "GROUP" "BY" IDENTIFIER
+
+sys_snapshot: "SNAPSHOT" STRING
+sys_rollback: "ROLLBACK" "TO" STRING
+sys_snapshots: "SNAPSHOTS"
 
 CLEAR_TARGET: "LOG" | "CACHE"
 WAL_ACTION: "STATUS" | "REPLAY"

@@ -53,6 +53,11 @@ from graphstore.dsl.ast_nodes import (
     RetractStmt,
     UpdateNodes,
     MergeStmt,
+    PropagateStmt,
+    BindContext,
+    DiscardContext,
+    RecallQuery,
+    CounterfactualQuery,
     SysStats,
     SysKinds,
     SysEdgeKinds,
@@ -70,6 +75,9 @@ from graphstore.dsl.ast_nodes import (
     SysWal,
     SysExpire,
     SysContradictions,
+    SysSnapshot,
+    SysRollback,
+    SysSnapshots,
 )
 
 
@@ -588,6 +596,30 @@ class DSLTransformer(Transformer):
             where=self._find(args[2:], WhereClause),
         )
 
+    # --- Intelligence queries ---
+    def recall_q(self, args):
+        node_id = self._str(args[0])
+        depth = self._num(args[1])
+        limit = self._find(args[2:], LimitClause)
+        where = self._find(args[2:], WhereClause)
+        return RecallQuery(node_id=node_id, depth=depth, limit=limit, where=where)
+
+    def counterfactual(self, args):
+        return CounterfactualQuery(node_id=self._str(args[0]))
+
+    def propagate_stmt(self, args):
+        return PropagateStmt(
+            node_id=self._str(args[0]),
+            field=str(args[1]),
+            depth=self._num(args[2]),
+        )
+
+    def bind_context(self, args):
+        return BindContext(name=self._str(args[0]))
+
+    def discard_context(self, args):
+        return DiscardContext(name=self._str(args[0]))
+
     # --- System queries ---
     def sys_stats(self, args):
         target = str(args[0]) if args else None
@@ -663,6 +695,15 @@ class DSLTransformer(Transformer):
     def sys_expire(self, args):
         where = self._find(args, WhereClause)
         return SysExpire(where=where)
+
+    def sys_snapshot(self, args):
+        return SysSnapshot(name=self._str(args[0]))
+
+    def sys_rollback(self, args):
+        return SysRollback(name=self._str(args[0]))
+
+    def sys_snapshots(self, args):
+        return SysSnapshots()
 
     def sys_contradictions(self, args):
         where = self._find(args, WhereClause)
