@@ -31,6 +31,8 @@ from graphstore.dsl.ast_nodes import (
     PatternArrow,
     MatchPattern,
     MatchQuery,
+    AggFunc,
+    AggregateQuery,
     FieldPair,
     CreateNode,
     VarAssign,
@@ -447,6 +449,75 @@ class DSLTransformer(Transformer):
 
     def count_edges(self, args):
         return "EDGES"
+
+    # --- Aggregate queries ---
+    def aggregate_q(self, items):
+        where = None
+        group_by = []
+        select = []
+        having = None
+        order_by = None
+        order_desc = False
+        limit = None
+        for item in items:
+            if isinstance(item, WhereClause):
+                where = item
+            elif isinstance(item, list) and item and isinstance(item[0], str):
+                group_by = item
+            elif isinstance(item, list) and item and isinstance(item[0], AggFunc):
+                select = item
+            elif isinstance(item, LimitClause):
+                limit = item
+            elif isinstance(item, AggFunc):
+                order_by = item
+            elif isinstance(item, tuple) and len(item) == 2:
+                order_by, order_desc = item
+            # having is an expression (Condition, AndExpr, etc.)
+            elif item is not None and not isinstance(item, (WhereClause, LimitClause, AggFunc, list)):
+                having = item
+        return AggregateQuery(where=where, group_by=group_by, select=select,
+                              having=having, order_by=order_by, order_desc=order_desc, limit=limit)
+
+    def group_clause(self, items):
+        return [str(i) for i in items]
+
+    def select_clause(self, items):
+        return list(items)
+
+    def having_clause(self, items):
+        return items[0]  # the having_expr (a Condition)
+
+    def having_expr(self, items):
+        agg = items[0]  # AggFunc
+        op = str(items[1])
+        val = items[2]
+        return Condition(field=agg.label(), op=op, value=val)
+
+    def order_agg_clause(self, items):
+        agg = items[0]
+        desc = len(items) > 1 and items[1] == "DESC"
+        return (agg, desc)
+
+    def agg_func_ref(self, items):
+        return items[0]
+
+    def agg_count(self, _items):
+        return AggFunc("COUNT", None)
+
+    def agg_count_distinct(self, items):
+        return AggFunc("COUNT_DISTINCT", str(items[0]))
+
+    def agg_sum(self, items):
+        return AggFunc("SUM", str(items[0]))
+
+    def agg_avg(self, items):
+        return AggFunc("AVG", str(items[0]))
+
+    def agg_min(self, items):
+        return AggFunc("MIN", str(items[0]))
+
+    def agg_max(self, items):
+        return AggFunc("MAX", str(items[0]))
 
     def update_edge(self, args):
         return UpdateEdge(
