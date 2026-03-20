@@ -417,6 +417,24 @@ class CoreStore:
             })
         return result
 
+    def count_nodes(self, kind: str | None = None) -> int:
+        """Count live nodes without building dicts. Uses numpy."""
+        if kind and kind not in self.string_table:
+            return 0
+        n = self._next_slot
+        if n == 0:
+            return 0
+        mask = self.node_ids[:n] >= 0
+        if self.node_tombstones:
+            tomb_arr = np.array(list(self.node_tombstones), dtype=np.int32)
+            tomb_mask = np.zeros(n, dtype=bool)
+            tomb_mask[tomb_arr[tomb_arr < n]] = True
+            mask &= ~tomb_mask
+        if kind is not None:
+            kind_id = self.string_table.intern(kind)
+            mask &= self.node_kinds[:n] == kind_id
+        return int(np.count_nonzero(mask))
+
     # -- field operations ----------------------------------------------------
 
     def increment_field(self, id: str, field: str, amount: int | float):

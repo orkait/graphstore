@@ -124,9 +124,13 @@ class Executor:
         return Result(kind="node", data=data, count=1 if data else 0)
 
     def _nodes(self, q: NodesQuery) -> Result:
-        nodes = self.store.get_all_nodes()
-        if q.where:
+        # Optimize: extract kind filter for numpy-accelerated get_all_nodes
+        kind_filter = self._extract_kind_from_where(q.where) if q.where else None
+        nodes = self.store.get_all_nodes(kind=kind_filter)
+        if q.where and not self._is_simple_kind_filter(q.where):
             nodes = [n for n in nodes if self._eval_where(q.where.expr, n)]
+        elif q.where and kind_filter:
+            pass  # already filtered by get_all_nodes
         if q.order:
             reverse = q.order.direction == "DESC"
             nodes.sort(key=lambda n: (n.get(q.order.field) is None, n.get(q.order.field, "")), reverse=reverse)
@@ -672,14 +676,23 @@ class Executor:
     def _count(self, q: CountQuery) -> Result:
         if q.target == "NODES":
             if q.where:
-                nodes = self.store.get_all_nodes()
-                count = sum(1 for n in nodes if self._eval_where(q.where.expr, n))
+                kind_filter = self._extract_kind_from_where(q.where)
+                if self._is_simple_kind_filter(q.where) and kind_filter:
+                    # Pure numpy count - no dict construction
+                    count = self.store.count_nodes(kind=kind_filter)
+                else:
+                    nodes = self.store.get_all_nodes(kind=kind_filter)
+                    count = sum(1 for n in nodes if self._eval_where(q.where.expr, n))
             else:
                 count = self.store.node_count
         else:  # EDGES
             if q.where:
-                edges = self.store.get_all_edges()
-                count = sum(1 for e in edges if self._eval_where(q.where.expr, e))
+                kind_filter = self._extract_kind_from_where(q.where)
+                if self._is_simple_kind_filter(q.where) and kind_filter:
+                    count = len(self.store._edges_by_type.get(kind_filter, []))
+                else:
+                    edges = self.store.get_all_edges()
+                    count = sum(1 for e in edges if self._eval_where(q.where.expr, e))
             else:
                 count = self.store.edge_count
         return Result(kind="count", data=count, count=count)
@@ -797,22 +810,19 @@ class Executor:
             actual = data.get(expr.field)
             if actual is None:
                 return False
-            import re
-            # Convert SQL LIKE pattern to regex: % -> .*, _ -> .
-            # Replace wildcards first, escape the rest, then restore wildcards
-            parts = []
-            i = 0
-            p = expr.pattern
-            while i < len(p):
-                if p[i] == '%':
-                    parts.append('.*')
-                elif p[i] == '_':
-                    parts.append('.')
-                else:
-                    parts.append(re.escape(p[i]))
-                i += 1
-            pattern = ''.join(parts)
-            return bool(re.fullmatch(pattern, str(actual)))
+            # Use cached compiled regex
+            if not hasattr(expr, '_compiled_re'):
+                import re
+                parts = []
+                for ch in expr.pattern:
+                    if ch == '%':
+                        parts.append('.*')
+                    elif ch == '_':
+                        parts.append('.')
+                    else:
+                        parts.append(re.escape(ch))
+                expr._compiled_re = re.compile(''.join(parts))  # type: ignore[attr-defined]
+            return bool(expr._compiled_re.fullmatch(str(actual)))
         elif isinstance(expr, InCondition):
             actual = data.get(expr.field)
             return actual in expr.values
