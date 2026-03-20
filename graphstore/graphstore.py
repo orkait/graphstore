@@ -39,10 +39,11 @@ class GraphStore:
 
     def __init__(self, path: str | None = None, ceiling_mb: int = 256,
                  embedder="default", allow_system_queries: bool = True,
-                 voice: bool = False):
+                 voice: bool = False, ingest_root: str | None = None):
         self._path = Path(path) if path else None
         self._ceiling_bytes = ceiling_mb * 1_000_000
         self._allow_system = allow_system_queries
+        self._ingest_root = ingest_root
         self._conn: sqlite3.Connection | None = None
         self._stt = None
         self._tts = None
@@ -103,7 +104,8 @@ class GraphStore:
         self._executor = Executor(self._store, self._schema,
                                   embedder=self._embedder,
                                   vector_store=self._vector_store,
-                                  document_store=self._document_store)
+                                  document_store=self._document_store,
+                                  ingest_root=self._ingest_root)
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
         self._sys_executor = SystemExecutor(self._store, self._schema, self._conn,
                                                embedder=self._embedder,
