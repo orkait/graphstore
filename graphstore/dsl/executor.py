@@ -6,6 +6,7 @@ separately by the server layer.
 
 import time
 
+import numpy as np
 
 from graphstore.dsl.ast_nodes import (
     AncestorsQuery,
@@ -124,20 +125,57 @@ class Executor:
         return Result(kind="node", data=data, count=1 if data else 0)
 
     def _nodes(self, q: NodesQuery) -> Result:
-        # Optimize: extract kind filter for numpy-accelerated get_all_nodes
         kind_filter = self._extract_kind_from_where(q.where) if q.where else None
-        nodes = self.store.get_all_nodes(kind=kind_filter)
-        if q.where and not self._is_simple_kind_filter(q.where):
-            nodes = [n for n in nodes if self._eval_where(q.where.expr, n)]
-        elif q.where and kind_filter:
-            pass  # already filtered by get_all_nodes
+
+        # Try secondary index fast path for simple equality on indexed field
+        nodes = self._try_index_lookup(q.where, kind_filter) if q.where else None
+
+        if nodes is None:
+            if q.where and not self._is_simple_kind_filter(q.where):
+                # Strip kind from expression (handled by numpy), get remaining filter
+                remaining = self._strip_kind_from_expr(q.where.expr)
+
+                if remaining is not None:
+                    # Try column filter first
+                    col_result = self._try_column_nodes(remaining, kind_filter)
+                    if col_result is not None:
+                        nodes = col_result
+                    else:
+                        raw_pred = self._make_raw_predicate(remaining)
+                        if raw_pred is not None:
+                            nodes = self.store.get_all_nodes(kind=kind_filter, predicate=raw_pred)
+                        else:
+                            nodes = self.store.get_all_nodes(kind=kind_filter)
+                            nodes = [n for n in nodes if self._eval_where(q.where.expr, n)]
+                else:
+                    # Only kind filter remained, already handled by numpy
+                    nodes = self.store.get_all_nodes(kind=kind_filter)
+            else:
+                nodes = self.store.get_all_nodes(kind=kind_filter)
+
         if q.order:
             reverse = q.order.direction == "DESC"
-            nodes.sort(key=lambda n: (n.get(q.order.field) is None, n.get(q.order.field, "")), reverse=reverse)
-        if q.offset:
-            nodes = nodes[q.offset.value:]
-        if q.limit:
-            nodes = nodes[:q.limit.value]
+            col_sorted = self._try_column_order_by(
+                nodes, q.order.field, reverse,
+                q.limit.value if q.limit else None,
+                q.offset.value if q.offset else None,
+            )
+            if col_sorted is not None:
+                nodes = col_sorted
+            else:
+                nodes.sort(
+                    key=lambda n: (n.get(q.order.field) is None, n.get(q.order.field, "")),
+                    reverse=reverse,
+                )
+                if q.offset:
+                    nodes = nodes[q.offset.value:]
+                if q.limit:
+                    nodes = nodes[:q.limit.value]
+        else:
+            if q.offset:
+                nodes = nodes[q.offset.value:]
+            if q.limit:
+                nodes = nodes[:q.limit.value]
         return Result(kind="nodes", data=nodes, count=len(nodes))
 
     def _edges(self, q: EdgesQuery) -> Result:
@@ -628,13 +666,33 @@ class Executor:
         return Result(kind="ok", data={"id": q.id}, count=1)
 
     def _delete_nodes(self, q: DeleteNodes) -> Result:
-        nodes = self.store.get_all_nodes()
-        to_delete = [n for n in nodes if self._eval_where(q.where.expr, n)]
+        kind_filter = self._extract_kind_from_where(q.where)
+        remaining = self._strip_kind_from_expr(q.where.expr)
+
+        ids_to_delete = None
+
+        if remaining is not None:
+            col_ids = self._try_column_delete_ids(remaining, kind_filter)
+            if col_ids is not None:
+                ids_to_delete = col_ids
+
+        if ids_to_delete is None:
+            if remaining is not None:
+                raw_pred = self._make_raw_predicate(remaining)
+            else:
+                raw_pred = None
+
+            if raw_pred is not None or remaining is None:
+                ids_to_delete = self.store.query_node_ids(kind=kind_filter, predicate=raw_pred)
+            else:
+                nodes = self.store.get_all_nodes(kind=kind_filter)
+                ids_to_delete = [n["id"] for n in nodes if self._eval_where(q.where.expr, n)]
+
         deleted_ids = []
-        for n in to_delete:
+        for nid in ids_to_delete:
             try:
-                self.store.delete_node(n["id"])
-                deleted_ids.append(n["id"])
+                self.store.delete_node(nid)
+                deleted_ids.append(nid)
             except NodeNotFound:
                 pass
         return Result(kind="nodes", data=[{"id": i} for i in deleted_ids], count=len(deleted_ids))
@@ -677,12 +735,22 @@ class Executor:
         if q.target == "NODES":
             if q.where:
                 kind_filter = self._extract_kind_from_where(q.where)
-                if self._is_simple_kind_filter(q.where) and kind_filter:
-                    # Pure numpy count - no dict construction
+                remaining = self._strip_kind_from_expr(q.where.expr)
+
+                if remaining is None:
+                    # Pure kind filter — numpy count, zero dict construction
                     count = self.store.count_nodes(kind=kind_filter)
                 else:
-                    nodes = self.store.get_all_nodes(kind=kind_filter)
-                    count = sum(1 for n in nodes if self._eval_where(q.where.expr, n))
+                    col_count = self._try_column_count(remaining, kind_filter)
+                    if col_count is not None:
+                        count = col_count
+                    else:
+                        raw_pred = self._make_raw_predicate(remaining)
+                        if raw_pred is not None:
+                            count = self.store.count_nodes(kind=kind_filter, predicate=raw_pred)
+                        else:
+                            nodes = self.store.get_all_nodes(kind=kind_filter)
+                            count = sum(1 for n in nodes if self._eval_where(q.where.expr, n))
             else:
                 count = self.store.node_count
         else:  # EDGES
@@ -781,6 +849,9 @@ class Executor:
             self.store.node_ids[:saved_next_slot] = saved_node_ids
             self.store.node_kinds[:saved_next_slot] = saved_node_kinds
             self.store._rebuild_edges()
+            self.store.columns.rebuild_from(
+                self.store.node_data, self.store._next_slot
+            )
             raise BatchRollback(
                 failed_statement=str(type(e).__name__), error=str(e)
             )
@@ -914,21 +985,315 @@ class Executor:
             return actual <= expected
         return False
 
+    def _try_index_lookup(self, where, kind_filter: str | None) -> list[dict] | None:
+        """Try to use secondary indices for O(1) equality lookups.
+
+        Returns list of matching node dicts if index hit, None otherwise.
+        """
+        if where is None:
+            return None
+        expr = where.expr
+
+        # Handle simple: WHERE field = value
+        if isinstance(expr, Condition) and expr.op == "=" and expr.field != "kind":
+            if expr.field in self.store._indexed_fields:
+                slots = self.store.query_by_index(expr.field, expr.value)
+                nodes = []
+                for slot in slots:
+                    node = self.store._materialize_slot(slot)
+                    if node is None:
+                        continue
+                    if kind_filter and node["kind"] != kind_filter:
+                        continue
+                    nodes.append(node)
+                return nodes
+
+        # Handle AND with an indexed equality: WHERE kind = "X" AND name = "Y"
+        if isinstance(expr, AndExpr):
+            for op in expr.operands:
+                if isinstance(op, Condition) and op.op == "=" and op.field != "kind":
+                    if op.field in self.store._indexed_fields:
+                        slots = self.store.query_by_index(op.field, op.value)
+                        # Build remaining expression excluding the indexed condition
+                        remaining_ops = [o for o in expr.operands if o is not op]
+                        # Also strip kind (handled separately)
+                        remaining_ops = [
+                            o for o in remaining_ops
+                            if not (isinstance(o, Condition) and o.field == "kind" and o.op == "=")
+                        ]
+                        nodes = []
+                        for slot in slots:
+                            node = self.store._materialize_slot(slot)
+                            if node is None:
+                                continue
+                            if kind_filter and node["kind"] != kind_filter:
+                                continue
+                            # Apply remaining filters
+                            if remaining_ops:
+                                remaining_expr = remaining_ops[0] if len(remaining_ops) == 1 else AndExpr(operands=remaining_ops)
+                                if not self._eval_where(remaining_expr, node):
+                                    continue
+                            nodes.append(node)
+                        return nodes
+
+        return None
+
     def _extract_kind_from_where(self, where) -> str | None:
-        """Extract kind value from a simple WHERE kind = 'x' clause."""
+        """Extract kind value from WHERE clause, including AND expressions."""
         if where is None:
             return None
         expr = where.expr
         if isinstance(expr, Condition) and expr.field == "kind" and expr.op == "=":
             return expr.value
+        if isinstance(expr, AndExpr):
+            for op in expr.operands:
+                if isinstance(op, Condition) and op.field == "kind" and op.op == "=":
+                    return op.value
         return None
 
     def _is_simple_kind_filter(self, where) -> bool:
-        """Check if WHERE clause is just kind = 'x'."""
+        """Check if WHERE clause is just kind = 'x' with nothing else."""
         if where is None:
             return False
         expr = where.expr
         return isinstance(expr, Condition) and expr.field == "kind" and expr.op == "="
+
+    def _strip_kind_from_expr(self, expr):
+        """Remove kind='X' from expression, return remaining or None."""
+        if isinstance(expr, Condition) and expr.field == "kind" and expr.op == "=":
+            return None
+        if isinstance(expr, AndExpr):
+            remaining = [
+                op for op in expr.operands
+                if not (isinstance(op, Condition) and op.field == "kind" and op.op == "=")
+            ]
+            if len(remaining) == 0:
+                return None
+            if len(remaining) == 1:
+                return remaining[0]
+            return AndExpr(operands=remaining)
+        return expr
+
+    def _contains_degree_condition(self, expr) -> bool:
+        """Check if expression tree contains any DegreeCondition."""
+        if isinstance(expr, DegreeCondition):
+            return True
+        if isinstance(expr, AndExpr):
+            return any(self._contains_degree_condition(op) for op in expr.operands)
+        if isinstance(expr, OrExpr):
+            return any(self._contains_degree_condition(op) for op in expr.operands)
+        if isinstance(expr, NotExpr):
+            return self._contains_degree_condition(expr.operand)
+        return False
+
+    def _references_synthetic_fields(self, expr) -> bool:
+        """Check if expression references 'kind' or 'id' (stored outside node_data)."""
+        if isinstance(expr, (Condition, ContainsCondition, LikeCondition, InCondition)):
+            return expr.field in ("kind", "id")
+        if isinstance(expr, AndExpr):
+            return any(self._references_synthetic_fields(op) for op in expr.operands)
+        if isinstance(expr, OrExpr):
+            return any(self._references_synthetic_fields(op) for op in expr.operands)
+        if isinstance(expr, NotExpr):
+            return self._references_synthetic_fields(expr.operand)
+        return False
+
+    def _make_raw_predicate(self, expr):
+        """Build a callable(raw_data_dict) -> bool for slot-level filtering.
+
+        Works against node_data[slot] directly (no id/kind fields).
+        Returns None if expression contains DegreeCondition or references
+        synthetic fields (kind, id) that aren't in node_data.
+        """
+        if self._contains_degree_condition(expr):
+            return None
+        if self._references_synthetic_fields(expr):
+            return None
+        return lambda data, _expr=expr: self._eval_where(_expr, data)
+
+    # --- Column-accelerated query helpers ---
+
+    def _try_column_filter(self, expr, base_mask: np.ndarray, n: int) -> np.ndarray | None:
+        """Try to evaluate expression using column store. Returns bool mask or None."""
+        columns = self.store.columns
+
+        if isinstance(expr, Condition):
+            if expr.field in ("kind", "id"):
+                return None
+            mask = columns.get_mask(expr.field, expr.op, expr.value, n)
+            if mask is None:
+                return None
+            return mask & base_mask
+
+        elif isinstance(expr, InCondition):
+            if expr.field in ("kind", "id"):
+                return None
+            mask = columns.get_mask_in(expr.field, expr.values, n)
+            if mask is None:
+                return None
+            return mask & base_mask
+
+        elif isinstance(expr, AndExpr):
+            result = base_mask.copy()
+            for op in expr.operands:
+                sub = self._try_column_filter(op, result, n)
+                if sub is None:
+                    return None
+                result = sub
+            return result
+
+        elif isinstance(expr, OrExpr):
+            result = np.zeros(n, dtype=bool)
+            for op in expr.operands:
+                sub = self._try_column_filter(op, base_mask, n)
+                if sub is None:
+                    return None
+                result |= sub
+            return result
+
+        elif isinstance(expr, NotExpr):
+            sub = self._try_column_filter(expr.operand, base_mask, n)
+            if sub is None:
+                return None
+            fields = self._column_fields(expr.operand)
+            if fields is None:
+                return None
+            combined_pres = np.ones(n, dtype=bool)
+            for f in fields:
+                fp = self.store.columns.get_presence(f, n)
+                if fp is None:
+                    return None
+                combined_pres &= fp
+            return ~sub & combined_pres & base_mask
+
+        return None
+
+    def _column_fields(self, expr) -> set[str] | None:
+        """Extract field names from expression. None if non-columnarizable."""
+        if isinstance(expr, (Condition, ContainsCondition, LikeCondition, InCondition)):
+            if expr.field in ("kind", "id"):
+                return None
+            return {expr.field}
+        if isinstance(expr, AndExpr):
+            fields = set()
+            for op in expr.operands:
+                sub = self._column_fields(op)
+                if sub is None:
+                    return None
+                fields |= sub
+            return fields
+        if isinstance(expr, OrExpr):
+            fields = set()
+            for op in expr.operands:
+                sub = self._column_fields(op)
+                if sub is None:
+                    return None
+                fields |= sub
+            return fields
+        if isinstance(expr, NotExpr):
+            return self._column_fields(expr.operand)
+        return None
+
+    def _try_column_nodes(self, expr, kind_filter: str | None) -> list[dict] | None:
+        """Try column-accelerated node query. Returns node dicts or None."""
+        n = self.store._next_slot
+        if n == 0:
+            return []
+        base_mask = self.store._live_mask(kind_filter)
+        col_mask = self._try_column_filter(expr, base_mask, n)
+        if col_mask is None:
+            return None
+        slots = np.nonzero(col_mask)[0]
+        nodes = []
+        for slot in slots:
+            node = self.store._materialize_slot(int(slot))
+            if node:
+                nodes.append(node)
+        return nodes
+
+    def _try_column_count(self, expr, kind_filter: str | None) -> int | None:
+        """Try column-accelerated count. Returns count or None."""
+        n = self.store._next_slot
+        if n == 0:
+            return 0
+        base_mask = self.store._live_mask(kind_filter)
+        col_mask = self._try_column_filter(expr, base_mask, n)
+        if col_mask is None:
+            return None
+        return int(np.count_nonzero(col_mask))
+
+    def _try_column_delete_ids(self, expr, kind_filter: str | None) -> list[str] | None:
+        """Try column-accelerated ID query for deletion. Returns IDs or None."""
+        n = self.store._next_slot
+        if n == 0:
+            return []
+        base_mask = self.store._live_mask(kind_filter)
+        col_mask = self._try_column_filter(expr, base_mask, n)
+        if col_mask is None:
+            return None
+        slots = np.nonzero(col_mask)[0]
+        return [
+            nid for slot in slots
+            if (nid := self.store._slot_to_id(int(slot))) is not None
+        ]
+
+    def _try_column_order_by(self, nodes: list[dict], field: str,
+                              descending: bool, limit: int | None,
+                              offset: int | None) -> list[dict] | None:
+        """Try column-accelerated ORDER BY using np.argpartition for top-K."""
+        col_info = self.store.columns.get_column(field, self.store._next_slot)
+        if col_info is None:
+            return None
+        col_data, col_pres, dtype_str = col_info
+
+        if dtype_str == "int32_interned":
+            return None
+
+        slot_to_idx: dict[int, int] = {}
+        for i, node in enumerate(nodes):
+            slot = self._resolve_slot(node["id"])
+            if slot is not None:
+                slot_to_idx[slot] = i
+
+        if not slot_to_idx:
+            return nodes
+
+        slots = np.array(list(slot_to_idx.keys()), dtype=np.int32)
+        values = col_data[slots].astype(np.float64)
+        present = col_pres[slots]
+
+        if descending:
+            values[~present] = -np.inf
+        else:
+            values[~present] = np.inf
+
+        total = len(slots)
+        eff_offset = (offset or 0)
+        eff_limit = limit if limit is not None else total
+
+        k = min(eff_offset + eff_limit, total)
+
+        if k < total and k > 0:
+            if descending:
+                part_idx = np.argpartition(-values, k)[:k]
+                sorted_idx = part_idx[np.argsort(-values[part_idx])]
+            else:
+                part_idx = np.argpartition(values, k)[:k]
+                sorted_idx = part_idx[np.argsort(values[part_idx])]
+        else:
+            if descending:
+                sorted_idx = np.argsort(-values)
+            else:
+                sorted_idx = np.argsort(values)
+
+        sorted_idx = sorted_idx[eff_offset:eff_offset + eff_limit]
+
+        result = []
+        for idx in sorted_idx:
+            slot = int(slots[idx])
+            node_idx = slot_to_idx[slot]
+            result.append(nodes[node_idx])
+        return result
 
     def _extract_edge_type_from_expr(self, expr) -> str | None:
         """Extract edge type from an arrow expression."""

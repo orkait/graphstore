@@ -93,6 +93,7 @@ class SystemExecutor:
                 self.store.node_count, self.store.edge_count
             )
             data["ceiling_bytes"] = self.store._ceiling_bytes
+            data["column_memory_bytes"] = self.store.columns.memory_bytes
         if q.target is None or q.target == "WAL":
             if self.conn:
                 row = self.conn.execute("SELECT COUNT(*) FROM wal").fetchone()
@@ -223,6 +224,15 @@ class SystemExecutor:
 
     def _register_node_kind(self, q: SysRegisterNodeKind) -> Result:
         self.schema.register_node_kind(q.kind, q.required, q.optional)
+        # Pre-create columns for typed fields
+        type_map = {"string": "int32_interned", "int": "int64", "float": "float64"}
+        for item in q.required + q.optional:
+            if isinstance(item, tuple):
+                name, type_name = item
+            else:
+                name, type_name = item, None
+            if type_name and type_name in type_map:
+                self.store.columns.declare_column(name, type_map[type_name])
         return Result(kind="ok", data=None, count=0)
 
     def _register_edge_kind(self, q: SysRegisterEdgeKind) -> Result:
@@ -245,6 +255,10 @@ class SystemExecutor:
         # Rebuild secondary indices
         for field in list(self.store._indexed_fields):
             self.store.add_index(field)
+        # Rebuild column store from dicts
+        self.store.columns.rebuild_from(
+            self.store.node_data, self.store._next_slot
+        )
         return Result(kind="ok", data=None, count=0)
 
     def _clear(self, q: SysClear) -> Result:

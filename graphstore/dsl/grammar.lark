@@ -142,7 +142,9 @@ sys_wal:        "WAL" WAL_ACTION
 CLEAR_TARGET: "LOG" | "CACHE"
 WAL_ACTION: "STATUS" | "REPLAY"
 
-ident_list: IDENTIFIER ("," IDENTIFIER)*
+ident_list: typed_ident ("," typed_ident)*
+typed_ident: IDENTIFIER ":" IDENTIFIER -> typed_ident_with_type
+           | IDENTIFIER -> typed_ident_bare
 string_list: STRING ("," STRING)*
 
 // =============================================

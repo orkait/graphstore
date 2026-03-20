@@ -504,8 +504,14 @@ class DSLTransformer(Transformer):
         action = str(args[0])
         return SysWal(action=action)
 
+    def typed_ident_with_type(self, args):
+        return (str(args[0]), str(args[1]))
+
+    def typed_ident_bare(self, args):
+        return (str(args[0]), None)
+
     def ident_list(self, args):
-        return [str(a) for a in args]
+        return list(args)
 
     def string_list(self, args):
         return [self._str(a) for a in args]
