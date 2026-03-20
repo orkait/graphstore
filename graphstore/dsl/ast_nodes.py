@@ -60,6 +60,26 @@ class OrderClause:
     field: str
     direction: str = "ASC"  # "ASC" or "DESC"
 
+@dataclass
+class AggFunc:
+    func: str       # "COUNT", "COUNT_DISTINCT", "SUM", "AVG", "MIN", "MAX"
+    field: str | None  # None for COUNT()
+
+    def label(self) -> str:
+        if self.field is None:
+            return f"{self.func}()"
+        return f"{self.func}({self.field})"
+
+@dataclass
+class AggregateQuery:
+    where: WhereClause | None = None
+    group_by: list[str] | None = None
+    select: list[AggFunc] | None = None
+    having: Any | None = None
+    order_by: AggFunc | None = None
+    order_desc: bool = False
+    limit: LimitClause | None = None
+
 # --- Read queries ---
 @dataclass
 class NodeQuery:

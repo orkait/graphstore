@@ -33,6 +33,7 @@ from graphstore.errors import (
     CeilingExceeded,
     VersionMismatch,
     SchemaError,
+    AggregationError,
     CostThresholdExceeded,
     BatchRollback,
 )
@@ -55,6 +56,7 @@ __all__ = [
     "CeilingExceeded",
     "VersionMismatch",
     "SchemaError",
+    "AggregationError",
     "CostThresholdExceeded",
     "BatchRollback",
     "DEFAULT_CEILING_BYTES",

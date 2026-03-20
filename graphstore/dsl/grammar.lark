@@ -13,6 +13,7 @@ start: statement
            | weighted_sp_q | weighted_dist_q
            | ancestors_q | descendants_q | common_q | match_q
            | count_q
+           | aggregate_q
 
 node_q:        "NODE" STRING
 nodes_q:       "NODES" where_clause? order_clause? limit_clause? offset_clause?
@@ -32,6 +33,21 @@ match_q:       "MATCH" pattern limit_clause?
 count_q:       "COUNT" count_target where_clause?
 count_target:  "NODES" -> count_nodes
              | "EDGES" -> count_edges
+
+aggregate_q: "AGGREGATE" "NODES" where_clause? group_clause? select_clause having_clause? order_agg_clause? limit_clause?
+group_clause: "GROUP" "BY" IDENTIFIER ("," IDENTIFIER)*
+select_clause: "SELECT" agg_func ("," agg_func)*
+having_clause: "HAVING" having_expr
+having_expr: agg_func OP value
+order_agg_clause: "ORDER" "BY" agg_func_ref order_dir?
+agg_func_ref: agg_func
+
+agg_func: "COUNT" "(" ")"                          -> agg_count
+         | "COUNT" "DISTINCT" "(" IDENTIFIER ")"     -> agg_count_distinct
+         | "SUM" "(" IDENTIFIER ")"                   -> agg_sum
+         | "AVG" "(" IDENTIFIER ")"                   -> agg_avg
+         | "MIN" "(" IDENTIFIER ")"                   -> agg_min
+         | "MAX" "(" IDENTIFIER ")"                   -> agg_max
 
 direction: "FROM" -> dir_from
          | "TO" -> dir_to

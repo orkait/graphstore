@@ -71,6 +71,11 @@ class SchemaError(GraphStoreError):
         super().__init__(message)
 
 
+class AggregationError(SchemaError):
+    """Aggregation requires columnarized fields."""
+    pass
+
+
 class CostThresholdExceeded(GraphStoreError):
     """MATCH/TRAVERSE estimated cost exceeds threshold."""
 
