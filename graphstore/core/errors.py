@@ -97,3 +97,18 @@ class BatchRollback(GraphStoreError):
         super().__init__(
             f"Batch rollback on statement {failed_statement!r}: {error}"
         )
+
+
+class VectorError(GraphStoreError):
+    """Vector operation failure."""
+    pass
+
+
+class EmbedderRequired(VectorError):
+    """Text-based SIMILAR TO requires an embedder."""
+    pass
+
+
+class VectorNotFound(VectorError):
+    """Node has no stored vector."""
+    pass

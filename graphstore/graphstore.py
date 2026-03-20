@@ -32,15 +32,31 @@ class GraphStore:
         path: Directory for graphstore.db persistence.
               If None, in-memory only (no persistence, no WAL, no query log).
         ceiling_mb: Hard memory limit in MB. Raises CeilingExceeded on breach.
+        embedder: Embedder instance, "default" for Model2Vec, or None to disable.
         allow_system_queries: If False, SYS queries raise PermissionError.
     """
 
     def __init__(self, path: str | None = None, ceiling_mb: int = 256,
-                 allow_system_queries: bool = True):
+                 embedder="default", allow_system_queries: bool = True):
         self._path = Path(path) if path else None
         self._ceiling_bytes = ceiling_mb * 1_000_000
         self._allow_system = allow_system_queries
         self._conn: sqlite3.Connection | None = None
+
+        # Initialize embedder
+        if embedder == "default":
+            try:
+                from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
+                self._embedder = Model2VecEmbedder()
+            except Exception:
+                self._embedder = None
+        elif embedder is None:
+            self._embedder = None
+        else:
+            self._embedder = embedder  # custom Embedder instance
+
+        # Vector store (lazy init on first vector operation)
+        self._vector_store = None
 
         # Initialize store
         p = self._path
@@ -57,7 +73,10 @@ class GraphStore:
             self._schema = SchemaRegistry()
 
         # Create executors before WAL replay so _replay_wal can use them
-        self._executor = Executor(self._store, self._schema)
+        self._executor = Executor(self._store, self._schema,
+                                  embedder=self._embedder,
+                                  vector_store=self._vector_store)
+        self._executor._ensure_vector_store_cb = self._ensure_vector_store
         self._sys_executor = SystemExecutor(self._store, self._schema, self._conn)
 
         # Replay WAL (must happen after executor is created)
@@ -67,6 +86,10 @@ class GraphStore:
     def execute(self, query: str) -> Result:
         """Execute a single DSL query (user or system). Returns Result."""
         start = time.perf_counter_ns()
+
+        # Sync vector store reference (may have been lazily created)
+        if self._vector_store is not None and self._executor._vector_store is not self._vector_store:
+            self._executor._vector_store = self._vector_store
 
         try:
             ast = parse(query)
@@ -170,6 +193,15 @@ class GraphStore:
 
     def __exit__(self, *args) -> None:
         self.close()
+
+    def _ensure_vector_store(self, dims: int):
+        """Lazily initialize vector store with given dimensionality."""
+        if self._vector_store is None:
+            from graphstore.vector.store import VectorStore
+            self._vector_store = VectorStore(dims=dims, capacity=self._store._capacity)
+            # Sync to executor
+            self._executor._vector_store = self._vector_store
+        return self._vector_store
 
     # --- Internal ---
 

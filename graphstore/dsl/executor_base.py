@@ -20,9 +20,12 @@ from graphstore.core.types import Result
 
 
 class ExecutorBase:
-    def __init__(self, store: CoreStore, schema: SchemaRegistry | None = None):
+    def __init__(self, store: CoreStore, schema: SchemaRegistry | None = None,
+                 embedder=None, vector_store=None):
         self.store = store
         self.schema = schema or SchemaRegistry()
+        self._embedder = embedder
+        self._vector_store = vector_store
         self.cost_threshold = 100_000
 
     def execute(self, ast) -> Result:

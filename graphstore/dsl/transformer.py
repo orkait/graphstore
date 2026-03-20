@@ -58,6 +58,7 @@ from graphstore.dsl.ast_nodes import (
     DiscardContext,
     RecallQuery,
     CounterfactualQuery,
+    SimilarQuery,
     SysStats,
     SysKinds,
     SysEdgeKinds,
@@ -279,18 +280,27 @@ class DSLTransformer(Transformer):
         return PatternArrow(expr=args[0])
 
     # --- Writes ---
+    def vector_clause(self, args):
+        return ("vector", args[0])  # args[0] is the list from vector_literal
+
+    def embed_clause(self, args):
+        return ("embed", str(args[0]))
+
     def create_node(self, args):
         fields = args[1] if isinstance(args[1], list) else []
+        vec = self._find_vector(args[2:])
         exp_in, exp_at = self._find_expires(args[2:])
         return CreateNode(
             id=self._str(args[0]),
             fields=fields,
             expires_in=exp_in,
             expires_at=exp_at,
+            vector=vec,
         )
 
     def create_node_auto(self, args):
         fields = args[0] if isinstance(args[0], list) else []
+        vec = self._find_vector(args[1:])
         exp_in, exp_at = self._find_expires(args[1:])
         return CreateNode(
             id=None,
@@ -298,6 +308,7 @@ class DSLTransformer(Transformer):
             auto_id=True,
             expires_in=exp_in,
             expires_at=exp_at,
+            vector=vec,
         )
 
     def var_assign(self, args):
@@ -324,12 +335,14 @@ class DSLTransformer(Transformer):
 
     def upsert_node(self, args):
         fields = args[1] if isinstance(args[1], list) else []
+        vec = self._find_vector(args[2:])
         exp_in, exp_at = self._find_expires(args[2:])
         return UpsertNode(
             id=self._str(args[0]),
             fields=fields,
             expires_in=exp_in,
             expires_at=exp_at,
+            vector=vec,
         )
 
     def expires_in(self, args):
@@ -607,6 +620,28 @@ class DSLTransformer(Transformer):
     def counterfactual(self, args):
         return CounterfactualQuery(node_id=self._str(args[0]))
 
+    # --- Similar queries ---
+    def similar_q(self, args):
+        target = args[0]  # SimilarQuery with target set
+        limit = self._find(args[1:], LimitClause)
+        where = self._find(args[1:], WhereClause)
+        target.limit = limit
+        target.where = where
+        return target
+
+    def similar_vector(self, args):
+        vec = args[0]  # list of floats from vector_literal
+        return SimilarQuery(target_vector=vec)
+
+    def similar_text(self, args):
+        return SimilarQuery(target_text=self._str(args[0]))
+
+    def similar_node(self, args):
+        return SimilarQuery(target_node_id=self._str(args[0]))
+
+    def vector_literal(self, args):
+        return [self._num(a) for a in args]
+
     def propagate_stmt(self, args):
         return PropagateStmt(
             node_id=self._str(args[0]),
@@ -661,8 +696,15 @@ class DSLTransformer(Transformer):
     def sys_register_node_kind(self, args):
         kind = self._str(args[0])
         required = args[1]  # ident_list
-        optional = args[2] if len(args) > 2 else []
-        return SysRegisterNodeKind(kind=kind, required=required, optional=optional)
+        optional = []
+        embed_field = None
+        for a in args[2:]:
+            if isinstance(a, list):
+                optional = a  # from optional_clause
+            elif isinstance(a, tuple) and a[0] == "embed":
+                embed_field = a[1]
+        return SysRegisterNodeKind(kind=kind, required=required, optional=optional,
+                                   embed_field=embed_field)
 
     def sys_register_edge_kind(self, args):
         kind = self._str(args[0])
@@ -764,3 +806,10 @@ class DSLTransformer(Transformer):
                 elif a[0] == "expires_at":
                     exp_at = a[1]
         return exp_in, exp_at
+
+    def _find_vector(self, args):
+        """Extract vector from args. Returns list[float] or None."""
+        for a in args:
+            if isinstance(a, tuple) and a[0] == "vector":
+                return a[1]
+        return None

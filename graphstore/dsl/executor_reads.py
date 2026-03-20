@@ -26,6 +26,7 @@ from graphstore.dsl.ast_nodes import (
     PathsQuery,
     RecallQuery,
     ShortestPathQuery,
+    SimilarQuery,
     SubgraphQuery,
     TraverseQuery,
     WeightedDistanceQuery,
@@ -34,7 +35,10 @@ from graphstore.dsl.ast_nodes import (
 from graphstore.core.errors import (
     AggregationError,
     CostThresholdExceeded,
+    EmbedderRequired,
     NodeNotFound,
+    VectorError,
+    VectorNotFound,
 )
 from graphstore.core.path import (
     bfs_traverse,
@@ -970,6 +974,64 @@ class ReadExecutor(ExecutorBase):
                             continue
                 node["_activation_score"] = float(activation[slot])
                 results.append(node)
+
+        return Result(kind="nodes", data=results, count=len(results))
+
+    def _similar(self, q: SimilarQuery) -> Result:
+        """SIMILAR TO: vector similarity search."""
+        # 1. Resolve query vector
+        if q.target_vector is not None:
+            query_vec = np.array(q.target_vector, dtype=np.float32)
+        elif q.target_text is not None:
+            if not self._embedder:
+                raise EmbedderRequired("Text similarity requires an embedder")
+            query_vec = self._embedder.encode_queries([q.target_text])[0]
+        elif q.target_node_id is not None:
+            slot = self._resolve_slot(q.target_node_id)
+            if slot is None:
+                raise NodeNotFound(q.target_node_id)
+            if not self._vector_store or not self._vector_store.has_vector(slot):
+                raise VectorNotFound(f"Node '{q.target_node_id}' has no vector")
+            query_vec = self._vector_store.get_vector(slot)
+        else:
+            raise VectorError("SIMILAR TO requires a vector, text, or node target")
+
+        if not self._vector_store or self._vector_store.count() == 0:
+            return Result(kind="nodes", data=[], count=0)
+
+        # 2. Build combined mask: live + has_vector
+        n = self.store._next_slot
+        if n == 0:
+            return Result(kind="nodes", data=[], count=0)
+
+        mask = self._compute_live_mask(n)
+        vs_cap = self._vector_store._capacity
+        if n <= vs_cap:
+            vs_mask = self._vector_store._has_vector[:n]
+        else:
+            vs_mask = np.zeros(n, dtype=bool)
+            vs_mask[:vs_cap] = self._vector_store._has_vector[:vs_cap]
+        combined_mask = mask & vs_mask
+
+        # 3. Search
+        k = q.limit.value if q.limit else 10
+        search_k = k * 3 if q.where else k
+        slots, dists = self._vector_store.search(query_vec, k=search_k, mask=combined_mask)
+
+        # 4. Post-filter with WHERE
+        results = []
+        target_k = q.limit.value if q.limit else 10
+        for slot_idx, dist in zip(slots, dists):
+            slot = int(slot_idx)
+            node = self.store._materialize_slot(slot)
+            if node is None:
+                continue
+            if q.where and not self._eval_where(q.where.expr, node):
+                continue
+            node["_similarity_score"] = round(1.0 - float(dist), 4)
+            results.append(node)
+            if len(results) >= target_k:
+                break
 
         return Result(kind="nodes", data=results, count=len(results))
 
