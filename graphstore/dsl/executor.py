@@ -221,6 +221,11 @@ class Executor:
         # Apply remaining filters if where has more than just kind
         if q.where and not self._is_simple_kind_filter(q.where):
             edges = [e for e in edges if self._eval_where(q.where.expr, e)]
+        # Filter edges touching non-visible nodes
+        edges = [
+            e for e in edges
+            if self._is_visible_by_id(e["source"]) and self._is_visible_by_id(e["target"])
+        ]
         if q.limit:
             edges = edges[:q.limit.value]
         return Result(kind="edges", data=edges, count=len(edges))
@@ -254,6 +259,7 @@ class Executor:
                 if node:
                     node["_depth"] = depth
                     nodes.append(node)
+        nodes = self._filter_visible(nodes)
         if q.limit:
             nodes = nodes[:q.limit.value]
         return Result(kind="nodes", data=nodes, count=len(nodes))
@@ -288,15 +294,18 @@ class Executor:
                 if node:
                     nodes.append(node)
 
-        # Collect edges between visited nodes
+        # Filter out retracted/expired nodes
+        nodes = self._filter_visible(nodes)
+        visible_ids = {n["id"] for n in nodes}
+
+        # Collect edges between visible nodes
         edges = []
         for node_idx in visited_slots:
             nid = self.store._slot_to_id(node_idx)
-            if nid:
+            if nid and nid in visible_ids:
                 for e in self.store.get_edges_from(nid):
                     tgt_id = e["target"]
-                    tgt_slot = self._resolve_slot(tgt_id)
-                    if tgt_slot in visited_slots:
+                    if tgt_id in visible_ids:
                         edges.append(e)
 
         return Result(
@@ -322,6 +331,9 @@ class Executor:
             return Result(kind="path", data=None, count=0)
 
         path_ids = [self.store._slot_to_id(s) for s in path]
+        # Validate all nodes in path are visible
+        if any(pid is None or not self._is_visible_by_id(pid) for pid in path_ids):
+            return Result(kind="path", data=None, count=0)
         return Result(kind="path", data=path_ids, count=len(path_ids))
 
     def _paths(self, q: PathsQuery) -> Result:
@@ -339,7 +351,9 @@ class Executor:
         result = []
         for path in paths:
             path_ids = [self.store._slot_to_id(s) for s in path]
-            result.append(path_ids)
+            # Only include paths where all nodes are visible
+            if all(pid is not None and self._is_visible_by_id(pid) for pid in path_ids):
+                result.append(path_ids)
         return Result(kind="paths", data=result, count=len(result))
 
     def _shortest_path(self, q: ShortestPathQuery) -> Result:
@@ -359,6 +373,9 @@ class Executor:
             return Result(kind="path", data=None, count=0)
 
         path_ids = [self.store._slot_to_id(s) for s in path]
+        # Validate all nodes in path are visible
+        if any(pid is None or not self._is_visible_by_id(pid) for pid in path_ids):
+            return Result(kind="path", data=None, count=0)
         return Result(kind="path", data=path_ids, count=len(path_ids))
 
     def _distance(self, q: DistanceQuery) -> Result:
@@ -375,6 +392,11 @@ class Executor:
         matrix_t = matrix.T.tocsr()
 
         path = bidirectional_bfs(matrix, matrix_t, src_slot, tgt_slot, q.max_depth)
+        if path is not None:
+            # Validate all nodes in path are visible
+            path_ids = [self.store._slot_to_id(s) for s in path]
+            if any(pid is None or not self._is_visible_by_id(pid) for pid in path_ids):
+                path = None
         dist = len(path) - 1 if path else -1
         return Result(kind="distance", data=dist, count=1)
 
@@ -394,6 +416,9 @@ class Executor:
             return Result(kind="path", data=None, count=0)
 
         path_ids = [self.store._slot_to_id(s) for s in path]
+        # Validate all nodes in path are visible
+        if any(pid is None or not self._is_visible_by_id(pid) for pid in path_ids):
+            return Result(kind="path", data=None, count=0)
         return Result(kind="path", data=path_ids, count=len(path_ids))
 
     def _weighted_distance(self, q: WeightedDistanceQuery) -> Result:
@@ -409,6 +434,11 @@ class Executor:
             return Result(kind="distance", data=-1, count=1)
 
         path, cost = dijkstra(matrix, src_slot, tgt_slot)
+        if path is not None:
+            # Validate all nodes in path are visible
+            path_ids = [self.store._slot_to_id(s) for s in path]
+            if any(pid is None or not self._is_visible_by_id(pid) for pid in path_ids):
+                path = None
         if path is None:
             return Result(kind="distance", data=-1, count=1)
         return Result(kind="distance", data=cost, count=1)
@@ -449,14 +479,17 @@ class Executor:
                         node["_query_anchor"] = True
                     nodes.append(node)
 
-        # Collect forward edges between all visited nodes (incl. anchor)
+        # Filter out retracted/expired nodes
+        nodes = self._filter_visible(nodes)
+        visible_ids = {n["id"] for n in nodes}
+
+        # Collect forward edges between visible nodes (incl. anchor)
         edges = []
         for node_idx in visited_slots:
             nid = self.store._slot_to_id(node_idx)
-            if nid:
+            if nid and nid in visible_ids:
                 for e in self.store.get_edges_from(nid, kind=edge_type):
-                    tgt_slot = self._resolve_slot(e["target"])
-                    if tgt_slot in visited_slots:
+                    if e["target"] in visible_ids:
                         edges.append(e)
 
         ancestor_count = sum(1 for n in nodes if not n.get("_query_anchor"))
@@ -492,13 +525,16 @@ class Executor:
                         node["_query_anchor"] = True
                     nodes.append(node)
 
+        # Filter out retracted/expired nodes
+        nodes = self._filter_visible(nodes)
+        visible_ids = {n["id"] for n in nodes}
+
         edges = []
         for node_idx in visited_slots:
             nid = self.store._slot_to_id(node_idx)
-            if nid:
+            if nid and nid in visible_ids:
                 for e in self.store.get_edges_from(nid, kind=edge_type):
-                    tgt_slot = self._resolve_slot(e["target"])
-                    if tgt_slot in visited_slots:
+                    if e["target"] in visible_ids:
                         edges.append(e)
 
         descendant_count = sum(1 for n in nodes if not n.get("_query_anchor"))
@@ -523,6 +559,7 @@ class Executor:
                 node = self.store.get_node(nid)
                 if node:
                     nodes.append(node)
+        nodes = self._filter_visible(nodes)
         return Result(kind="nodes", data=nodes, count=len(nodes))
 
     def _match(self, q: MatchQuery) -> Result:
@@ -535,6 +572,17 @@ class Executor:
 
         # Execute match pattern using sparse matrix traversal
         bindings, edges = self._execute_match_pattern(pattern)
+
+        # Filter out bindings that reference non-visible nodes
+        bindings = [
+            b for b in bindings
+            if all(self._is_visible_by_id(nid) for nid in b.values())
+        ]
+        # Filter edges that reference non-visible nodes
+        edges = [
+            e for e in edges
+            if self._is_visible_by_id(e["source"]) and self._is_visible_by_id(e["target"])
+        ]
 
         if q.limit:
             bindings = bindings[: q.limit.value]
@@ -941,7 +989,10 @@ class Executor:
                         d[field] = int(raw)
             for label, arr in results.items():
                 val = arr[i]
-                d[label] = int(val) if val == int(val) else float(val)
+                if np.isnan(val) or np.isinf(val):
+                    d[label] = None if np.isnan(val) else float(val)
+                else:
+                    d[label] = int(val) if float(val) == int(float(val)) else float(val)
             group_dicts.append(d)
 
         # HAVING filter
@@ -1061,6 +1112,11 @@ class Executor:
             slot = int(slot_idx)
             self.store.columns.set(slot, update_data)
             self.store.columns.set_reserved(slot, "__updated_at__", now_ms)
+
+        # Rebuild secondary indices for updated fields
+        for fp in q.fields:
+            if fp.name in self.store._indexed_fields:
+                self.store.add_index(fp.name)  # rebuild index for this field
 
         updated = len(matching_slots)
         return Result(kind="ok", data={"updated": updated}, count=updated)
@@ -1211,9 +1267,8 @@ class Executor:
             # Weight by importance and recency
             activation *= importance[:len(activation)]
             activation *= recency[:len(activation)]
-
-        # Apply live mask (zero out non-live nodes)
-        activation[:n] *= live_mask
+            # Zero out non-live nodes EACH hop
+            activation[:n] *= live_mask.astype(np.float64)
 
         # Zero out the cue node itself
         activation[cue_slot] = 0.0
@@ -1364,6 +1419,9 @@ class Executor:
         saved_node_kinds = self.store.node_kinds[:self.store._next_slot].copy()
 
         try:
+            # Apply hypothetical retraction
+            self.store.columns.set_reserved(src_slot, "__retracted__", 1)
+
             # Find all descendants via BFS on edge matrices
             combined = self.store.edge_matrices.get(None)
             n = self.store._next_slot
@@ -1425,6 +1483,7 @@ class Executor:
 
     def _discard_context(self, q: DiscardContext) -> Result:
         """DISCARD CONTEXT: delete all nodes with matching __context__ and unbind."""
+        deleted_count = 0
         n = self.store._next_slot
         if n > 0 and self.store.columns.has_column("__context__"):
             ctx_col = self.store.columns.get_column("__context__", n)
@@ -1438,12 +1497,13 @@ class Executor:
                     if nid:
                         try:
                             self.store.delete_node(nid)
-                        except Exception:
+                            deleted_count += 1
+                        except NodeNotFound:
                             pass
 
         # Unbind context
         self.store._active_context = None
-        return Result(kind="ok", data={"discarded": q.name}, count=0)
+        return Result(kind="ok", data={"discarded": q.name, "deleted": deleted_count}, count=deleted_count)
 
     def _apply_ttl(self, node_id: str, expires_in: tuple | None, expires_at: str | None):
         """Set __expires_at__ on a node based on TTL clauses."""
@@ -1525,39 +1585,15 @@ class Executor:
 
     def _compute_live_mask(self, n: int) -> np.ndarray:
         """Unified visibility filter: tombstones + TTL + retracted + context."""
-        mask = self.store.node_ids[:n] >= 0
-
-        # Tombstones
-        if self.store.node_tombstones:
-            tomb_arr = np.array(list(self.store.node_tombstones), dtype=np.int32)
-            tomb_mask = np.zeros(n, dtype=bool)
-            valid = tomb_arr[tomb_arr < n]
-            if len(valid) > 0:
-                tomb_mask[valid] = True
-            mask = mask & ~tomb_mask
-
-        # TTL expiry
-        expires = self.store.columns.get_column("__expires_at__", n)
-        if expires is not None:
-            col, pres, _ = expires
-            now_ms = int(time.time() * 1000)
-            mask = mask & ~(pres & (col > 0) & (col < now_ms))
-
-        # Retracted beliefs
-        retracted = self.store.columns.get_column("__retracted__", n)
-        if retracted is not None:
-            col, pres, _ = retracted
-            mask = mask & ~(pres & (col == 1))
+        mask = self.store.compute_live_mask(n)
 
         # Context filtering: when bound, only show nodes tagged with active context
-        if self.store._active_context is not None:
-            ctx_col = self.store.columns.get_column("__context__", n)
-            if ctx_col is not None:
-                col_data, col_pres, _ = ctx_col
-                ctx_id = self.store.string_table.intern(self.store._active_context)
-                mask = mask & (col_pres & (col_data[:n] == ctx_id))
+        if hasattr(self.store, '_active_context') and self.store._active_context:
+            ctx_id = self.store.string_table.intern(self.store._active_context)
+            ctx_mask = self.store.columns.get_mask("__context__", "=", ctx_id, n)
+            if ctx_mask is not None:
+                mask = mask & ctx_mask
             else:
-                # No context column exists yet, so no nodes match
                 mask = np.zeros(n, dtype=bool)
 
         return mask
@@ -1599,6 +1635,13 @@ class Executor:
                 # No context column at all - nothing has context
                 return False
         return True
+
+    def _is_visible_by_id(self, node_id: str) -> bool:
+        """Check if a node ID is visible (not tombstoned, expired, or retracted)."""
+        slot = self._resolve_slot(node_id)
+        if slot is None:
+            return False
+        return self._is_slot_visible(slot)
 
     def _filter_visible(self, nodes: list[dict]) -> list[dict]:
         """Filter out retracted, expired, and out-of-context nodes."""

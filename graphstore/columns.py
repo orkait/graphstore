@@ -172,8 +172,7 @@ class ColumnStore:
 
     def _ensure_column(self, field: str, dtype_str: str) -> None:
         """Create column if it doesn't exist. No-op if it already exists."""
-        if field not in self._dtypes:
-            self._create_column(field, dtype_str)
+        self.declare_column(field, dtype_str)
 
     def set_reserved(self, slot: int, field: str, value) -> None:
         """Set a system-managed column value. Auto-interns strings."""

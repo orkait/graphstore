@@ -40,7 +40,7 @@ from graphstore.dsl.ast_nodes import (
 )
 from graphstore.dsl.cost_estimator import estimate_match_cost, estimate_traverse_cost
 from graphstore.memory import estimate as estimate_memory
-from graphstore.errors import GraphStoreError
+from graphstore.errors import GraphStoreError, NodeNotFound
 
 
 class SystemExecutor:
@@ -348,7 +348,7 @@ class SystemExecutor:
                 try:
                     self.store.delete_node(nid)
                     expired_count += 1
-                except Exception:
+                except NodeNotFound:
                     pass
 
         return Result(kind="ok", data={"expired": expired_count}, count=expired_count)
@@ -359,28 +359,8 @@ class SystemExecutor:
         if n == 0:
             return Result(kind="contradictions", data=[], count=0)
 
-        # Build live mask
-        mask = self.store.node_ids[:n] >= 0
-        if self.store.node_tombstones:
-            tomb_arr = np.array(list(self.store.node_tombstones), dtype=np.int32)
-            tomb_mask = np.zeros(n, dtype=bool)
-            valid = tomb_arr[tomb_arr < n]
-            if len(valid) > 0:
-                tomb_mask[valid] = True
-            mask = mask & ~tomb_mask
-
-        # Retracted filter
-        retracted = self.store.columns.get_column("__retracted__", n)
-        if retracted is not None:
-            col_r, pres_r, _ = retracted
-            mask = mask & ~(pres_r & (col_r == 1))
-
-        # TTL filter
-        expires = self.store.columns.get_column("__expires_at__", n)
-        if expires is not None:
-            col_e, pres_e, _ = expires
-            now_ms = int(time.time() * 1000)
-            mask = mask & ~(pres_e & (col_e > 0) & (col_e < now_ms))
+        # Build live mask (tombstones + TTL + retracted)
+        mask = self.store.compute_live_mask(n)
 
         # Apply WHERE filter (kind filter)
         if q.where:
