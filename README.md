@@ -16,7 +16,7 @@
 
 ---
 
-Five engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vector search, document ingestion, and a human-readable query language - everything an AI agent needs to remember, recall, reason, and speak.
+Six engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vector search, document ingestion, markdown vault, and a human-readable query language - everything an AI agent needs to remember, recall, reason, and speak.
 
 ## 🧩 What agents get
 
@@ -35,19 +35,19 @@ Five engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vec
 | **Isolated reasoning** | `BIND CONTEXT "session"` ... `DISCARD CONTEXT "session"` | 72 μs |
 | **Point lookup** | `NODE "memory:42"` | 4 μs |
 
-## 🏗️ Five Engines
+## 🏗️ Six Engines
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    DSL (one language)                         │
-└──────┬──────────┬──────────┬──────────┬──────────┬──────────┘
-       ▼          ▼          ▼          ▼          ▼
- ColumnStore    Graph    VectorStore  DocStore   Ingestor
-  (numpy)    (scipy CSR) (usearch)   (SQLite)
- structured  relationships meaning   raw docs   PDF/Word/text
- WHERE       RECALL       SIMILAR    WITH DOC   → markdown
- GROUP BY    TRAVERSE     TO                    → chunks
- ORDER BY    PATH, MATCH                        → images
+┌──────────────────────────────────────────────────────────────────────┐
+│                         DSL (one language)                            │
+└──┬──────────┬──────────┬──────────┬──────────┬──────────┬────────────┘
+   ▼          ▼          ▼          ▼          ▼          ▼
+ColumnStore  Graph    VectorStore DocStore   Ingestor    Vault
+ (numpy)  (scipy CSR) (usearch)  (SQLite)              (markdown)
+structured relations  meaning    raw docs   PDF/Word   agent notes
+WHERE      RECALL     SIMILAR    WITH DOC   → chunks   NEW/READ
+GROUP BY   TRAVERSE   TO                    → embed    WRITE/SYNC
+ORDER BY   PATH                             → images   DAILY/LIST
 ```
 
 ## 📦 Install
@@ -154,7 +154,7 @@ SYS STATS DOCUMENTS
 </details>
 
 <details>
-<summary><strong>Vault</strong> - Obsidian-compatible markdown notes for agent memory</summary>
+<summary><strong>Vault</strong> - structured markdown notes for agent memory</summary>
 
 ```python
 g = GraphStore(path="./brain", vault="./notes")
@@ -163,7 +163,7 @@ g = GraphStore(path="./brain", vault="./notes")
 g.execute('VAULT NEW "Project Requirements" KIND "context" TAGS "project,specs"')
 g.execute('VAULT WRITE "Project Requirements" SECTION "body" CONTENT "The app must support..."')
 
-# Vault files are human-readable in Obsidian, auto-indexed in graphstore
+# Vault files are human-readable markdown, auto-indexed in graphstore
 g.execute('VAULT SEARCH "deployment requirements" LIMIT 5')
 
 # Load standing instructions at session start
