@@ -5,7 +5,7 @@ start: statement
 // USER DSL
 // =============================================
 
-?user_query: read_query | write_query | batch
+?user_query: read_query | write_query | batch | vault_query
 
 // --- Reads ---
 ?read_query: node_q | nodes_q | edges_q | traverse_q | subgraph_q
@@ -174,6 +174,27 @@ offset_clause: "OFFSET" NUMBER
 order_clause: "ORDER" "BY" IDENTIFIER order_dir?
 order_dir: "ASC" -> order_asc
           | "DESC" -> order_desc
+
+// --- Vault ---
+?vault_query: vault_new | vault_read | vault_write | vault_append
+            | vault_search | vault_backlinks | vault_list
+            | vault_sync | vault_daily | vault_archive
+
+vault_new: "VAULT" "NEW" STRING vault_kind? vault_tags?
+vault_kind: "KIND" STRING
+vault_tags: "TAGS" STRING
+
+vault_read: "VAULT" "READ" STRING
+vault_write: "VAULT" "WRITE" STRING "SECTION" STRING "CONTENT" STRING
+vault_append: "VAULT" "APPEND" STRING "SECTION" STRING "CONTENT" STRING
+
+vault_search: "VAULT" "SEARCH" STRING limit_clause? where_clause?
+vault_backlinks: "VAULT" "BACKLINKS" STRING
+vault_list: "VAULT" "LIST" where_clause? order_clause? limit_clause?
+
+vault_sync: "VAULT" "SYNC"
+vault_daily: "VAULT" "DAILY"
+vault_archive: "VAULT" "ARCHIVE" STRING
 
 // =============================================
 // SYSTEM DSL

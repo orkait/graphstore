@@ -60,6 +60,16 @@ from graphstore.dsl.ast_nodes import (
     RecallQuery,
     CounterfactualQuery,
     SimilarQuery,
+    VaultNew,
+    VaultRead,
+    VaultWrite,
+    VaultAppend,
+    VaultSearch,
+    VaultBacklinks,
+    VaultList,
+    VaultSync,
+    VaultDaily,
+    VaultArchive,
     SysStats,
     SysKinds,
     SysEdgeKinds,
@@ -707,6 +717,65 @@ class DSLTransformer(Transformer):
 
     def vision_clause(self, args):
         return ("vision_clause", self._str(args[0]))
+
+    # --- Vault queries ---
+    def vault_new(self, args):
+        title = self._str(args[0])
+        kind = "memory"
+        tags = None
+        for a in args[1:]:
+            if isinstance(a, tuple) and a[0] == "vault_kind":
+                kind = a[1]
+            elif isinstance(a, tuple) and a[0] == "vault_tags":
+                tags = a[1]
+        return VaultNew(title=title, kind=kind, tags=tags)
+
+    def vault_kind(self, args):
+        return ("vault_kind", self._str(args[0]))
+
+    def vault_tags(self, args):
+        return ("vault_tags", self._str(args[0]))
+
+    def vault_read(self, args):
+        return VaultRead(title=self._str(args[0]))
+
+    def vault_write(self, args):
+        return VaultWrite(
+            title=self._str(args[0]),
+            section=self._str(args[1]),
+            content=self._str(args[2]),
+        )
+
+    def vault_append(self, args):
+        return VaultAppend(
+            title=self._str(args[0]),
+            section=self._str(args[1]),
+            content=self._str(args[2]),
+        )
+
+    def vault_search(self, args):
+        query = self._str(args[0])
+        limit = self._find(args[1:], LimitClause)
+        where = self._find(args[1:], WhereClause)
+        return VaultSearch(query=query, limit=limit, where=where)
+
+    def vault_backlinks(self, args):
+        return VaultBacklinks(title=self._str(args[0]))
+
+    def vault_list(self, args):
+        where = self._find(args, WhereClause)
+        order = self._find(args, OrderClause)
+        limit = self._find(args, LimitClause)
+        return VaultList(where=where, order=order, limit=limit)
+
+    def vault_sync(self, args):
+        return VaultSync()
+
+    def vault_daily(self, args):
+        return VaultDaily()
+
+    def vault_archive(self, args):
+        return VaultArchive(title=self._str(args[0]))
 
     # --- System queries ---
     def sys_stats(self, args):
