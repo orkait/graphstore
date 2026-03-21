@@ -247,6 +247,61 @@ Stable note
         g.close()
 
 
+class TestFactAutoAssert:
+    def test_fact_note_sets_confidence(self, tmp_path):
+        from graphstore import GraphStore
+        vault_path = tmp_path / "notes"
+        vault_path.mkdir()
+        (vault_path / "db-version.md").write_text("""---
+kind: fact
+confidence: 0.95
+source: human
+status: active
+---
+
+## Summary
+Production database is PostgreSQL 15.3
+
+## Body
+Verified on 2026-03-21.
+""")
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(vault_path), embedder=None)
+        node = g.execute('NODE "note:db-version"')
+        assert node.data is not None
+        assert node.data["note_kind"] == "fact"
+        # Check that belief columns were set via reserved columns
+        slot = 0
+        cols = g._store.columns
+        assert cols.has_column("__confidence__")
+        assert cols._presence["__confidence__"][slot]
+        assert abs(float(cols._columns["__confidence__"][slot]) - 0.95) < 0.01
+        assert cols.has_column("__source__")
+        assert cols._presence["__source__"][slot]
+        g.close()
+
+    def test_non_fact_note_has_no_confidence(self, tmp_path):
+        from graphstore import GraphStore
+        vault_path = tmp_path / "notes"
+        vault_path.mkdir()
+        (vault_path / "regular.md").write_text("""---
+kind: memory
+status: active
+---
+
+## Summary
+Just a regular memory.
+""")
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(vault_path), embedder=None)
+        node = g.execute('NODE "note:regular"')
+        assert node.data is not None
+        # No __confidence__ set for non-fact notes
+        slot = 0
+        cols = g._store.columns
+        if cols.has_column("__confidence__"):
+            assert not cols._presence["__confidence__"][slot]
+        g.close()
+
+
 class TestVaultDSL:
     def test_vault_new(self, tmp_path):
         from graphstore import GraphStore
