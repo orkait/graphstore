@@ -133,6 +133,15 @@ class VaultSync:
             if self._vector_store is not None:
                 self._vector_store.add(slot, vec)
 
+        # Fact kind: auto-ASSERT into graphstore belief store
+        if fm.get("kind") == "fact" and slot is not None:
+            confidence = fm.get("confidence", 1.0)
+            source = fm.get("source", "vault")
+            if isinstance(confidence, (int, float)):
+                self._store.columns.set_reserved(slot, "__confidence__", float(confidence))
+            self._store.columns.set_reserved(slot, "__source__", str(source))
+            self._store.columns.set_reserved(slot, "__retracted__", 0)
+
         return slot
 
     def _sync_edges(self, slug: str) -> None:
