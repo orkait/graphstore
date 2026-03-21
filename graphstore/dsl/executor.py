@@ -43,6 +43,16 @@ from graphstore.dsl.ast_nodes import (
     UpdateNode,
     UpdateNodes,
     UpsertNode,
+    VaultNew,
+    VaultRead,
+    VaultWrite,
+    VaultAppend,
+    VaultSearch,
+    VaultBacklinks,
+    VaultList,
+    VaultSync,
+    VaultDaily,
+    VaultArchive,
     WeightedDistanceQuery,
     WeightedShortestPathQuery,
 )
@@ -52,11 +62,24 @@ from graphstore.dsl.executor_reads import ReadExecutor
 from graphstore.dsl.executor_writes import WriteExecutor
 
 
+_VAULT_TYPES = (VaultNew, VaultRead, VaultWrite, VaultAppend,
+                VaultSearch, VaultBacklinks, VaultList,
+                VaultSync, VaultDaily, VaultArchive)
+
+
 class Executor(ReadExecutor, WriteExecutor):
     """Full executor combining read and write handlers."""
 
+    _vault_executor = None  # set by GraphStore when vault is configured
+
     def _dispatch(self, ast) -> Result:
         """Route AST node to handler."""
+        # Vault commands
+        if isinstance(ast, _VAULT_TYPES):
+            if not self._vault_executor:
+                raise GraphStoreError("Vault not configured. Use GraphStore(vault='./notes')")
+            return self._vault_executor.dispatch(ast)
+
         handlers = {
             NodeQuery: self._node,
             NodesQuery: self._nodes,

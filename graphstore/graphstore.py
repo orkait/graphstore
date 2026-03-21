@@ -121,6 +121,7 @@ class GraphStore:
         if vault:
             from graphstore.vault.manager import VaultManager
             from graphstore.vault.sync import VaultSync
+            from graphstore.vault.executor import VaultExecutor
             self._vault_manager = VaultManager(vault)
             self._vault_sync = VaultSync(
                 self._vault_manager, self._store, self._schema,
@@ -128,9 +129,16 @@ class GraphStore:
             )
             # Initial sync
             self._vault_sync.sync_all()
+            # Wire vault executor into DSL executor
+            self._vault_executor = VaultExecutor(
+                self._vault_manager, self._vault_sync, self._store,
+                self._embedder, self._vector_store
+            )
+            self._executor._vault_executor = self._vault_executor
         else:
             self._vault_manager = None
             self._vault_sync = None
+            self._vault_executor = None
 
     def execute(self, query: str) -> Result:
         """Execute a single DSL query (user or system). Returns Result."""
