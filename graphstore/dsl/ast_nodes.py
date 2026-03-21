@@ -455,3 +455,54 @@ class SysReembed:
 @dataclass
 class SysStatus:
     pass
+
+# --- Vault queries ---
+@dataclass
+class VaultNew:
+    title: str
+    kind: str = "memory"
+    tags: str | None = None  # comma-separated
+
+@dataclass
+class VaultRead:
+    title: str
+
+@dataclass
+class VaultWrite:
+    title: str
+    section: str
+    content: str
+
+@dataclass
+class VaultAppend:
+    title: str
+    section: str
+    content: str
+
+@dataclass
+class VaultSearch:
+    query: str
+    limit: LimitClause | None = None
+    where: WhereClause | None = None
+
+@dataclass
+class VaultBacklinks:
+    title: str
+
+@dataclass
+class VaultList:
+    where: WhereClause | None = None
+    order: OrderClause | None = None
+    limit: LimitClause | None = None
+
+@dataclass
+class VaultSync:
+    pass
+
+@dataclass
+class VaultDaily:
+    pass
+
+@dataclass
+class VaultArchive:
+    title: str
