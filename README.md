@@ -37,18 +37,9 @@ Six engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vect
 
 ## 🏗️ Six Engines
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                         DSL (one language)                            │
-└──┬──────────┬──────────┬──────────┬──────────┬──────────┬────────────┘
-   ▼          ▼          ▼          ▼          ▼          ▼
-ColumnStore  Graph    VectorStore DocStore   Ingestor    Vault
- (numpy)  (scipy CSR) (usearch)  (SQLite)              (markdown)
-structured relations  meaning    raw docs   PDF/Word   agent notes
-WHERE      RECALL     SIMILAR    WITH DOC   → chunks   NEW/READ
-GROUP BY   TRAVERSE   TO                    → embed    WRITE/SYNC
-ORDER BY   PATH                             → images   DAILY/LIST
-```
+<div align="center">
+<img src="assets/engines.svg" alt="graphstore six engines architecture" width="100%">
+</div>
 
 ## 📦 Install
 
