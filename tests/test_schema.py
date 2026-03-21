@@ -2,8 +2,8 @@
 
 import pytest
 
-from graphstore.errors import SchemaError
-from graphstore.schema import SchemaRegistry
+from graphstore.core.errors import SchemaError
+from graphstore.core.schema import SchemaRegistry
 
 
 # ── 1. Empty registry ────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 """Memory estimator and ceiling enforcement."""
 
-from graphstore.errors import CeilingExceeded
+from graphstore.core.errors import CeilingExceeded
 
 BYTES_PER_NODE = 330  # numpy arrays + Python dict + string table entry
 BYTES_PER_EDGE = 20  # CSR entries across typed matrices

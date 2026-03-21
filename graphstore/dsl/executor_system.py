@@ -7,9 +7,9 @@ for stats, schema management, query logs, WAL, and diagnostics.
 import time
 import sqlite3
 
-from graphstore.store import CoreStore
-from graphstore.schema import SchemaRegistry
-from graphstore.types import Result
+from graphstore.core.store import CoreStore
+from graphstore.core.schema import SchemaRegistry
+from graphstore.core.types import Result
 import numpy as np
 
 from graphstore.dsl.ast_nodes import (
@@ -18,15 +18,19 @@ from graphstore.dsl.ast_nodes import (
     NodesQuery,
     SysCheckpoint,
     SysClear,
+    SysConnect,
     SysContradictions,
     SysDescribe,
+    SysDuplicates,
     SysEdgeKinds,
+    SysEmbedders,
     SysExpire,
     SysExplain,
     SysFailedQueries,
     SysFrequentQueries,
     SysKinds,
     SysRebuild,
+    SysReembed,
     SysRegisterEdgeKind,
     SysRegisterNodeKind,
     SysRollback,
@@ -34,13 +38,14 @@ from graphstore.dsl.ast_nodes import (
     SysSnapshot,
     SysSnapshots,
     SysStats,
+    SysStatus,
     SysUnregister,
     SysWal,
     TraverseQuery,
 )
 from graphstore.dsl.cost_estimator import estimate_match_cost, estimate_traverse_cost
-from graphstore.memory import estimate as estimate_memory
-from graphstore.errors import GraphStoreError, NodeNotFound
+from graphstore.core.memory import estimate as estimate_memory
+from graphstore.core.errors import GraphStoreError, NodeNotFound
 
 
 class SystemExecutor:
@@ -49,10 +54,16 @@ class SystemExecutor:
         store: CoreStore,
         schema: SchemaRegistry,
         conn: sqlite3.Connection | None = None,
+        embedder=None,
+        vector_store=None,
+        document_store=None,
     ):
         self.store = store
         self.schema = schema
         self.conn = conn
+        self._embedder = embedder
+        self._vector_store = vector_store
+        self._document_store = document_store
         self._start_time = time.time()
 
     def execute(self, ast) -> Result:
@@ -83,6 +94,11 @@ class SystemExecutor:
             SysSnapshot: self._snapshot,
             SysRollback: self._rollback,
             SysSnapshots: self._snapshots,
+            SysDuplicates: self._duplicates,
+            SysEmbedders: self._embedders,
+            SysConnect: self._connect,
+            SysReembed: self._reembed,
+            SysStatus: self._status,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -235,7 +251,8 @@ class SystemExecutor:
         return Result(kind="plan", data=cost.to_dict(), count=1)
 
     def _register_node_kind(self, q: SysRegisterNodeKind) -> Result:
-        self.schema.register_node_kind(q.kind, q.required, q.optional)
+        self.schema.register_node_kind(q.kind, q.required, q.optional,
+                                       embed_field=q.embed_field)
         # Pre-create columns for typed fields
         type_map = {"string": "int32_interned", "int": "int64", "float": "float64"}
         for item in q.required + q.optional:
@@ -471,19 +488,28 @@ class SystemExecutor:
     def _snapshot(self, q: SysSnapshot) -> Result:
         """SYS SNAPSHOT: save full graph state to a named snapshot."""
         store = self.store
+        ns = store._next_slot
         snap = {
             "columns": store.columns.snapshot_arrays(),
-            "node_ids": store.node_ids[:store._next_slot].copy(),
-            "node_kinds": store.node_kinds[:store._next_slot].copy(),
+            "node_ids": store.node_ids[:ns].copy(),
+            "node_kinds": store.node_kinds[:ns].copy(),
             "tombstones": set(store.node_tombstones),
             "edges_by_type": {k: list(v) for k, v in store._edges_by_type.items()},
             "edge_keys": set(store._edge_keys),
             "id_to_slot": dict(store.id_to_slot),
-            "next_slot": store._next_slot,
+            "next_slot": ns,
             "count": store._count,
             "capacity": store._capacity,
             "active_context": store._active_context,
         }
+        # Snapshot vector state
+        vs = self._vector_store
+        if vs is not None and vs.count() > 0:
+            snap["vector_index"] = vs.save()
+            snap["vector_presence"] = vs._has_vector[:ns].copy()
+            snap["vector_dims"] = vs.dims
+        else:
+            snap["vector_index"] = None
         store._snapshots[q.name] = snap
         return Result(kind="ok", data={"snapshot": q.name}, count=1)
 
@@ -520,8 +546,27 @@ class SystemExecutor:
         store._count = snap["count"]
         store._active_context = snap.get("active_context")
 
+        # Restore vector state
+        if snap.get("vector_index") is not None:
+            from graphstore.vector.store import VectorStore
+            vs = VectorStore(dims=snap["vector_dims"], capacity=store._capacity)
+            vs.load(snap["vector_index"])
+            vs._has_vector[:len(snap["vector_presence"])] = snap["vector_presence"]
+            self._vector_store = vs
+        else:
+            self._vector_store = None
+
         # Rebuild derived state
         store._rebuild_edges()
+
+        # Orphan cleanup in DocumentStore
+        if self._document_store:
+            live = store.compute_live_mask(store._next_slot)
+            live_slots = set(int(s) for s in np.nonzero(live)[0])
+            try:
+                self._document_store.orphan_cleanup(live_slots)
+            except Exception:
+                pass
 
         return Result(kind="ok", data={"rollback": q.name}, count=1)
 
@@ -529,3 +574,174 @@ class SystemExecutor:
         """SYS SNAPSHOTS: list all named snapshots."""
         names = list(self.store._snapshots.keys())
         return Result(kind="snapshots", data=names, count=len(names))
+
+    def _duplicates(self, q: SysDuplicates) -> Result:
+        """SYS DUPLICATES: find near-duplicate nodes by vector similarity."""
+        vs = self._vector_store
+        if vs is None or vs.count() == 0:
+            return Result(kind="duplicates", data=[], count=0)
+
+        store = self.store
+        n = store._next_slot
+
+        # Build live mask
+        mask = store.compute_live_mask(n)
+
+        # Apply optional WHERE filter
+        if q.where:
+            expr = q.where.expr
+            if isinstance(expr, Condition) and expr.field == "kind" and expr.op == "=":
+                kind_mask = store._live_mask(expr.value)
+                mask = mask & kind_mask
+
+        # Collect slots that are both live and have vectors
+        candidate_slots = []
+        for slot in range(n):
+            if mask[slot] and vs.has_vector(slot):
+                candidate_slots.append(slot)
+
+        if len(candidate_slots) < 2:
+            return Result(kind="duplicates", data=[], count=0)
+
+        # For each candidate, find its nearest neighbor among candidates
+        seen = set()
+        pairs = []
+        candidate_mask = np.zeros(max(n, vs._capacity), dtype=bool)
+        for s in candidate_slots:
+            candidate_mask[s] = True
+
+        for slot in candidate_slots:
+            vec = vs.get_vector(slot)
+            if vec is None:
+                continue
+            # Search for top-2 (first result may be self)
+            slots_found, dists = vs.search(vec, k=2, mask=candidate_mask)
+            for found_slot, dist in zip(slots_found, dists):
+                found_slot = int(found_slot)
+                if found_slot == slot:
+                    continue
+                # cosine similarity = 1 - cosine distance
+                similarity = 1.0 - float(dist)
+                if similarity >= q.threshold:
+                    pair_key = (min(slot, found_slot), max(slot, found_slot))
+                    if pair_key not in seen:
+                        seen.add(pair_key)
+                        # Resolve IDs
+                        id_a = store.string_table.lookup(int(store.node_ids[pair_key[0]]))
+                        id_b = store.string_table.lookup(int(store.node_ids[pair_key[1]]))
+                        pairs.append({
+                            "node_a": id_a,
+                            "node_b": id_b,
+                            "similarity": round(similarity, 6),
+                        })
+
+        return Result(kind="duplicates", data=pairs, count=len(pairs))
+
+    def _embedders(self, q: SysEmbedders) -> Result:
+        """SYS EMBEDDERS: list active embedder info."""
+        info = []
+        if self._embedder:
+            info.append({
+                "name": self._embedder.name,
+                "dims": self._embedder.dims,
+                "status": "active",
+            })
+        else:
+            info.append({"name": "none", "status": "no embedder configured"})
+        return Result(kind="embedders", data=info, count=len(info))
+
+    def _connect(self, q: SysConnect) -> Result:
+        """SYS CONNECT: auto-wire cross-document relationships via vector similarity."""
+        from graphstore.ingest.connector import connect_all
+        return connect_all(
+            self.store, self._vector_store,
+            threshold=q.threshold, where_expr=q.where,
+        )
+
+    def _reembed(self, q: SysReembed) -> Result:
+        """SYS REEMBED: re-embed all summaries with current embedder, replace vectors."""
+        if not self._embedder:
+            raise GraphStoreError("No embedder configured")
+
+        vs = self._vector_store
+        if vs is None:
+            raise GraphStoreError("No vector store initialized")
+
+        store = self.store
+        n = store._next_slot
+        live = store.compute_live_mask(n)
+
+        reembedded = 0
+        for slot in range(n):
+            if not live[slot]:
+                continue
+            # Try to get summary text from columns
+            text = None
+            if store.columns.has_column("summary") and store.columns._presence["summary"][slot]:
+                raw = store.columns._columns["summary"][slot]
+                dtype = store.columns._dtypes["summary"]
+                if dtype == "int32_interned":
+                    text = store.string_table.lookup(int(raw))
+            if text:
+                vec = self._embedder.encode_documents([text])[0]
+                vs.add(slot, vec)
+                reembedded += 1
+
+        # Clear dirty flag on the GraphStore (set by caller after return)
+        return Result(kind="ok", data={"reembedded": reembedded}, count=reembedded)
+
+    def _status(self, q: SysStatus) -> Result:
+        """SYS STATUS: comprehensive system state."""
+        store = self.store
+        data = {
+            "nodes": store.node_count,
+            "edges": store.edge_count,
+            "memory_bytes": estimate_memory(store.node_count, store.edge_count),
+            "ceiling_bytes": store._ceiling_bytes,
+            "column_memory_bytes": store.columns.memory_bytes,
+        }
+
+        # Vector store info
+        vs = self._vector_store
+        if vs is not None:
+            data["vectors"] = {
+                "count": vs.count(),
+                "dims": vs.dims,
+                "memory_bytes": vs.memory_bytes,
+            }
+        else:
+            data["vectors"] = {"count": 0, "dims": 0, "memory_bytes": 0}
+
+        # Embedder info
+        if self._embedder:
+            data["embedder"] = {
+                "name": getattr(self._embedder, "name", "unknown"),
+                "dims": getattr(self._embedder, "dims", 0),
+                "status": "active",
+            }
+        else:
+            data["embedder"] = {"name": "none", "status": "inactive"}
+
+        # Document store info
+        if self._document_store:
+            try:
+                data["documents"] = self._document_store.stats()
+            except Exception:
+                data["documents"] = {}
+        else:
+            data["documents"] = {}
+
+        # Edge types
+        data["edge_types"] = {
+            etype: len(edges)
+            for etype, edges in store._edges_by_type.items()
+        }
+
+        # Schema info
+        data["registered_kinds"] = self.schema.list_node_kinds()
+        data["registered_edge_kinds"] = self.schema.list_edge_kinds()
+
+        # Uptime
+        data["uptime_seconds"] = time.time() - self._start_time
+
+        return Result(kind="status", data=data, count=1)
