@@ -39,7 +39,8 @@ class GraphStore:
 
     def __init__(self, path: str | None = None, ceiling_mb: int = 256,
                  embedder="default", allow_system_queries: bool = True,
-                 voice: bool = False, ingest_root: str | None = None):
+                 voice: bool = False, ingest_root: str | None = None,
+                 vault: str | None = None):
         self._path = Path(path) if path else None
         self._ceiling_bytes = ceiling_mb * 1_000_000
         self._allow_system = allow_system_queries
@@ -115,6 +116,21 @@ class GraphStore:
         # Replay WAL (must happen after executor is created)
         if self._path and self._conn:
             self._replay_wal()
+
+        # Vault: markdown note system
+        if vault:
+            from graphstore.vault.manager import VaultManager
+            from graphstore.vault.sync import VaultSync
+            self._vault_manager = VaultManager(vault)
+            self._vault_sync = VaultSync(
+                self._vault_manager, self._store, self._schema,
+                self._embedder, self._vector_store, self._document_store
+            )
+            # Initial sync
+            self._vault_sync.sync_all()
+        else:
+            self._vault_manager = None
+            self._vault_sync = None
 
     def execute(self, query: str) -> Result:
         """Execute a single DSL query (user or system). Returns Result."""
