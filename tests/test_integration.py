@@ -7,7 +7,7 @@ and error handling through the GraphStore facade.
 import pytest
 
 from graphstore import GraphStore
-from graphstore.errors import BatchRollback, CeilingExceeded
+from graphstore.core.errors import BatchRollback, CeilingExceeded
 
 
 # ── Test 1: Full workflow — schema, bulk load, query, mutate, verify ──

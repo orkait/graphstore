@@ -2,8 +2,8 @@
 
 import pytest
 
-from graphstore.errors import CeilingExceeded
-from graphstore.memory import (
+from graphstore.core.errors import CeilingExceeded
+from graphstore.core.memory import (
     BYTES_PER_EDGE,
     BYTES_PER_NODE,
     DEFAULT_CEILING_BYTES,

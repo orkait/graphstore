@@ -84,6 +84,7 @@ class AggregateQuery:
 @dataclass
 class NodeQuery:
     id: str
+    with_document: bool = False
 
 @dataclass
 class NodesQuery:
@@ -208,6 +209,8 @@ class CreateNode:
     auto_id: bool = False
     expires_in: tuple[int, str] | None = None   # (amount, unit) e.g. (30, "m")
     expires_at: str | None = None                # ISO-8601 string
+    vector: list[float] | None = None
+    document: str | None = None
 
 @dataclass
 class VarAssign:
@@ -225,6 +228,7 @@ class UpsertNode:
     fields: list[FieldPair]
     expires_in: tuple[int, str] | None = None
     expires_at: str | None = None
+    vector: list[float] | None = None
 
 @dataclass
 class DeleteNode:
@@ -305,6 +309,14 @@ class BindContext:
 class DiscardContext:
     name: str
 
+@dataclass
+class IngestStmt:
+    file_path: str
+    node_id: str | None = None
+    kind: str | None = None
+    using: str | None = None
+    vision_model: str | None = None
+
 # --- Read queries (intelligence) ---
 
 @dataclass
@@ -317,6 +329,14 @@ class RecallQuery:
 @dataclass
 class CounterfactualQuery:
     node_id: str
+
+@dataclass
+class SimilarQuery:
+    target_vector: list[float] | None = None
+    target_text: str | None = None
+    target_node_id: str | None = None
+    limit: LimitClause | None = None
+    where: WhereClause | None = None
 
 # --- System queries ---
 @dataclass
@@ -358,6 +378,7 @@ class SysRegisterNodeKind:
     kind: str
     required: list[tuple[str, str | None]]  # [(field_name, type_name_or_none), ...]
     optional: list[tuple[str, str | None]]
+    embed_field: str | None = None
 
 @dataclass
 class SysRegisterEdgeKind:
@@ -406,4 +427,31 @@ class SysRollback:
 
 @dataclass
 class SysSnapshots:
+    pass
+
+@dataclass
+class SysDuplicates:
+    where: WhereClause | None = None
+    threshold: float = 0.95
+
+@dataclass
+class SysEmbedders:
+    pass
+
+@dataclass
+class SysConnect:
+    where: WhereClause | None = None
+    threshold: float = 0.85
+
+@dataclass
+class ConnectNode:
+    node_id: str
+    threshold: float = 0.8
+
+@dataclass
+class SysReembed:
+    pass
+
+@dataclass
+class SysStatus:
     pass

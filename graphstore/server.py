@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from graphstore import GraphStore
-from graphstore.errors import GraphStoreError
+from graphstore.core.errors import GraphStoreError
 
 app = FastAPI(title="graphstore playground")
 
@@ -37,7 +37,13 @@ def _get_store() -> GraphStore:
     global _store
     if _store is None:
         db_path = os.environ.get("GRAPHSTORE_DB_PATH")
-        _store = GraphStore(path=db_path if db_path else None)
+        # Security: when running as a server, restrict INGEST to cwd
+        # to prevent path traversal via HTTP API
+        ingest_root = os.environ.get("GRAPHSTORE_INGEST_ROOT", os.getcwd())
+        _store = GraphStore(
+            path=db_path if db_path else None,
+            ingest_root=ingest_root,
+        )
     return _store
 
 

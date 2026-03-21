@@ -56,8 +56,10 @@ from graphstore.dsl.ast_nodes import (
     PropagateStmt,
     BindContext,
     DiscardContext,
+    IngestStmt,
     RecallQuery,
     CounterfactualQuery,
+    SimilarQuery,
     SysStats,
     SysKinds,
     SysEdgeKinds,
@@ -78,6 +80,12 @@ from graphstore.dsl.ast_nodes import (
     SysSnapshot,
     SysRollback,
     SysSnapshots,
+    SysDuplicates,
+    SysEmbedders,
+    SysConnect,
+    ConnectNode,
+    SysReembed,
+    SysStatus,
 )
 
 
@@ -150,7 +158,12 @@ class DSLTransformer(Transformer):
 
     # --- Read queries ---
     def node_q(self, args):
-        return NodeQuery(id=self._str(args[0]))
+        node_id = self._str(args[0])
+        with_document = any(isinstance(a, str) and a == "_with_doc" for a in args[1:])
+        return NodeQuery(id=node_id, with_document=with_document)
+
+    def with_doc(self, args):
+        return "_with_doc"
 
     def nodes_q(self, args):
         where = self._find(args, WhereClause)
@@ -279,26 +292,43 @@ class DSLTransformer(Transformer):
         return PatternArrow(expr=args[0])
 
     # --- Writes ---
+    def vector_clause(self, args):
+        return ("vector", args[0])  # args[0] is the list from vector_literal
+
+    def embed_clause(self, args):
+        return ("embed", str(args[0]))
+
     def create_node(self, args):
         fields = args[1] if isinstance(args[1], list) else []
+        vec = self._find_vector(args[2:])
         exp_in, exp_at = self._find_expires(args[2:])
+        doc = self._find_document(args[2:])
         return CreateNode(
             id=self._str(args[0]),
             fields=fields,
             expires_in=exp_in,
             expires_at=exp_at,
+            vector=vec,
+            document=doc,
         )
 
     def create_node_auto(self, args):
         fields = args[0] if isinstance(args[0], list) else []
+        vec = self._find_vector(args[1:])
         exp_in, exp_at = self._find_expires(args[1:])
+        doc = self._find_document(args[1:])
         return CreateNode(
             id=None,
             fields=fields,
             auto_id=True,
             expires_in=exp_in,
             expires_at=exp_at,
+            vector=vec,
+            document=doc,
         )
+
+    def document_clause(self, args):
+        return ("document", self._str(args[0]))
 
     def var_assign(self, args):
         var_name = str(args[0])
@@ -324,12 +354,14 @@ class DSLTransformer(Transformer):
 
     def upsert_node(self, args):
         fields = args[1] if isinstance(args[1], list) else []
+        vec = self._find_vector(args[2:])
         exp_in, exp_at = self._find_expires(args[2:])
         return UpsertNode(
             id=self._str(args[0]),
             fields=fields,
             expires_in=exp_in,
             expires_at=exp_at,
+            vector=vec,
         )
 
     def expires_in(self, args):
@@ -607,6 +639,28 @@ class DSLTransformer(Transformer):
     def counterfactual(self, args):
         return CounterfactualQuery(node_id=self._str(args[0]))
 
+    # --- Similar queries ---
+    def similar_q(self, args):
+        target = args[0]  # SimilarQuery with target set
+        limit = self._find(args[1:], LimitClause)
+        where = self._find(args[1:], WhereClause)
+        target.limit = limit
+        target.where = where
+        return target
+
+    def similar_vector(self, args):
+        vec = args[0]  # list of floats from vector_literal
+        return SimilarQuery(target_vector=vec)
+
+    def similar_text(self, args):
+        return SimilarQuery(target_text=self._str(args[0]))
+
+    def similar_node(self, args):
+        return SimilarQuery(target_node_id=self._str(args[0]))
+
+    def vector_literal(self, args):
+        return [self._num(a) for a in args]
+
     def propagate_stmt(self, args):
         return PropagateStmt(
             node_id=self._str(args[0]),
@@ -619,6 +673,40 @@ class DSLTransformer(Transformer):
 
     def discard_context(self, args):
         return DiscardContext(name=self._str(args[0]))
+
+    def ingest_stmt(self, args):
+        file_path = self._str(args[0])
+        node_id = None
+        kind = None
+        using = None
+        vision_model = None
+        for a in args[1:]:
+            if isinstance(a, tuple):
+                if a[0] == "ingest_as":
+                    node_id = a[1]
+                elif a[0] == "ingest_kind":
+                    kind = a[1]
+                elif a[0] == "using_clause":
+                    using = a[1]
+                elif a[0] == "vision_clause":
+                    vision_model = a[1]
+        return IngestStmt(file_path=file_path, node_id=node_id, kind=kind,
+                          using=using, vision_model=vision_model)
+
+    def ingest_as(self, args):
+        return ("ingest_as", self._str(args[0]))
+
+    def ingest_kind(self, args):
+        return ("ingest_kind", self._str(args[0]))
+
+    def ingest_using(self, args):
+        return args[0]  # pass through the using_clause or vision_clause tuple
+
+    def using_clause(self, args):
+        return ("using_clause", str(args[0]))
+
+    def vision_clause(self, args):
+        return ("vision_clause", self._str(args[0]))
 
     # --- System queries ---
     def sys_stats(self, args):
@@ -661,8 +749,15 @@ class DSLTransformer(Transformer):
     def sys_register_node_kind(self, args):
         kind = self._str(args[0])
         required = args[1]  # ident_list
-        optional = args[2] if len(args) > 2 else []
-        return SysRegisterNodeKind(kind=kind, required=required, optional=optional)
+        optional = []
+        embed_field = None
+        for a in args[2:]:
+            if isinstance(a, list):
+                optional = a  # from optional_clause
+            elif isinstance(a, tuple) and a[0] == "embed":
+                embed_field = a[1]
+        return SysRegisterNodeKind(kind=kind, required=required, optional=optional,
+                                   embed_field=embed_field)
 
     def sys_register_edge_kind(self, args):
         kind = self._str(args[0])
@@ -704,6 +799,42 @@ class DSLTransformer(Transformer):
 
     def sys_snapshots(self, args):
         return SysSnapshots()
+
+    def sys_duplicates(self, args):
+        where = self._find(args, WhereClause)
+        threshold = 0.95
+        for a in args:
+            if isinstance(a, tuple) and a[0] == "threshold":
+                threshold = a[1]
+        return SysDuplicates(where=where, threshold=threshold)
+
+    def threshold_clause(self, args):
+        return ("threshold", self._num(args[0]))
+
+    def sys_embedders(self, args):
+        return SysEmbedders()
+
+    def sys_connect(self, args):
+        where = self._find(args, WhereClause)
+        threshold = 0.85
+        for a in args:
+            if isinstance(a, tuple) and a[0] == "threshold":
+                threshold = a[1]
+        return SysConnect(where=where, threshold=threshold)
+
+    def connect_node(self, args):
+        node_id = self._str(args[0])
+        threshold = 0.8
+        for a in args[1:]:
+            if isinstance(a, tuple) and a[0] == "threshold":
+                threshold = a[1]
+        return ConnectNode(node_id=node_id, threshold=threshold)
+
+    def sys_reembed(self, args):
+        return SysReembed()
+
+    def sys_status(self, args):
+        return SysStatus()
 
     def sys_contradictions(self, args):
         where = self._find(args, WhereClause)
@@ -764,3 +895,17 @@ class DSLTransformer(Transformer):
                 elif a[0] == "expires_at":
                     exp_at = a[1]
         return exp_in, exp_at
+
+    def _find_vector(self, args):
+        """Extract vector from args. Returns list[float] or None."""
+        for a in args:
+            if isinstance(a, tuple) and a[0] == "vector":
+                return a[1]
+        return None
+
+    def _find_document(self, args):
+        """Extract document text from args. Returns str or None."""
+        for a in args:
+            if isinstance(a, tuple) and a[0] == "document":
+                return a[1]
+        return None

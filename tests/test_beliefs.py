@@ -2,7 +2,7 @@
 import time
 import pytest
 from graphstore import GraphStore
-from graphstore.errors import NodeNotFound
+from graphstore.core.errors import NodeNotFound
 
 
 class TestAssert:

@@ -10,11 +10,11 @@ from __future__ import annotations
 import time
 import numpy as np
 
-from graphstore.edges import EdgeMatrices
-from graphstore.errors import GraphStoreError, NodeExists, NodeNotFound
-from graphstore.memory import DEFAULT_CEILING_BYTES, check_ceiling
-from graphstore.columns import ColumnStore
-from graphstore.strings import StringTable
+from graphstore.core.edges import EdgeMatrices
+from graphstore.core.errors import GraphStoreError, NodeExists, NodeNotFound
+from graphstore.core.memory import DEFAULT_CEILING_BYTES, check_ceiling
+from graphstore.core.columns import ColumnStore
+from graphstore.core.strings import StringTable
 
 
 class CoreStore:

@@ -2,7 +2,7 @@ from pathlib import Path
 from collections import OrderedDict
 from lark import Lark
 from graphstore.dsl.transformer import DSLTransformer
-from graphstore.errors import QueryError
+from graphstore.core.errors import QueryError
 
 _grammar_path = Path(__file__).parent / "grammar.lark"
 _grammar = _grammar_path.read_text()
