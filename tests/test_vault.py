@@ -245,3 +245,137 @@ Stable note
         assert result["skipped"] >= 1
         assert result["synced"] == 0
         g.close()
+
+
+class TestVaultDSL:
+    def test_vault_new(self, tmp_path):
+        from graphstore import GraphStore
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(tmp_path / "notes"), embedder=None)
+        result = g.execute('VAULT NEW "My Research" KIND "memory" TAGS "ai,ml"')
+        assert result.data["slug"] == "my-research"
+        assert (tmp_path / "notes" / "my-research.md").exists()
+        # Node should exist in graph
+        node = g.execute('NODE "note:my-research"')
+        assert node.data is not None
+        assert node.data["note_kind"] == "memory"
+        g.close()
+
+    def test_vault_read(self, tmp_path):
+        from graphstore import GraphStore
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(tmp_path / "notes"), embedder=None)
+        g.execute('VAULT NEW "Read Test" KIND "fact"')
+        result = g.execute('VAULT READ "Read Test"')
+        assert result.kind == "note"
+        assert "## Summary" in result.data["content"]
+        g.close()
+
+    def test_vault_write_section(self, tmp_path):
+        from graphstore import GraphStore
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(tmp_path / "notes"), embedder=None)
+        g.execute('VAULT NEW "Write Test"')
+        g.execute('VAULT WRITE "Write Test" SECTION "body" CONTENT "Updated body content"')
+        result = g.execute('VAULT READ "Write Test"')
+        assert "Updated body content" in result.data["content"]
+        g.close()
+
+    def test_vault_append_section(self, tmp_path):
+        from graphstore import GraphStore
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(tmp_path / "notes"), embedder=None)
+        g.execute('VAULT NEW "Append Test"')
+        g.execute('VAULT APPEND "Append Test" SECTION "body" CONTENT "Line 1"')
+        g.execute('VAULT APPEND "Append Test" SECTION "body" CONTENT "Line 2"')
+        result = g.execute('VAULT READ "Append Test"')
+        assert "Line 1" in result.data["content"]
+        assert "Line 2" in result.data["content"]
+        g.close()
+
+    def test_vault_list(self, tmp_path):
+        from graphstore import GraphStore
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(tmp_path / "notes"), embedder=None)
+        g.execute('VAULT NEW "Note A" KIND "memory"')
+        g.execute('VAULT NEW "Note B" KIND "instruction"')
+        result = g.execute('VAULT LIST')
+        assert result.count >= 2
+        g.close()
+
+    def test_vault_list_with_where(self, tmp_path):
+        from graphstore import GraphStore
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(tmp_path / "notes"), embedder=None)
+        g.execute('VAULT NEW "Memory Note" KIND "memory"')
+        g.execute('VAULT NEW "Instruction Note" KIND "instruction"')
+        result = g.execute('VAULT LIST WHERE note_kind = "instruction"')
+        assert result.count == 1
+        assert result.data[0]["note_kind"] == "instruction"
+        g.close()
+
+    def test_vault_sync(self, tmp_path):
+        from graphstore import GraphStore
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(tmp_path / "notes"), embedder=None)
+        result = g.execute('VAULT SYNC')
+        assert "synced" in result.data
+        g.close()
+
+    def test_vault_daily(self, tmp_path):
+        from graphstore import GraphStore
+        import datetime
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(tmp_path / "notes"), embedder=None)
+        result = g.execute('VAULT DAILY')
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        assert result.data["slug"] == today
+        g.close()
+
+    def test_vault_archive(self, tmp_path):
+        from graphstore import GraphStore
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(tmp_path / "notes"), embedder=None)
+        g.execute('VAULT NEW "Archive Me"')
+        g.execute('VAULT ARCHIVE "Archive Me"')
+        node = g.execute('NODE "note:archive-me"')
+        assert node.data["status"] == "archived"
+        g.close()
+
+    def test_vault_search_fallback(self, tmp_path):
+        from graphstore import GraphStore
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(tmp_path / "notes"), embedder=None)
+        g.execute('VAULT NEW "AI Research" KIND "memory"')
+        # Write a summary that's searchable
+        g.execute('VAULT WRITE "AI Research" SECTION "summary" CONTENT "Deep learning transformer models"')
+        result = g.execute('VAULT SEARCH "transformer" LIMIT 5')
+        assert result.count >= 1
+        g.close()
+
+    def test_vault_without_vault_raises(self, tmp_path):
+        import pytest as _pytest
+        from graphstore import GraphStore
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        with _pytest.raises(Exception, match="[Vv]ault"):
+            g.execute('VAULT NEW "test"')
+        g.close()
+
+    def test_vault_backlinks(self, tmp_path):
+        from graphstore import GraphStore
+        vault_path = tmp_path / "notes"
+        vault_path.mkdir()
+        # Create notes with wikilinks
+        (vault_path / "note-a.md").write_text("""---
+kind: memory
+status: active
+---
+
+## Summary
+Note A
+
+## Links
+- [[note-b]]
+""")
+        (vault_path / "note-b.md").write_text("""---
+kind: memory
+status: active
+---
+
+## Summary
+Note B
+""")
+        g = GraphStore(path=str(tmp_path / "db"), vault=str(vault_path), embedder=None)
+        result = g.execute('VAULT BACKLINKS "note-b"')
+        assert result.count >= 1
+        g.close()
