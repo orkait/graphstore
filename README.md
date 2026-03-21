@@ -154,6 +154,39 @@ SYS STATS DOCUMENTS
 </details>
 
 <details>
+<summary><strong>Vault</strong> - Obsidian-compatible markdown notes for agent memory</summary>
+
+```python
+g = GraphStore(path="./brain", vault="./notes")
+
+# Agent writes notes as structured markdown files
+g.execute('VAULT NEW "Project Requirements" KIND "context" TAGS "project,specs"')
+g.execute('VAULT WRITE "Project Requirements" SECTION "body" CONTENT "The app must support..."')
+
+# Vault files are human-readable in Obsidian, auto-indexed in graphstore
+g.execute('VAULT SEARCH "deployment requirements" LIMIT 5')
+
+# Load standing instructions at session start
+instructions = g.execute('VAULT LIST WHERE note_kind = "instruction" AND status = "active"')
+
+# Daily working notes
+g.execute('VAULT DAILY')
+g.execute('VAULT APPEND "2026-03-21" SECTION "body" CONTENT "Completed task X"')
+
+# Facts auto-assert with confidence
+# (note with kind: fact in frontmatter auto-sets __confidence__)
+g.execute('VAULT SYNC')  # re-index after external edits
+
+# Wikilinks become graph edges
+# [[related-note]] in Links section → EDGES FROM "note:x"
+g.execute('VAULT BACKLINKS "my-note"')
+```
+
+Note kinds: `instruction`, `goal`, `context`, `plan`, `memory`, `artifact`, `log`, `daily`, `entity`, `fact`, `scratch`
+
+</details>
+
+<details>
 <summary><strong>Hypothesis Testing</strong> - snapshot, explore, rollback</summary>
 
 ```sql
@@ -301,6 +334,24 @@ SYS SLOW QUERIES LIMIT 10 / SYS FAILED QUERIES LIMIT 10
 
 </details>
 
+<details>
+<summary><strong>Vault</strong> - markdown note operations</summary>
+
+```sql
+VAULT NEW "title" KIND "memory" TAGS "tag1,tag2"
+VAULT READ "title"
+VAULT WRITE "title" SECTION "body" CONTENT "..."
+VAULT APPEND "title" SECTION "body" CONTENT "..."
+VAULT SEARCH "query" LIMIT 10
+VAULT BACKLINKS "title"
+VAULT LIST [WHERE ...] [ORDER BY ...] [LIMIT n]
+VAULT SYNC
+VAULT DAILY
+VAULT ARCHIVE "title"
+```
+
+</details>
+
 ## ⚡ Performance (100k nodes)
 
 | Operation | Time |
@@ -381,6 +432,11 @@ graphstore/
 ├── voice/                    # Speech (opt-in)
 │   ├── stt.py                # Moonshine STT
 │   └── tts.py                # Piper TTS
+├── vault/                    # Markdown notes
+│   ├── parser.py             # Frontmatter, sections, wikilinks
+│   ├── manager.py            # Note CRUD (new/read/write/append)
+│   ├── sync.py               # Vault dir → graphstore sync
+│   └── executor.py           # VAULT DSL command handler
 ├── registry/                 # Model management
 │   ├── models.py             # Supported models config
 │   ├── installer.py          # Download + verify + smoke test

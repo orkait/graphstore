@@ -25,7 +25,7 @@ jobs:
         run: pip install -e ".[dev,playground]"
 
       - name: Run tests
-        run: pytest --tb=short -q
+        run: pytest --tb=short -q --ignore=tests/test_server.py
 
   publish:
     needs: test

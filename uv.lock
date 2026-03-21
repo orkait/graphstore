@@ -650,13 +650,16 @@ wheels = [
 
 [[package]]
 name = "graphstore"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "lark" },
+    { name = "markitdown" },
     { name = "model2vec" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pymupdf" },
+    { name = "pymupdf4llm" },
     { name = "pyyaml" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -670,12 +673,9 @@ dev = [
     { name = "pytest-benchmark" },
     { name = "pytest-cov" },
 ]
-ingest = [
+ingest-pro = [
     { name = "docling" },
-    { name = "markitdown" },
     { name = "openai" },
-    { name = "pymupdf" },
-    { name = "pymupdf4llm" },
 ]
 playground = [
     { name = "fastapi" },
@@ -684,16 +684,16 @@ playground = [
 
 [package.metadata]
 requires-dist = [
-    { name = "docling", marker = "extra == 'ingest'", specifier = ">=2.0" },
+    { name = "docling", marker = "extra == 'ingest-pro'", specifier = ">=2.0" },
     { name = "fastapi", marker = "extra == 'playground'", specifier = ">=0.100" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "lark", specifier = ">=1.1" },
-    { name = "markitdown", marker = "extra == 'ingest'", specifier = ">=0.1" },
+    { name = "markitdown", specifier = ">=0.1" },
     { name = "model2vec", specifier = ">=0.4" },
     { name = "numpy", specifier = ">=1.24" },
-    { name = "openai", marker = "extra == 'ingest'", specifier = ">=1.0" },
-    { name = "pymupdf", marker = "extra == 'ingest'", specifier = ">=1.20" },
-    { name = "pymupdf4llm", marker = "extra == 'ingest'", specifier = ">=0.1" },
+    { name = "openai", marker = "extra == 'ingest-pro'", specifier = ">=1.0" },
+    { name = "pymupdf", specifier = ">=1.20" },
+    { name = "pymupdf4llm", specifier = ">=0.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0" },
     { name = "pytest-benchmark", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
@@ -702,7 +702,7 @@ requires-dist = [
     { name = "usearch", specifier = ">=2.0" },
     { name = "uvicorn", marker = "extra == 'playground'", specifier = ">=0.20" },
 ]
-provides-extras = ["dev", "playground", "ingest"]
+provides-extras = ["dev", "playground", "ingest-pro"]
 
 [[package]]
 name = "h11"
