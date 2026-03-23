@@ -3,16 +3,21 @@
 import numpy as np
 from graphstore.embedding.base import Embedder
 
+_model_cache: dict[str, object] = {}
+
 
 class Model2VecEmbedder(Embedder):
     """Default embedder. 30MB, numpy-only, zero-config.
 
     Symmetric model - queries and documents use the same encoding.
+    Model instance is cached at module level so repeated construction is free.
     """
 
     def __init__(self, model_name: str = "minishlab/M2V_base_output"):
-        from model2vec import StaticModel
-        self._model = StaticModel.from_pretrained(model_name)
+        if model_name not in _model_cache:
+            from model2vec import StaticModel
+            _model_cache[model_name] = StaticModel.from_pretrained(model_name)
+        self._model = _model_cache[model_name]
         self._name = "model2vec"
 
     @property

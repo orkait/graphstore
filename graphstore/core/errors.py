@@ -112,3 +112,10 @@ class EmbedderRequired(VectorError):
 class VectorNotFound(VectorError):
     """Node has no stored vector."""
     pass
+
+
+class OptimizationInProgress(GraphStoreError):
+    """Operation rejected because self-balancing is in progress."""
+
+    def __init__(self) -> None:
+        super().__init__("Self-balance in progress. Retry after optimization completes.")

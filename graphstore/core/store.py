@@ -20,13 +20,13 @@ from graphstore.core.strings import StringTable
 class CoreStore:
     """In-memory graph store backed by numpy arrays and sparse matrices."""
 
-    def __init__(self, ceiling_bytes: int = DEFAULT_CEILING_BYTES):
+    def __init__(self, ceiling_bytes: int = DEFAULT_CEILING_BYTES, capacity: int = 1024):
         self.string_table = StringTable()
         self._edge_matrices = EdgeMatrices()
         self._ceiling_bytes = ceiling_bytes
 
         # Node storage - pre-allocate
-        self._capacity = 1024
+        self._capacity = capacity
         self._count = 0  # number of live nodes (not counting tombstones)
         self._next_slot = 0  # next slot to fill
         self.node_ids = np.full(self._capacity, -1, dtype=np.int32)
@@ -51,6 +51,7 @@ class CoreStore:
 
         # Named snapshots storage (for SYS SNAPSHOT/ROLLBACK)
         self._snapshots: dict[str, dict] = {}
+        self._tombstone_mask_cache: tuple[int, int, np.ndarray] | None = None  # (n, len(tombstones), mask)
 
     # -- slot management -----------------------------------------------------
 
@@ -58,6 +59,7 @@ class CoreStore:
         """Get next available slot, reusing tombstones or expanding."""
         if self.node_tombstones:
             slot = self.node_tombstones.pop()
+            self._tombstone_mask_cache = None
             return slot
         if self._next_slot >= self._capacity:
             self._grow()
@@ -211,6 +213,7 @@ class CoreStore:
         # Tombstone
         self.columns.clear(slot)
         self.node_tombstones.add(slot)
+        self._tombstone_mask_cache = None
         del self.id_to_slot[str_id]
         self._count -= 1
 
@@ -279,7 +282,7 @@ class CoreStore:
         self._rebuild_edges()
 
     def get_edges_from(self, id: str, kind: str | None = None) -> list[dict]:
-        """Get outgoing edges from a node."""
+        """Get outgoing edges from a node. Uses CSR for neighbor lookup."""
         self._ensure_edges_built()
         if id not in self.string_table:
             return []
@@ -289,10 +292,14 @@ class CoreStore:
             return []
 
         result = []
-        types_to_check = [kind] if kind else self.edge_matrices.edge_types
+        types_to_check = [kind] if kind else self._edge_matrices.edge_types
         for etype in types_to_check:
+            neighbors = self._edge_matrices.neighbors_out(slot, etype)
+            if len(neighbors) == 0:
+                continue
+            neighbor_set = set(int(n) for n in neighbors)
             for s, t, d in self._edges_by_type.get(etype, []):
-                if s == slot:
+                if s == slot and t in neighbor_set:
                     tgt_id = self._slot_to_id(t)
                     if tgt_id is not None:
                         result.append({"source": id, "target": tgt_id, "kind": etype, **d})
@@ -322,6 +329,7 @@ class CoreStore:
 
     def _cascade_delete_edges(self, slot: int):
         """Remove all edges involving this slot from pending edges."""
+        any_removed = False
         for etype in list(self._edges_by_type.keys()):
             old_len = len(self._edges_by_type[etype])
             self._edges_by_type[etype] = [
@@ -332,12 +340,13 @@ class CoreStore:
             if not self._edges_by_type[etype]:
                 del self._edges_by_type[etype]
             if len(self._edges_by_type.get(etype, [])) != old_len:
-                # Rebuild edge_keys set from scratch (simpler than tracking removals)
-                self._edge_keys = {
-                    (s, t, k)
-                    for k, edges in self._edges_by_type.items()
-                    for s, t, _d in edges
-                }
+                any_removed = True
+        if any_removed:
+            self._edge_keys = {
+                (s, t, k)
+                for k, edges in self._edges_by_type.items()
+                for s, t, _d in edges
+            }
         self._edges_dirty = True
         self._ensure_edges_built()
 
@@ -407,16 +416,27 @@ class CoreStore:
                     result.append({"source": src_id, "target": tgt_id, "kind": etype, **data})
         return result
 
+    def _tombstone_mask(self, n: int) -> np.ndarray:
+        """Cached tombstone boolean mask. Invalidated when tombstones change."""
+        if not self.node_tombstones:
+            return np.zeros(n, dtype=bool)
+        cache = self._tombstone_mask_cache
+        tomb_len = len(self.node_tombstones)
+        if cache is not None and cache[0] == n and cache[1] == tomb_len:
+            return cache[2]
+        tomb_arr = np.array(list(self.node_tombstones), dtype=np.int32)
+        mask = np.zeros(n, dtype=bool)
+        valid = tomb_arr[tomb_arr < n]
+        if len(valid) > 0:
+            mask[valid] = True
+        self._tombstone_mask_cache = (n, tomb_len, mask)
+        return mask
+
     def compute_live_mask(self, n: int) -> np.ndarray:
         """Unified visibility: tombstones + TTL + retracted."""
         mask = self.node_ids[:n] >= 0
         if self.node_tombstones:
-            tomb_arr = np.array(list(self.node_tombstones), dtype=np.int32)
-            tomb_mask = np.zeros(n, dtype=bool)
-            valid = tomb_arr[tomb_arr < n]
-            if len(valid) > 0:
-                tomb_mask[valid] = True
-            mask = mask & ~tomb_mask
+            mask = mask & ~self._tombstone_mask(n)
         expires = self.columns.get_column("__expires_at__", n)
         if expires is not None:
             col, pres, _ = expires
@@ -481,21 +501,25 @@ class CoreStore:
         str_id = int(self.node_ids[slot])
         if str_id == -1:
             return None
+        lookup = self.string_table.lookup
+        cols = self.columns._columns
+        pres = self.columns._presence
+        dtypes = self.columns._dtypes
         d = {
-            "id": self.string_table.lookup(str_id),
-            "kind": self.string_table.lookup(int(self.node_kinds[slot])),
+            "id": lookup(str_id),
+            "kind": lookup(int(self.node_kinds[slot])),
         }
-        for field in self.columns._columns:
-            if field.startswith("__") and field.endswith("__"):
-                continue  # skip reserved columns in user-facing output
-            if self.columns._presence[field][slot]:
-                dtype = self.columns._dtypes[field]
-                raw = self.columns._columns[field][slot]
+        for field, col in cols.items():
+            if field[0] == "_" and field[-1] == "_":
+                continue
+            if pres[field][slot]:
+                dtype = dtypes[field]
+                raw = col[slot]
                 if dtype == "int32_interned":
-                    d[field] = self.string_table.lookup(int(raw))
+                    d[field] = lookup(int(raw))
                 elif dtype == "float64":
                     d[field] = float(raw)
-                elif dtype == "int64":
+                else:
                     d[field] = int(raw)
         return d
 

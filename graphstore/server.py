@@ -37,13 +37,16 @@ def _get_store() -> GraphStore:
     global _store
     if _store is None:
         db_path = os.environ.get("GRAPHSTORE_DB_PATH")
-        # Security: when running as a server, restrict INGEST to cwd
-        # to prevent path traversal via HTTP API
+        config_path = os.environ.get("GRAPHSTORE_CONFIG")
         ingest_root = os.environ.get("GRAPHSTORE_INGEST_ROOT", os.getcwd())
-        _store = GraphStore(
-            path=db_path if db_path else None,
-            ingest_root=ingest_root,
-        )
+        kwargs: dict = {}
+        if db_path:
+            kwargs["path"] = db_path
+        if config_path:
+            kwargs["config_path"] = config_path
+        if ingest_root:
+            kwargs["ingest_root"] = ingest_root
+        _store = GraphStore(**kwargs)
     return _store
 
 

@@ -28,8 +28,12 @@ Six engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vect
 | **Belief tracking** | `ASSERT "fact:x" CONFIDENCE 0.9` / `RETRACT "fact:x"` | 9 μs |
 | **Contradiction detection** | `SYS CONTRADICTIONS WHERE kind = "belief" FIELD value GROUP BY topic` | 981 μs |
 | **Hypothesis testing** | `SYS SNAPSHOT "before"` ... `SYS ROLLBACK TO "before"` | 1.8 ms |
-| **Document ingestion** | `INGEST "report.pdf"` (auto-parse, chunk, embed, wire) | < 2 sec |
+| **Lexical recall** | `LEXICAL SEARCH "exact phrase" LIMIT 10` | 52 μs |
+| **Document ingestion** | `INGEST "report.pdf"` (auto-parse, section hierarchy, embed, wire) | < 2 sec |
+| **Visual memory** | `INGEST "photo.png" USING VISION "smolvlm2"` (VLM description) | < 3 sec |
 | **Cross-doc connections** | `SYS CONNECT` (auto-wire similar chunks across documents) | < 5 sec |
+| **Blob lifecycle** | `SYS RETAIN` (warm -> archived -> deleted by retention policy) | 89 μs |
+| **Hard forget** | `FORGET NODE "mem1"` (blob + vector + memory, irreversible) | 12 μs |
 | **Working memory** | `CREATE NODE ... EXPIRES IN 30m` + `SYS EXPIRE` | 9 μs |
 | **Temporal queries** | `NODES WHERE __created_at__ > NOW() - 7d` | 102 μs |
 | **Isolated reasoning** | `BIND CONTEXT "session"` ... `DISCARD CONTEXT "session"` | 72 μs |
@@ -115,6 +119,8 @@ SIMILAR TO "European travel" LIMIT 10
 SIMILAR TO "revenue growth" LIMIT 10 WHERE kind = "chunk" AND confidence > 0.5
 SIMILAR TO NODE "concept:paris" LIMIT 10
 SIMILAR TO [0.12, -0.34, 0.56, ...] LIMIT 10
+LEXICAL SEARCH "exact phrase" LIMIT 10         -- BM25 full-text search
+LEXICAL SEARCH "error log" WHERE kind = "chunk" -- with filters
 SYS DUPLICATES THRESHOLD 0.95
 SYS CONNECT THRESHOLD 0.85
 ```
@@ -122,24 +128,25 @@ SYS CONNECT THRESHOLD 0.85
 </details>
 
 <details>
-<summary><strong>Document Ingestion</strong> - PDF, Word, text, images, audio</summary>
+<summary><strong>Document Ingestion</strong> - PDF, Word, text, images, audio with section hierarchy</summary>
 
 ```sql
 -- Tiered parsing: MarkItDown → PyMuPDF4LLM → Docling → VLM
 INGEST "report.pdf" AS "doc:q3" KIND "report"
 INGEST "notes.docx" USING markitdown
 INGEST "financials.pdf" USING docling
-INGEST "slides.pptx" USING VISION "smolvlm2"
+
+-- Standalone images with VLM description
+INGEST "diagram.png" USING VISION "smolvlm2"
+
+-- Documents auto-build: doc → section → chunk hierarchy
+-- Section nodes carry __confidence__ = 0.6 (inferred structure)
 
 -- Fetch full document text (from disk, on demand)
 NODE "doc:q3:chunk:7" WITH DOCUMENT
 
 -- Auto-wire similar chunks across all documents
 SYS CONNECT
-
--- System info
-SYS INGESTORS
-SYS STATS DOCUMENTS
 ```
 
 </details>
@@ -174,6 +181,24 @@ g.execute('VAULT BACKLINKS "my-note"')
 ```
 
 Note kinds: `instruction`, `goal`, `context`, `plan`, `memory`, `artifact`, `log`, `daily`, `entity`, `fact`, `scratch`
+
+</details>
+
+<details>
+<summary><strong>Blob Lifecycle + Forgetting</strong> - retention policy, hard delete</summary>
+
+```sql
+-- Hard forget: removes blob + vector + graph node (irreversible)
+FORGET NODE "memory:old"          -- cascades to children for documents
+
+-- Retention policy scan (warm → archived → blob deleted by age)
+SYS RETAIN
+-- Configurable: GraphStore(retention={"blob_warm_days": 30, "blob_archive_days": 90, "blob_delete_days": 365})
+
+-- Blob deletion != memory forgetting:
+-- SYS RETAIN deletes bytes but keeps the graph node + summary
+-- FORGET NODE removes everything
+```
 
 </details>
 
@@ -272,6 +297,7 @@ AGGREGATE NODES GROUP BY kind SELECT COUNT()
 RECALL FROM "concept:x" DEPTH 3 LIMIT 10
 SIMILAR TO "search text" LIMIT 10
 SIMILAR TO [0.1, 0.2, ...] LIMIT 10 WHERE kind = "memory"
+LEXICAL SEARCH "exact phrase" LIMIT 10
 WHAT IF RETRACT "belief:x"
 ```
 
@@ -296,6 +322,7 @@ MERGE NODE "old" INTO "canonical"
 PROPAGATE "belief:x" FIELD confidence DEPTH 3
 INGEST "report.pdf" AS "doc:q3" KIND "report"
 CONNECT NODE "chunk:7" THRESHOLD 0.8
+FORGET NODE "old-memory"
 BIND CONTEXT "session-1"
 DISCARD CONTEXT "session-1"
 BEGIN ... COMMIT
@@ -318,6 +345,7 @@ SYS EXPIRE / SYS EXPIRE WHERE kind = "working"
 SYS SNAPSHOT "name" / SYS ROLLBACK TO "name" / SYS SNAPSHOTS
 SYS EMBEDDERS / SYS SET EMBEDDER "embeddinggemma-300m" / SYS REEMBED
 SYS INGESTORS
+SYS RETAIN
 SYS CHECKPOINT / SYS REBUILD INDICES / SYS CLEAR CACHE
 SYS EXPLAIN TRAVERSE FROM "a" DEPTH 5
 SYS SLOW QUERIES LIMIT 10 / SYS FAILED QUERIES LIMIT 10
@@ -366,8 +394,13 @@ g = GraphStore(
     path="./brain",          # persistence directory (None = in-memory)
     ceiling_mb=256,          # graph memory ceiling
     embedder="default",      # "default" (model2vec) or custom Embedder
-    vision_model=None,       # "smolvlm2" or "qwen3-vl" (opt-in)
     voice=False,             # True to enable STT/TTS (opt-in)
+    vault="./notes",         # markdown vault directory (None = disabled)
+    retention={              # blob lifecycle policy
+        "blob_warm_days": 30,
+        "blob_archive_days": 90,
+        "blob_delete_days": 365,
+    },
 )
 ```
 
