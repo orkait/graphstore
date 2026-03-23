@@ -428,7 +428,9 @@ graphstore/
 │   ├── parser.py             # Parser + LRU cache
 │   ├── transformer.py        # Parse tree → AST
 │   ├── ast_nodes.py          # 60+ AST dataclasses
-│   ├── executor_base.py      # Shared: live_mask, eval_where, column filters
+│   ├── executor_base.py      # ExecutorBase: __init__, execute(), mixin wiring
+│   ├── visibility.py         # VisibilityMixin: live-mask, slot visibility, TTL
+│   ├── filtering.py          # FilteringMixin: WHERE eval, column accel, index helpers
 │   ├── executor_reads.py     # NODES, RECALL, SIMILAR TO, AGGREGATE, MATCH
 │   ├── executor_writes.py    # CREATE, ASSERT, RETRACT, INGEST, MERGE, BATCH
 │   ├── executor_system.py    # SYS commands
