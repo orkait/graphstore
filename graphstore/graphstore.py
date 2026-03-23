@@ -17,6 +17,7 @@ from graphstore.persistence.serializer import checkpoint as _checkpoint_fn
 from graphstore.persistence.deserializer import load as _load_fn
 from graphstore.core.errors import GraphStoreError
 from graphstore.core.memory import estimate as _estimate_memory
+from graphstore.config import GraphStoreConfig, load_config, merge_kwargs
 
 # All system AST types
 _SYS_TYPES = tuple(
@@ -37,19 +38,44 @@ class GraphStore:
         allow_system_queries: If False, SYS queries raise PermissionError.
     """
 
-    def __init__(self, path: str | None = None, ceiling_mb: int = 256,
-                 embedder="default", allow_system_queries: bool = True,
-                 voice: bool = False, ingest_root: str | None = None,
-                 vault: str | None = None, retention: dict | None = None):
+    _UNSET = object()
+
+    def __init__(self, path: str | None = None, ceiling_mb=_UNSET,
+                 embedder=_UNSET, allow_system_queries: bool = True,
+                 voice: bool = False, ingest_root=_UNSET,
+                 vault=_UNSET, retention=_UNSET,
+                 config: GraphStoreConfig | None = None,
+                 config_path: str | None = None):
+        # Load config: explicit > file > defaults, then overlay kwargs
+        if config is not None:
+            self._config = config
+        elif config_path is not None:
+            self._config = load_config(config_path)
+        elif path is not None:
+            self._config = load_config(Path(path) / "graphstore.json")
+        else:
+            self._config = GraphStoreConfig()
+
+        # Only merge kwargs that were explicitly passed (not sentinel)
+        overrides = {}
+        if ceiling_mb is not self._UNSET:
+            overrides["ceiling_mb"] = ceiling_mb
+        if embedder is not self._UNSET:
+            overrides["embedder"] = embedder
+        if ingest_root is not self._UNSET:
+            overrides["ingest_root"] = ingest_root
+        if vault is not self._UNSET:
+            overrides["vault"] = vault
+        if retention is not self._UNSET:
+            overrides["retention"] = retention
+        if overrides:
+            self._config = merge_kwargs(self._config, **overrides)
+        cfg = self._config
+
         self._path = Path(path) if path else None
-        self._ceiling_bytes = ceiling_mb * 1_000_000
+        self._ceiling_bytes = cfg.core.ceiling_mb * 1_000_000
         self._allow_system = allow_system_queries
-        self._ingest_root = ingest_root
-        self._retention = retention or {
-            "blob_warm_days": 30,
-            "blob_archive_days": 90,
-            "blob_delete_days": 365,
-        }
+        self._ingest_root = cfg.server.ingest_root
         self._conn: sqlite3.Connection | None = None
         self._stt = None
         self._tts = None
@@ -64,16 +90,19 @@ class GraphStore:
                 pass  # Voice not installed; speak/listen will raise on use
 
         # Initialize embedder
-        if embedder == "default":
+        emb_cfg = cfg.vector.embedder
+        if embedder is not self._UNSET and embedder is not None and not isinstance(embedder, str):
+            self._embedder = embedder  # custom Embedder instance
+        elif emb_cfg == "none":
+            self._embedder = None
+        elif emb_cfg in ("default", "model2vec"):
             try:
                 from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
                 self._embedder = Model2VecEmbedder()
             except Exception:
                 self._embedder = None
-        elif embedder is None:
-            self._embedder = None
         else:
-            self._embedder = embedder  # custom Embedder instance
+            self._embedder = None
 
         # Vector store (lazy init on first vector operation)
         self._vector_store = None
@@ -92,7 +121,8 @@ class GraphStore:
             if hasattr(self._store, 'vectors') and self._store.vectors is not None:
                 self._vector_store = self._store.vectors
         else:
-            self._store = CoreStore(ceiling_bytes=self._ceiling_bytes)
+            self._store = CoreStore(ceiling_bytes=self._ceiling_bytes,
+                                    capacity=cfg.core.initial_capacity)
             self._schema = SchemaRegistry()
 
         # DocumentStore: separate SQLite, always on disk
@@ -113,22 +143,29 @@ class GraphStore:
                                   document_store=self._document_store,
                                   ingest_root=self._ingest_root)
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
+        self._executor.cost_threshold = cfg.dsl.cost_threshold
+        retention_dict = {
+            "blob_warm_days": cfg.retention.blob_warm_days,
+            "blob_archive_days": cfg.retention.blob_archive_days,
+            "blob_delete_days": cfg.retention.blob_delete_days,
+        }
         self._sys_executor = SystemExecutor(self._store, self._schema, self._conn,
                                                embedder=self._embedder,
                                                vector_store=self._vector_store,
                                                document_store=self._document_store,
-                                               retention=self._retention)
+                                               retention=retention_dict)
 
         # Replay WAL (must happen after executor is created)
         if self._path and self._conn:
             self._replay_wal()
 
         # Vault: markdown note system
-        if vault:
+        vault_path = cfg.vault.path if cfg.vault.enabled else None
+        if vault_path:
             from graphstore.vault.manager import VaultManager
             from graphstore.vault.sync import VaultSync
             from graphstore.vault.executor import VaultExecutor
-            self._vault_manager = VaultManager(vault)
+            self._vault_manager = VaultManager(vault_path)
             self._vault_sync = VaultSync(
                 self._vault_manager, self._store, self._schema,
                 self._embedder, self._vector_store, self._document_store
@@ -307,14 +344,13 @@ class GraphStore:
 
     # --- Internal ---
 
-    _WAL_HARD_LIMIT = 100_000  # max WAL entries before rejecting writes
-
     def _wal_append(self, statement: str):
         """Append a mutation to the WAL table. Rejects if WAL exceeds hard limit."""
         conn = self._conn
+        wal_limit = self._config.persistence.wal_hard_limit
         if conn is not None:
             row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
-            if row and row[0] >= self._WAL_HARD_LIMIT:
+            if row and row[0] >= wal_limit:
                 # Try checkpoint first to clear WAL
                 try:
                     self.checkpoint()
@@ -322,9 +358,9 @@ class GraphStore:
                     pass
                 # Re-check after checkpoint
                 row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
-                if row and row[0] >= self._WAL_HARD_LIMIT:
+                if row and row[0] >= wal_limit:
                     raise GraphStoreError(
-                        f"WAL exceeds hard limit ({self._WAL_HARD_LIMIT} entries). "
+                        f"WAL exceeds hard limit ({wal_limit} entries). "
                         "Checkpoint failed - check disk space."
                     )
             conn.execute(
@@ -362,18 +398,17 @@ class GraphStore:
         if conn is None:
             return
         row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
-        if row and row[0] > 50_000:
+        if row and row[0] > self._config.persistence.auto_checkpoint_threshold:
             self.checkpoint()
-        # Log rotation: delete entries older than 7 days
         self._rotate_query_log()
 
     def _rotate_query_log(self):
-        """Delete query_log entries older than 7 days."""
+        """Delete old query_log entries based on config."""
         conn = self._conn
         if conn is None:
             return
         try:
-            cutoff = time.time() - 7 * 86400
+            cutoff = time.time() - self._config.persistence.log_retention_days * 86400
             conn.execute("DELETE FROM query_log WHERE timestamp < ?", (cutoff,))
             conn.commit()
         except Exception:

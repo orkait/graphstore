@@ -20,13 +20,13 @@ from graphstore.core.strings import StringTable
 class CoreStore:
     """In-memory graph store backed by numpy arrays and sparse matrices."""
 
-    def __init__(self, ceiling_bytes: int = DEFAULT_CEILING_BYTES):
+    def __init__(self, ceiling_bytes: int = DEFAULT_CEILING_BYTES, capacity: int = 1024):
         self.string_table = StringTable()
         self._edge_matrices = EdgeMatrices()
         self._ceiling_bytes = ceiling_bytes
 
         # Node storage - pre-allocate
-        self._capacity = 1024
+        self._capacity = capacity
         self._count = 0  # number of live nodes (not counting tombstones)
         self._next_slot = 0  # next slot to fill
         self.node_ids = np.full(self._capacity, -1, dtype=np.int32)

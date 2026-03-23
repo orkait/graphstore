@@ -16,6 +16,11 @@ from graphstore.core.errors import (
     VectorError, EmbedderRequired, VectorNotFound,
 )
 from graphstore.core.memory import DEFAULT_CEILING_BYTES
+from graphstore.config import (
+    GraphStoreConfig, load_config, save_config,
+    CoreConfig, VectorConfig, DocumentConfig, DslConfig,
+    VaultConfig, PersistenceConfig, RetentionConfig, ServerConfig,
+)
 
 __all__ = [
     "GraphStore", "CoreStore", "SchemaRegistry",
@@ -26,4 +31,7 @@ __all__ = [
     "CostThresholdExceeded", "BatchRollback", "AggregationError",
     "VectorError", "EmbedderRequired", "VectorNotFound",
     "DEFAULT_CEILING_BYTES",
+    "GraphStoreConfig", "load_config", "save_config",
+    "CoreConfig", "VectorConfig", "DocumentConfig", "DslConfig",
+    "VaultConfig", "PersistenceConfig", "RetentionConfig", "ServerConfig",
 ]
