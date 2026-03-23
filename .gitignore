@@ -9,3 +9,4 @@ build/
 docs/superpowers/
 logs/
 zen-graph-db/
+.worktrees/
