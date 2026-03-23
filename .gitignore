@@ -3,6 +3,9 @@ __pycache__/
 .venv/
 *.pyc
 .pytest_cache/
+.benchmarks/
 dist/
 build/
 docs/superpowers/
+logs/
+zen-graph-db/
