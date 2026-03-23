@@ -843,3 +843,29 @@ def test_wal_manager_no_inline_methods(tmp_path):
     assert not hasattr(gs, '_rotate_query_log'), "inline _rotate_query_log must be deleted"
     assert not hasattr(gs, '_log_query'), "inline _log_query must be deleted"
     gs.close()
+
+
+def test_graphstore_has_public_api():
+    """GraphStore must expose public methods so server.py does not need private access."""
+    from graphstore import GraphStore
+    gs = GraphStore()
+    assert hasattr(gs, 'get_all_nodes'), "missing get_all_nodes()"
+    assert hasattr(gs, 'get_all_edges'), "missing get_all_edges()"
+    assert hasattr(GraphStore, 'cost_threshold'), "missing cost_threshold property"
+    assert hasattr(GraphStore, 'ceiling_mb'), "missing ceiling_mb property"
+
+
+def test_cost_threshold_property():
+    from graphstore import GraphStore
+    gs = GraphStore()
+    original = gs.cost_threshold
+    gs.cost_threshold = 50_000
+    assert gs.cost_threshold == 50_000
+    gs.cost_threshold = original
+
+
+def test_ceiling_mb_property():
+    from graphstore import GraphStore
+    gs = GraphStore()
+    gs.ceiling_mb = 512
+    assert gs.ceiling_mb == 512
