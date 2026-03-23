@@ -129,6 +129,14 @@ class TestGraphStoreConfig:
         assert gs._config.core.ceiling_mb == 512
         gs.close()
 
+    def test_env_var_config_path(self, tmp_path, monkeypatch):
+        cfg_file = tmp_path / "external.json"
+        cfg_file.write_text('{"core": {"ceiling_mb": 77}}')
+        monkeypatch.setenv("GRAPHSTORE_CONFIG", str(cfg_file))
+        gs = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        assert gs._config.core.ceiling_mb == 77
+        gs.close()
+
     def test_explicit_config_object(self, tmp_path):
         cfg = GraphStoreConfig(core=CoreConfig(ceiling_mb=32))
         gs = GraphStore(path=str(tmp_path / "db"), embedder=None, config=cfg)

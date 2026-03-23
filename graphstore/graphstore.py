@@ -46,11 +46,13 @@ class GraphStore:
                  vault=_UNSET, retention=_UNSET,
                  config: GraphStoreConfig | None = None,
                  config_path: str | None = None):
-        # Load config: explicit > file > defaults, then overlay kwargs
+        # Load config: explicit object > explicit path > env var > db dir > defaults
         if config is not None:
             self._config = config
         elif config_path is not None:
             self._config = load_config(config_path)
+        elif os.environ.get("GRAPHSTORE_CONFIG"):
+            self._config = load_config(os.environ["GRAPHSTORE_CONFIG"])
         elif path is not None:
             self._config = load_config(Path(path) / "graphstore.json")
         else:
