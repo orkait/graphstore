@@ -16,6 +16,7 @@ from graphstore.persistence.database import open_database
 from graphstore.persistence.serializer import checkpoint as _checkpoint_fn
 from graphstore.persistence.deserializer import load as _load_fn
 from graphstore.core.errors import GraphStoreError, OptimizationInProgress
+from graphstore.dsl.handlers import is_write_op
 from graphstore.core.memory import estimate as _estimate_memory
 from graphstore.config import GraphStoreConfig, load_config, merge_kwargs
 
@@ -245,18 +246,7 @@ class GraphStore:
                         self._embedder_dirty = False
                         self._executor._embedder_dirty = False
             else:
-                # Check if it's a write - log to WAL before executing
-                is_write = isinstance(ast, (
-                    ast_nodes.CreateNode, ast_nodes.UpdateNode, ast_nodes.UpsertNode,
-                    ast_nodes.DeleteNode, ast_nodes.DeleteNodes,
-                    ast_nodes.CreateEdge, ast_nodes.UpdateEdge, ast_nodes.DeleteEdge, ast_nodes.DeleteEdges,
-                    ast_nodes.Increment, ast_nodes.Batch,
-                    ast_nodes.AssertStmt, ast_nodes.RetractStmt,
-                    ast_nodes.UpdateNodes, ast_nodes.MergeStmt,
-                    ast_nodes.PropagateStmt, ast_nodes.DiscardContext,
-                    ast_nodes.IngestStmt, ast_nodes.ConnectNode,
-                    ast_nodes.ForgetNode,
-                ))
+                is_write = is_write_op(ast)
 
                 if is_write and self._conn:
                     self._wal_append(query)
