@@ -821,3 +821,25 @@ class TestColumnPersistence:
         assert store2.columns._dtypes["weight"] == "float64"
         assert store2.columns._dtypes["name"] == "int32_interned"
         conn.close()
+
+
+def test_wal_manager_is_wired(tmp_path):
+    """GraphStore must have _wal attribute (WALManager)."""
+    from graphstore import GraphStore
+    gs = GraphStore(path=str(tmp_path))
+    assert hasattr(gs, '_wal'), "GraphStore must have _wal attribute (WALManager)"
+    from graphstore.wal import WALManager
+    assert isinstance(gs._wal, WALManager)
+    gs.close()
+
+
+def test_wal_manager_no_inline_methods(tmp_path):
+    """Inline WAL methods must be deleted from GraphStore."""
+    from graphstore import GraphStore
+    gs = GraphStore(path=str(tmp_path))
+    assert not hasattr(gs, '_wal_append'), "inline _wal_append must be deleted"
+    assert not hasattr(gs, '_replay_wal'), "inline _replay_wal must be deleted"
+    assert not hasattr(gs, '_maybe_auto_checkpoint'), "inline _maybe_auto_checkpoint must be deleted"
+    assert not hasattr(gs, '_rotate_query_log'), "inline _rotate_query_log must be deleted"
+    assert not hasattr(gs, '_log_query'), "inline _log_query must be deleted"
+    gs.close()
