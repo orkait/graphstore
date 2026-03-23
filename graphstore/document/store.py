@@ -68,6 +68,13 @@ class DocumentStore:
             (slot, content, content_type, len(content)))
         self._conn.commit()
 
+    def put_documents_batch(self, rows: list[tuple[int, bytes, str]]) -> None:
+        """Batch insert documents with single commit."""
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO documents (slot, content, content_type, size) VALUES (?, ?, ?, ?)",
+            [(slot, content, ctype, len(content)) for slot, content, ctype in rows])
+        self._conn.commit()
+
     def get_document(self, slot: int) -> tuple[bytes, str] | None:
         row = self._conn.execute(
             "SELECT content, content_type FROM documents WHERE slot = ?", (slot,)).fetchone()
@@ -75,6 +82,11 @@ class DocumentStore:
 
     def delete_document(self, slot: int) -> None:
         self._conn.execute("DELETE FROM documents WHERE slot = ?", (slot,))
+        self._conn.commit()
+
+    def delete_documents_batch(self, slots: list[int]) -> None:
+        """Batch delete documents with single commit."""
+        self._conn.executemany("DELETE FROM documents WHERE slot = ?", [(s,) for s in slots])
         self._conn.commit()
 
     def has_document(self, slot: int) -> bool:

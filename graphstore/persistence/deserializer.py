@@ -8,6 +8,8 @@ secondary indices, and tombstones.
 import json
 from urllib.parse import unquote
 
+import msgspec.json as mjson
+
 import numpy as np
 
 from graphstore.core.store import CoreStore
@@ -37,11 +39,11 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     if strings_row is None:
         return CoreStore(), SchemaRegistry()
 
-    string_table = StringTable.from_list(json.loads(strings_row[0]))
+    string_table = StringTable.from_list(mjson.decode(strings_row[0]))
 
     # Load store metadata
     meta_row = conn.execute("SELECT data FROM blobs WHERE key='store_meta'").fetchone()
-    meta = json.loads(meta_row[0])
+    meta = mjson.decode(meta_row[0])
 
     # Create store and set its internals
     store = CoreStore()
@@ -68,7 +70,7 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
 
     # Load tombstones
     tomb_row = conn.execute("SELECT data FROM blobs WHERE key='tombstones'").fetchone()
-    store.node_tombstones = set(json.loads(tomb_row[0]))
+    store.node_tombstones = set(mjson.decode(tomb_row[0]))
 
     # Rebuild id_to_slot from node_ids array
     store.id_to_slot = {}
@@ -85,7 +87,7 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     ).fetchall()
     for key, data in edge_rows:
         etype = key[len("raw_edges:"):]
-        edge_list = json.loads(data)
+        edge_list = mjson.decode(data)
         store._edges_by_type[etype] = [(s, t, d) for s, t, d in edge_list]
 
     # Rebuild edge keys set and edge matrices
@@ -98,7 +100,7 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
 
     # Load indexed field names (indices rebuilt after columns are loaded)
     idx_row = conn.execute("SELECT data FROM blobs WHERE key='indexed_fields'").fetchone()
-    indexed_fields = json.loads(idx_row[0]) if idx_row else []
+    indexed_fields = mjson.decode(idx_row[0]) if idx_row else []
 
     # Load column store data
     col_rows = conn.execute(
@@ -161,6 +163,6 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     schema = SchemaRegistry()
     schema_row = conn.execute("SELECT data FROM blobs WHERE key='schema'").fetchone()
     if schema_row:
-        schema = SchemaRegistry.from_dict(json.loads(schema_row[0]))
+        schema = SchemaRegistry.from_dict(mjson.decode(schema_row[0]))
 
     return store, schema

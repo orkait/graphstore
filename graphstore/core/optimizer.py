@@ -72,54 +72,61 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
 
     Renumbers all slot references: node_ids, node_kinds, columns,
     edges, id_to_slot, vectors, DocumentStore, FTS5.
+    Uses numpy fancy indexing for bulk array operations.
     """
     if not store.node_tombstones:
         return {"compacted": 0}
 
     n = store._next_slot
-    live_slots = []
-    for slot in range(n):
-        if slot not in store.node_tombstones and int(store.node_ids[slot]) >= 0:
-            live_slots.append(slot)
 
-    if len(live_slots) == n:
+    # Vectorized live slot detection
+    live_mask = store.node_ids[:n] >= 0
+    if store.node_tombstones:
+        tomb_arr = np.array(list(store.node_tombstones), dtype=np.int32)
+        valid = tomb_arr[tomb_arr < n]
+        if len(valid) > 0:
+            live_mask[valid] = False
+
+    live_slots_arr = np.nonzero(live_mask)[0]
+    new_count = len(live_slots_arr)
+
+    if new_count == n:
         return {"compacted": 0}
 
-    old_to_new: dict[int, int] = {}
-    for new_slot, old_slot in enumerate(live_slots):
-        old_to_new[old_slot] = new_slot
+    # Build remapping via numpy
+    old_to_new = np.full(n, -1, dtype=np.int32)
+    old_to_new[live_slots_arr] = np.arange(new_count, dtype=np.int32)
+    old_to_new_dict = {int(old): int(old_to_new[old]) for old in live_slots_arr}
 
-    new_count = len(live_slots)
     new_capacity = max(new_count * 2, store._capacity)
 
-    # Remap node arrays
+    # Remap node arrays via fancy indexing
     new_ids = np.full(new_capacity, -1, dtype=np.int32)
+    new_ids[:new_count] = store.node_ids[live_slots_arr]
     new_kinds = np.zeros(new_capacity, dtype=np.int32)
-    for old_slot, new_slot in old_to_new.items():
-        new_ids[new_slot] = store.node_ids[old_slot]
-        new_kinds[new_slot] = store.node_kinds[old_slot]
+    new_kinds[:new_count] = store.node_kinds[live_slots_arr]
 
-    # Remap columns
+    # Remap columns via fancy indexing (no Python loop over slots)
     for field in list(store.columns._columns.keys()):
         old_col = store.columns._columns[field]
         old_pres = store.columns._presence[field]
         dtype_str = store.columns._dtypes[field]
         new_col = store.columns._make_sentinel_array(dtype_str, new_capacity)
         new_pres = np.zeros(new_capacity, dtype=bool)
-        for old_slot, new_slot in old_to_new.items():
-            if old_slot < len(old_col):
-                new_col[new_slot] = old_col[old_slot]
-                new_pres[new_slot] = old_pres[old_slot]
+        new_col[:new_count] = old_col[live_slots_arr]
+        new_pres[:new_count] = old_pres[live_slots_arr]
         store.columns._columns[field] = new_col
         store.columns._presence[field] = new_pres
     store.columns._capacity = new_capacity
 
-    # Remap edges
+    # Remap edges using numpy lookup array
     for etype in list(store._edges_by_type.keys()):
         remapped = []
         for s, t, d in store._edges_by_type[etype]:
-            if s in old_to_new and t in old_to_new:
-                remapped.append((old_to_new[s], old_to_new[t], d))
+            ns = old_to_new[s] if s < n else -1
+            nt = old_to_new[t] if t < n else -1
+            if ns >= 0 and nt >= 0:
+                remapped.append((int(ns), int(nt), d))
         if remapped:
             store._edges_by_type[etype] = remapped
         else:
@@ -132,7 +139,8 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
     # Remap vectors
     if vector_store is not None:
         old_vectors: dict[int, np.ndarray] = {}
-        for old_slot in live_slots:
+        for old_slot in live_slots_arr:
+            old_slot = int(old_slot)
             if vector_store.has_vector(old_slot):
                 old_vectors[old_slot] = vector_store.get_vector(old_slot)
 
@@ -142,14 +150,14 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
         from usearch.index import Index
         vector_store._index = Index(ndim=vector_store._dims, metric="cos", dtype="f32")
         for old_slot, vec in old_vectors.items():
-            new_slot = old_to_new[old_slot]
+            new_slot = old_to_new_dict[old_slot]
             vector_store._index.add(new_slot, vec)
             vector_store._has_vector[new_slot] = True
 
     # Remap DocumentStore slot keys
     if document_store is not None:
         conn = document_store._conn
-        for old_slot, new_slot in old_to_new.items():
+        for old_slot, new_slot in old_to_new_dict.items():
             if old_slot == new_slot:
                 continue
             conn.execute("UPDATE documents SET slot = ? WHERE slot = ?", (-old_slot - 1, old_slot))
@@ -158,7 +166,7 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
             conn.execute("UPDATE images SET slot = ? WHERE slot = ?", (-old_slot - 1, old_slot))
             conn.execute("UPDATE doc_metadata SET doc_slot = ? WHERE doc_slot = ?", (-old_slot - 1, old_slot))
             conn.execute("DELETE FROM doc_fts WHERE rowid = ?", (old_slot,))
-        for old_slot, new_slot in old_to_new.items():
+        for old_slot, new_slot in old_to_new_dict.items():
             if old_slot == new_slot:
                 continue
             temp = -old_slot - 1
@@ -202,28 +210,28 @@ def gc_strings(store: CoreStore) -> dict:
     """Rebuild string table with only referenced strings.
 
     Remaps all int32 values: node_ids, node_kinds, all int32_interned columns.
+    Uses numpy for bulk ID collection instead of Python loops.
     """
     n = store._next_slot
 
-    # Collect all referenced string IDs
-    referenced: set[int] = set()
-    for slot in range(n):
-        if slot in store.node_tombstones:
-            continue
-        str_id = int(store.node_ids[slot])
-        if str_id >= 0:
-            referenced.add(str_id)
-        kind_id = int(store.node_kinds[slot])
-        if kind_id >= 0:
-            referenced.add(kind_id)
+    # Vectorized: collect all referenced string IDs
+    live_mask = store.node_ids[:n] >= 0
+    if store.node_tombstones:
+        tomb_arr = np.array(list(store.node_tombstones), dtype=np.int32)
+        valid = tomb_arr[tomb_arr < n]
+        if len(valid) > 0:
+            live_mask[valid] = False
+
+    live_ids = store.node_ids[:n][live_mask]
+    live_kinds = store.node_kinds[:n][live_mask]
+    referenced: set[int] = set(live_ids[live_ids >= 0].tolist())
+    referenced.update(live_kinds[live_kinds >= 0].tolist())
 
     for field in store.columns._columns:
         if store.columns._dtypes[field] == "int32_interned":
-            col = store.columns._columns[field]
-            pres = store.columns._presence[field]
-            for slot in range(n):
-                if pres[slot]:
-                    referenced.add(int(col[slot]))
+            col = store.columns._columns[field][:n]
+            pres = store.columns._presence[field][:n]
+            referenced.update(col[pres].tolist())
 
     # Also reference edge type names
     for etype in store._edges_by_type:
@@ -245,25 +253,27 @@ def gc_strings(store: CoreStore) -> dict:
 
     new_table = StringTable.from_list(new_strings)
 
-    # Remap node_ids and node_kinds
-    for slot in range(n):
-        if slot in store.node_tombstones:
-            continue
-        old_id = int(store.node_ids[slot])
-        if old_id >= 0:
-            store.node_ids[slot] = old_to_new[old_id]
-        old_kind = int(store.node_kinds[slot])
-        if old_kind >= 0:
-            store.node_kinds[slot] = old_to_new[old_kind]
+    # Vectorized remap: build lookup array old_id -> new_id
+    max_old = len(old_table)
+    remap_arr = np.arange(max_old, dtype=np.int32)  # identity by default
+    for old_id, new_id in old_to_new.items():
+        remap_arr[old_id] = new_id
 
-    # Remap int32_interned columns
+    # Remap node_ids and node_kinds via numpy fancy indexing
+    ids = store.node_ids[:n]
+    valid_ids = ids >= 0
+    ids[valid_ids] = remap_arr[ids[valid_ids]]
+
+    kinds = store.node_kinds[:n]
+    valid_kinds = live_mask
+    kinds[valid_kinds] = remap_arr[kinds[valid_kinds]]
+
+    # Remap int32_interned columns via numpy fancy indexing
     for field in store.columns._columns:
         if store.columns._dtypes[field] == "int32_interned":
-            col = store.columns._columns[field]
-            pres = store.columns._presence[field]
-            for slot in range(n):
-                if pres[slot]:
-                    col[slot] = old_to_new[int(col[slot])]
+            col = store.columns._columns[field][:n]
+            pres = store.columns._presence[field][:n]
+            col[pres] = remap_arr[col[pres]]
 
     # Remap id_to_slot keys
     store.id_to_slot = {
