@@ -683,6 +683,14 @@ playground = [
     { name = "uvicorn" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-benchmark" },
+    { name = "pytest-cov" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "docling", marker = "extra == 'ingest-pro'", specifier = ">=2.0" },
@@ -705,6 +713,14 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'playground'", specifier = ">=0.20" },
 ]
 provides-extras = ["dev", "playground", "ingest-pro"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-benchmark", specifier = ">=5.2.3" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+]
 
 [[package]]
 name = "h11"

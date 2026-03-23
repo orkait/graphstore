@@ -85,3 +85,11 @@ replace = 'version = "{new_version}"'
 filename = "graphstore/__init__.py"
 search = '__version__ = "{current_version}"'
 replace = '__version__ = "{new_version}"'
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+    "pytest-benchmark>=5.2.3",
+    "pytest-cov>=7.0.0",
+]

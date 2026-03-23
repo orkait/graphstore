@@ -51,6 +51,7 @@ class CoreStore:
 
         # Named snapshots storage (for SYS SNAPSHOT/ROLLBACK)
         self._snapshots: dict[str, dict] = {}
+        self._tombstone_mask_cache: tuple[int, int, np.ndarray] | None = None  # (n, len(tombstones), mask)
 
     # -- slot management -----------------------------------------------------
 
@@ -58,6 +59,7 @@ class CoreStore:
         """Get next available slot, reusing tombstones or expanding."""
         if self.node_tombstones:
             slot = self.node_tombstones.pop()
+            self._tombstone_mask_cache = None
             return slot
         if self._next_slot >= self._capacity:
             self._grow()
@@ -211,6 +213,7 @@ class CoreStore:
         # Tombstone
         self.columns.clear(slot)
         self.node_tombstones.add(slot)
+        self._tombstone_mask_cache = None
         del self.id_to_slot[str_id]
         self._count -= 1
 
@@ -414,14 +417,19 @@ class CoreStore:
         return result
 
     def _tombstone_mask(self, n: int) -> np.ndarray:
-        """Cached tombstone boolean mask. Rebuilt when tombstones change."""
+        """Cached tombstone boolean mask. Invalidated when tombstones change."""
         if not self.node_tombstones:
             return np.zeros(n, dtype=bool)
+        cache = self._tombstone_mask_cache
+        tomb_len = len(self.node_tombstones)
+        if cache is not None and cache[0] == n and cache[1] == tomb_len:
+            return cache[2]
         tomb_arr = np.array(list(self.node_tombstones), dtype=np.int32)
         mask = np.zeros(n, dtype=bool)
         valid = tomb_arr[tomb_arr < n]
         if len(valid) > 0:
             mask[valid] = True
+        self._tombstone_mask_cache = (n, tomb_len, mask)
         return mask
 
     def compute_live_mask(self, n: int) -> np.ndarray:

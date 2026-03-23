@@ -2,6 +2,8 @@
 from pathlib import Path
 from graphstore.ingest.base import IngestResult
 
+_PLAINTEXT_EXTS = {"txt", "md"}
+
 EXTENSION_MAP = {
     "txt": "markitdown", "md": "markitdown", "html": "markitdown", "htm": "markitdown",
     "csv": "markitdown", "json": "markitdown", "xml": "markitdown",
@@ -66,6 +68,12 @@ def select_ingestor(file_path: str, using: str | None = None) -> str:
 
 
 def ingest_file(file_path: str, using: str | None = None, **kwargs) -> IngestResult:
+    ext = Path(file_path).suffix.lstrip(".").lower()
+    if ext in _PLAINTEXT_EXTS and using is None:
+        with open(file_path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+        return IngestResult(markdown=text, parser_used="direct", confidence=1.0,
+                           metadata={"source": file_path})
     name = select_ingestor(file_path, using)
     ingestor = _get_ingestor(name, **kwargs)
     return ingestor.convert(file_path)
