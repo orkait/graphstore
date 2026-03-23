@@ -24,8 +24,10 @@ from graphstore.dsl.ast_nodes import (
     DiscardContext,
     DistanceQuery,
     EdgesQuery,
+    ForgetNode,
     Increment,
     IngestStmt,
+    LexicalSearchQuery,
     MatchQuery,
     MergeStmt,
     NodeQuery,
@@ -116,11 +118,13 @@ class Executor(ReadExecutor, WriteExecutor):
             RecallQuery: self._recall,
             CounterfactualQuery: self._counterfactual,
             SimilarQuery: self._similar,
+            LexicalSearchQuery: self._lexical_search,
             PropagateStmt: self._propagate,
             BindContext: self._bind_context,
             DiscardContext: self._discard_context,
             IngestStmt: self._ingest,
             ConnectNode: self._connect_node,
+            ForgetNode: self._forget,
         }
         handler = handlers.get(type(ast))
         if handler is None:

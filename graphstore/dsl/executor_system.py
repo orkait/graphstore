@@ -33,6 +33,7 @@ from graphstore.dsl.ast_nodes import (
     SysReembed,
     SysRegisterEdgeKind,
     SysRegisterNodeKind,
+    SysRetain,
     SysRollback,
     SysSlowQueries,
     SysSnapshot,
@@ -57,6 +58,7 @@ class SystemExecutor:
         embedder=None,
         vector_store=None,
         document_store=None,
+        retention: dict | None = None,
     ):
         self.store = store
         self.schema = schema
@@ -64,6 +66,7 @@ class SystemExecutor:
         self._embedder = embedder
         self._vector_store = vector_store
         self._document_store = document_store
+        self._retention = retention or {}
         self._start_time = time.time()
 
     def execute(self, ast) -> Result:
@@ -99,6 +102,7 @@ class SystemExecutor:
             SysConnect: self._connect,
             SysReembed: self._reembed,
             SysStatus: self._status,
+            SysRetain: self._retain,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -745,3 +749,57 @@ class SystemExecutor:
         data["uptime_seconds"] = time.time() - self._start_time
 
         return Result(kind="status", data=data, count=1)
+
+    def _retain(self, q: SysRetain) -> Result:
+        """SYS RETAIN: apply blob retention policy based on node age. Vectorized."""
+        store = self.store
+        n = store._next_slot
+        if n == 0:
+            return Result(kind="ok", data={"archived": 0, "blob_deleted": 0}, count=0)
+
+        archive_cutoff_ms = int(time.time() * 1000) - self._retention.get("blob_archive_days", 90) * 86400000
+        delete_cutoff_ms = int(time.time() * 1000) - self._retention.get("blob_delete_days", 365) * 86400000
+
+        live = store.compute_live_mask(n)
+        created_col = store.columns.get_column("__created_at__", n)
+        blob_col = store.columns.get_column("__blob_state__", n)
+
+        if created_col is None or blob_col is None:
+            return Result(kind="ok", data={"archived": 0, "blob_deleted": 0}, count=0)
+
+        created_data, created_pres, _ = created_col
+        blob_data, blob_pres, _ = blob_col
+
+        warm_id = store.string_table.intern("warm") if "warm" in store.string_table else None
+        if warm_id is None:
+            return Result(kind="ok", data={"archived": 0, "blob_deleted": 0}, count=0)
+
+        archived_id = store.string_table.intern("archived") if "archived" in store.string_table else None
+        deleted_str_id = store.string_table.intern("deleted")
+
+        # Vectorized: find warm nodes older than archive_cutoff
+        eligible = live & created_pres & blob_pres
+        warm_mask = eligible & (blob_data == warm_id) & (created_data < archive_cutoff_ms)
+        to_archive = np.nonzero(warm_mask)[0]
+
+        if len(to_archive) > 0:
+            archived_str_id = store.string_table.intern("archived")
+            store.columns._columns["__blob_state__"][to_archive] = archived_str_id
+        archived_count = len(to_archive)
+
+        # Vectorized: find archived nodes older than delete_cutoff
+        deleted_count = 0
+        if archived_id is not None:
+            archive_mask = eligible & (blob_data == archived_id) & (created_data < delete_cutoff_ms)
+            to_delete = np.nonzero(archive_mask)[0]
+            if len(to_delete) > 0:
+                if self._document_store:
+                    for slot in to_delete:
+                        self._document_store.delete_document(int(slot))
+                store.columns._columns["__blob_state__"][to_delete] = deleted_str_id
+            deleted_count = len(to_delete)
+
+        return Result(kind="ok", data={
+            "archived": archived_count,
+            "blob_deleted": deleted_count,
+        }, count=archived_count + deleted_count)

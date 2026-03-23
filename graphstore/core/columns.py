@@ -18,6 +18,14 @@ class ColumnStore:
 
     INT64_SENTINEL = np.iinfo(np.int64).min
     STR_SENTINEL = np.int32(-1)
+    _NUM_OPS = {
+        "=": np.equal,
+        "!=": np.not_equal,
+        ">": np.greater,
+        "<": np.less,
+        ">=": np.greater_equal,
+        "<=": np.less_equal,
+    }
 
     def __init__(self, string_table: StringTable, capacity: int = 1024):
         self._columns: dict[str, np.ndarray] = {}
@@ -116,16 +124,7 @@ class ColumnStore:
                 return (col != int_val) & pres
             return None  # >, <, >=, <= not supported on interned strings
 
-        # Numeric columns (int64, float64)
-        ops = {
-            "=": lambda c, v: c == v,
-            "!=": lambda c, v: c != v,
-            ">": lambda c, v: c > v,
-            "<": lambda c, v: c < v,
-            ">=": lambda c, v: c >= v,
-            "<=": lambda c, v: c <= v,
-        }
-        fn = ops.get(op)
+        fn = self._NUM_OPS.get(op)
         if fn is None:
             return None
         return fn(col, value) & pres

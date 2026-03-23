@@ -18,6 +18,7 @@ from graphstore.dsl.ast_nodes import (
     DeleteNode,
     DeleteNodes,
     DiscardContext,
+    ForgetNode,
     Increment,
     IngestStmt,
     MergeStmt,
@@ -84,6 +85,32 @@ class WriteExecutor(ExecutorBase):
                 vec = self._embedder.encode_documents([text])[0]
                 self._vector_store.add(slot, vec)
 
+    def _embed_and_store(self, slot: int, text: str) -> None:
+        """Embed text and store vector at slot. Handles lazy vector store init."""
+        if not self._embedder:
+            return
+        if self._vector_store is not None:
+            vec = self._embedder.encode_documents([text])[0]
+            self._vector_store.add(slot, vec)
+        elif hasattr(self, '_ensure_vector_store_cb') and self._ensure_vector_store_cb:
+            vec = self._embedder.encode_documents([text])[0]
+            self._ensure_vector_store_cb(len(vec))
+            self._vector_store.add(slot, vec)
+
+    def _batch_embed_and_store(self, items: list[tuple[int, str]]) -> None:
+        """Batch-embed multiple (slot, text) pairs in one model call."""
+        if not self._embedder or not items:
+            return
+        slots, texts = zip(*items)
+        if self._vector_store is None:
+            if hasattr(self, '_ensure_vector_store_cb') and self._ensure_vector_store_cb:
+                self._ensure_vector_store_cb(self._embedder.dims)
+            else:
+                return
+        vecs = self._embedder.encode_documents(list(texts))
+        for slot, vec in zip(slots, vecs):
+            self._vector_store.add(slot, vec)
+
     def _create_node(self, q: CreateNode) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
         kind = data.pop("kind", "default")
@@ -130,36 +157,53 @@ class WriteExecutor(ExecutorBase):
         node = self.store.get_node(q.id)
         return Result(kind="node", data=node, count=1)
 
+    def _collect_doc_children(self, doc_id: str) -> list[tuple[str, int]]:
+        """Collect all (node_id, slot) pairs for a document's children.
+        Works at slot level via raw edge lists to avoid materializing dicts."""
+        doc_slot = self._resolve_slot(doc_id)
+        if doc_slot is None:
+            return []
+        children = []
+        child_kinds = {"has_chunk", "has_image", "has_section"}
+        slot_to_id = self.store._slot_to_id
+        edges_by_type = self.store._edges_by_type
+        tombstones = self.store.node_tombstones
+
+        for etype in child_kinds:
+            for s, t, _d in edges_by_type.get(etype, []):
+                if s == doc_slot and t not in tombstones:
+                    tgt_id = slot_to_id(t)
+                    if tgt_id is None:
+                        continue
+                    if etype == "has_section":
+                        for se_etype in ("has_chunk",):
+                            for ss, st, _sd in edges_by_type.get(se_etype, []):
+                                if ss == t and st not in tombstones:
+                                    st_id = slot_to_id(st)
+                                    if st_id is not None:
+                                        children.append((st_id, st))
+                    children.append((tgt_id, t))
+        return children
+
     def _delete_node(self, q: DeleteNode) -> Result:
-        # Resolve slot before deletion
         slot = self._resolve_slot(q.id)
 
-        # Cascade: if this is a document node, delete all chunks and images first
         if slot is not None:
             kind_str_id = int(self.store.node_kinds[slot])
             kind_name = self.store.string_table.lookup(kind_str_id)
             if kind_name == "document":
-                # Find and delete all outgoing chunk/image nodes
-                edges = self.store.get_edges_from(q.id)
-                for edge in edges:
-                    if edge["kind"] in ("has_chunk", "has_image"):
-                        tgt_id = edge["target"]
-                        tgt_slot = self._resolve_slot(tgt_id)
-                        if tgt_slot is not None:
-                            if self._vector_store:
-                                self._vector_store.remove(tgt_slot)
-                            if self._document_store:
-                                self._document_store.delete_document(tgt_slot)
-                            try:
-                                self.store.delete_node(tgt_id)
-                            except NodeNotFound:
-                                pass
-
-                # Clean up DocumentStore entries for this document
+                for child_id, child_slot in self._collect_doc_children(q.id):
+                    if self._vector_store:
+                        self._vector_store.remove(child_slot)
+                    if self._document_store:
+                        self._document_store.delete_document(child_slot)
+                    try:
+                        self.store.delete_node(child_id)
+                    except NodeNotFound:
+                        pass
                 if self._document_store:
                     self._document_store.delete_all_for_doc(slot)
 
-        # Remove vector before deleting the node
         if self._vector_store and slot is not None:
             self._vector_store.remove(slot)
         self.store.delete_node(q.id)
@@ -290,22 +334,16 @@ class WriteExecutor(ExecutorBase):
         if q.reason:
             self.store.columns.set_reserved(slot, "__retract_reason__", q.reason)
 
-        # Cascade: if this is a document node, retract all chunks and images
+        # Cascade: if this is a document node, retract all children
         kind_str_id = int(self.store.node_kinds[slot])
         kind_name = self.store.string_table.lookup(kind_str_id)
         if kind_name == "document":
-            # Find all outgoing edges (has_chunk, has_image)
-            edges = self.store.get_edges_from(q.id)
-            for edge in edges:
-                if edge["kind"] in ("has_chunk", "has_image"):
-                    tgt_id = edge["target"]
-                    tgt_str_id = self.store.string_table.intern(tgt_id) if tgt_id in self.store.string_table else None
-                    tgt_slot = self.store.id_to_slot.get(tgt_str_id) if tgt_str_id is not None else None
-                    if tgt_slot is not None and tgt_slot not in self.store.node_tombstones:
-                        self.store.columns.set_reserved(tgt_slot, "__retracted__", 1)
-                        self.store.columns.set_reserved(tgt_slot, "__retracted_at__", now_ms)
-                        if q.reason:
-                            self.store.columns.set_reserved(tgt_slot, "__retract_reason__", q.reason)
+            for child_id, child_slot in self._collect_doc_children(q.id):
+                if child_slot not in self.store.node_tombstones:
+                    self.store.columns.set_reserved(child_slot, "__retracted__", 1)
+                    self.store.columns.set_reserved(child_slot, "__retracted_at__", now_ms)
+                    if q.reason:
+                        self.store.columns.set_reserved(child_slot, "__retract_reason__", q.reason)
 
         return Result(kind="ok", data={"id": q.id}, count=1)
 
@@ -661,10 +699,9 @@ class WriteExecutor(ExecutorBase):
         import os as _os
         from pathlib import Path as _Path
 
-        from graphstore.ingest.router import ingest_file
+        from graphstore.ingest.router import ingest_file, EXTENSION_MAP
         from graphstore.ingest.chunker import chunk_by_heading
 
-        # Security: validate file path against ingest_root to prevent path traversal
         resolved = _Path(q.file_path).resolve()
         if self._ingest_root:
             root = _Path(self._ingest_root).resolve()
@@ -676,8 +713,15 @@ class WriteExecutor(ExecutorBase):
         if not resolved.exists():
             raise GraphStoreError(f"File not found: {q.file_path}")
 
-        # 1. Parse file (use resolved path, not raw user input)
         safe_path = str(resolved)
+        ext = resolved.suffix.lstrip(".").lower()
+
+        # --- Standalone image with vision: bypass normal text flow ---
+        image_exts = {"png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff"}
+        if ext in image_exts and q.vision_model:
+            return self._ingest_image_with_vision(q, safe_path, ext)
+
+        # 1. Parse file
         result = ingest_file(safe_path, using=q.using)
 
         # 2. Chunk
@@ -691,7 +735,6 @@ class WriteExecutor(ExecutorBase):
 
         parent_kind = q.kind or "document"
 
-        # Check duplicate: if parent_id already exists, raise
         existing = self.store.get_node(parent_id)
         if existing is not None:
             raise GraphStoreError(f"Node already exists: {parent_id}")
@@ -707,10 +750,9 @@ class WriteExecutor(ExecutorBase):
             if isinstance(v, (str, int, float)) and k not in ("source",)
         })
 
-        # Use store.put_node directly to avoid recursion
         parent_slot = self.store.put_node(parent_id, parent_kind, metadata_fields)
+        self.store.columns.set_reserved(parent_slot, "__blob_state__", "warm")
 
-        # Store full markdown in DocumentStore
         if self._document_store:
             self._document_store.put_document(
                 parent_slot, result.markdown.encode("utf-8"), "text/markdown")
@@ -724,8 +766,28 @@ class WriteExecutor(ExecutorBase):
                 "ingested_at": int(time.time() * 1000),
             })
 
-        # 5. Create chunk nodes
+        # 5. Build section hierarchy from heading-based chunks
+        embed_batch: list[tuple[int, str]] = []
+        sections: dict[str, str] = {}
+        section_slots: dict[str, int] = {}
+        set_reserved = self.store.columns.set_reserved
+        for chunk in chunks:
+            if chunk.heading and chunk.heading not in sections:
+                section_id = f"{parent_id}:section:{len(sections)}"
+                sec_slot = self.store.put_node(section_id, "section", {
+                    "heading": chunk.heading,
+                    "summary": chunk.summary[:200],
+                })
+                set_reserved(sec_slot, "__confidence__", 0.6)
+                set_reserved(sec_slot, "__blob_state__", "warm")
+                self.store.put_edge(parent_id, section_id, "has_section")
+                embed_batch.append((sec_slot, chunk.summary[:200]))
+                sections[chunk.heading] = section_id
+                section_slots[chunk.heading] = sec_slot
+
+        # 6. Create chunk nodes - collect doc store writes, batch embed
         chunk_ids = []
+        ds = self._document_store
         for chunk in chunks:
             chunk_id = f"{parent_id}:chunk:{chunk.index}"
             chunk_fields = {"summary": chunk.summary}
@@ -735,56 +797,129 @@ class WriteExecutor(ExecutorBase):
                 chunk_fields["page"] = chunk.page
 
             chunk_slot = self.store.put_node(chunk_id, "chunk", chunk_fields)
+            set_reserved(chunk_slot, "__blob_state__", "warm")
             chunk_ids.append(chunk_id)
 
-            # Store full chunk text in DocumentStore
-            if self._document_store:
-                self._document_store.put_document(
-                    chunk_slot, chunk.text.encode("utf-8"), "text/markdown")
-                self._document_store.put_summary(
-                    chunk_slot, chunk.summary, chunk.heading,
-                    chunk.page, chunk.index, parent_slot)
+            if ds:
+                ds._conn.execute(
+                    "INSERT OR REPLACE INTO documents (slot, content, content_type, size) VALUES (?, ?, ?, ?)",
+                    (chunk_slot, chunk.text.encode("utf-8"), "text/markdown", len(chunk.text)))
+                ds._conn.execute(
+                    "INSERT OR REPLACE INTO summaries VALUES (?, ?, ?, ?, ?, ?)",
+                    (chunk_slot, chunk.summary, chunk.heading, chunk.page, chunk.index, parent_slot))
+                ds._conn.execute(
+                    "INSERT OR REPLACE INTO doc_fts (rowid, summary) VALUES (?, ?)",
+                    (chunk_slot, chunk.summary))
 
-            # Auto-embed summary
-            if self._embedder and self._vector_store is not None:
-                vec = self._embedder.encode_documents([chunk.summary])[0]
-                self._vector_store.add(chunk_slot, vec)
-            elif self._embedder and self._vector_store is None:
-                if hasattr(self, '_ensure_vector_store_cb') and self._ensure_vector_store_cb:
-                    vec = self._embedder.encode_documents([chunk.summary])[0]
-                    self._ensure_vector_store_cb(len(vec))
-                    self._vector_store.add(chunk_slot, vec)
+            embed_batch.append((chunk_slot, chunk.summary))
 
-            # Edge: parent -> chunk
-            self.store.put_edge(parent_id, chunk_id, "has_chunk")
+            if chunk.heading and chunk.heading in sections:
+                self.store.put_edge(sections[chunk.heading], chunk_id, "has_chunk")
+            else:
+                self.store.put_edge(parent_id, chunk_id, "has_chunk")
 
-        # 6. Handle images
+        # Single commit for all chunk doc store writes
+        if ds:
+            ds._conn.commit()
+
+        # 7. Handle images (with optional vision description)
         image_count = 0
+        vision_handler = None
+        if q.vision_model:
+            try:
+                from graphstore.ingest.vision import VisionHandler
+                vision_handler = VisionHandler(model=q.vision_model)
+            except Exception:
+                pass
+
         for i, img in enumerate(result.images):
             img_id = f"{parent_id}:image:{i}"
             img_fields = {}
             if img.page is not None:
                 img_fields["page"] = img.page
+
+            if not img.description and vision_handler:
+                try:
+                    img.description = vision_handler.describe(img.data, img.mime_type)
+                except Exception:
+                    pass
+
             if img.description:
-                img_fields["description"] = img.description
+                img_fields["summary"] = img.description
 
             img_slot = self.store.put_node(img_id, "image", img_fields)
+            set_reserved(img_slot, "__blob_state__", "warm")
 
-            if self._document_store:
-                self._document_store.put_image(
-                    img_slot, img.data, img.mime_type,
-                    img.page, img.description)
+            if ds:
+                ds.put_image(img_slot, img.data, img.mime_type, img.page, img.description)
+
+            if img.description:
+                embed_batch.append((img_slot, img.description))
 
             self.store.put_edge(parent_id, img_id, "has_image")
             image_count += 1
 
+        # 8. Batch embed all sections + chunks + images in one model call
+        self._batch_embed_and_store(embed_batch)
+
         return Result(kind="ok", data={
             "doc_id": parent_id,
             "chunks": len(chunks),
+            "sections": len(sections),
             "images": image_count,
             "parser": result.parser_used,
             "confidence": result.confidence,
         }, count=len(chunks))
+
+    def _ingest_image_with_vision(self, q: IngestStmt, safe_path: str, ext: str) -> Result:
+        """Handle standalone image ingest with VLM description."""
+        import hashlib
+
+        from graphstore.ingest.vision import VisionHandler
+
+        with open(safe_path, "rb") as f:
+            image_bytes = f.read()
+
+        mime_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                    "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp",
+                    "tiff": "image/tiff"}
+        mime_type = mime_map.get(ext, "image/png")
+
+        vh = VisionHandler(model=q.vision_model)
+        description = vh.describe(image_bytes, mime_type)
+
+        node_id = q.node_id
+        if not node_id:
+            h = hashlib.sha256(q.file_path.encode()).hexdigest()[:12]
+            node_id = f"img:{h}"
+
+        existing = self.store.get_node(node_id)
+        if existing is not None:
+            raise GraphStoreError(f"Node already exists: {node_id}")
+
+        node_kind = q.kind or "image"
+        fields = {
+            "summary": description,
+            "source": q.file_path,
+            "mime_type": mime_type,
+        }
+        slot = self.store.put_node(node_id, node_kind, fields)
+        self.store.columns.set_reserved(slot, "__blob_state__", "warm")
+
+        if self._document_store:
+            self._document_store.put_image(slot, image_bytes, mime_type, description=description)
+            self._document_store.put_summary(slot, description)
+
+        self._embed_and_store(slot, description)
+
+        return Result(kind="ok", data={
+            "doc_id": node_id,
+            "chunks": 0,
+            "sections": 0,
+            "images": 1,
+            "parser": "vision",
+            "confidence": 0.8,
+        }, count=1)
 
     def _connect_node(self, q: ConnectNode) -> Result:
         """CONNECT NODE: wire one node to similar neighbors via vector similarity."""
@@ -793,3 +928,31 @@ class WriteExecutor(ExecutorBase):
             self.store, self._vector_store,
             q.node_id, threshold=q.threshold,
         )
+
+    def _forget(self, q: ForgetNode) -> Result:
+        """FORGET NODE: hard delete blob + vector + memory (irreversible)."""
+        slot = self._resolve_slot(q.id)
+        if slot is None:
+            raise NodeNotFound(q.id)
+
+        kind_str_id = int(self.store.node_kinds[slot])
+        kind_name = self.store.string_table.lookup(kind_str_id)
+        if kind_name == "document":
+            for child_id, child_slot in self._collect_doc_children(q.id):
+                if self._vector_store:
+                    self._vector_store.remove(child_slot)
+                if self._document_store:
+                    self._document_store.delete_document(child_slot)
+                try:
+                    self.store.delete_node(child_id)
+                except NodeNotFound:
+                    pass
+            if self._document_store:
+                self._document_store.delete_all_for_doc(slot)
+
+        if self._vector_store:
+            self._vector_store.remove(slot)
+        if self._document_store:
+            self._document_store.delete_document(slot)
+        self.store.delete_node(q.id)
+        return Result(kind="ok", data={"forgotten": q.id}, count=1)

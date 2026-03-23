@@ -18,6 +18,7 @@ from graphstore.dsl.ast_nodes import (
     DescendantsQuery,
     DistanceQuery,
     EdgesQuery,
+    LexicalSearchQuery,
     MatchPattern,
     MatchQuery,
     NodeQuery,
@@ -1043,6 +1044,30 @@ class ReadExecutor(ExecutorBase):
             if q.where and not self._eval_where(q.where.expr, node):
                 continue
             node["_similarity_score"] = round(1.0 - float(dist), 4)
+            results.append(node)
+            if len(results) >= target_k:
+                break
+
+        return Result(kind="nodes", data=results, count=len(results))
+
+    def _lexical_search(self, q: LexicalSearchQuery) -> Result:
+        """LEXICAL SEARCH: BM25 full-text search over document summaries."""
+        if not self._document_store:
+            return Result(kind="nodes", data=[], count=0)
+
+        target_k = q.limit.value if q.limit else 10
+        hits = self._document_store.search_text(q.query, limit=target_k * 3)
+
+        results = []
+        for slot, score in hits:
+            if not self._is_slot_visible(slot):
+                continue
+            node = self.store._materialize_slot(slot)
+            if node is None:
+                continue
+            if q.where and not self._eval_where(q.where.expr, node):
+                continue
+            node["_bm25_score"] = round(score, 4)
             results.append(node)
             if len(results) >= target_k:
                 break
