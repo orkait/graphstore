@@ -183,3 +183,5 @@ class TestGetAllEdges:
         assert len(edges) == 2
         kinds = {e["kind"] for e in edges}
         assert kinds == {"knows", "follows"}
+
+

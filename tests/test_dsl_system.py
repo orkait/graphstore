@@ -391,3 +391,23 @@ class TestUnknownCommand:
         executor = SystemExecutor(store, schema)
         with pytest.raises(GraphStoreError, match="Unknown system command"):
             executor.execute("not an AST node")
+
+
+def test_executor_base_split_integrity():
+    """All ExecutorBase helpers must be accessible from Executor after split."""
+    from graphstore.dsl.executor import Executor
+    from graphstore.core.store import CoreStore
+    from graphstore.core.schema import SchemaRegistry
+    store = CoreStore()
+    schema = SchemaRegistry()
+    ex = Executor(store, schema)
+    # VisibilityMixin
+    assert hasattr(ex, '_compute_live_mask')
+    assert hasattr(ex, '_resolve_slot')
+    assert hasattr(ex, '_is_slot_visible')
+    assert hasattr(ex, '_apply_ttl')
+    # FilteringMixin
+    assert hasattr(ex, '_eval_where')
+    assert hasattr(ex, '_try_column_filter')
+    assert hasattr(ex, '_try_column_nodes')
+    assert hasattr(ex, '_try_index_lookup')

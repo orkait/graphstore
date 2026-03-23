@@ -127,3 +127,24 @@ class TestBindContext:
         result = g.execute('NODES')
         assert len(result.data) == 1
         assert result.data[0]["id"] == "global"
+
+
+def test_combined_transpose_cached():
+    """get_combined_transpose() must return the same object on repeated calls."""
+    from graphstore.core.edges import EdgeMatrices
+    em = EdgeMatrices()
+    em.rebuild({"knows": [(0, 1, {}), (1, 2, {})]}, num_nodes=3)
+    t1 = em.get_combined_transpose()
+    t2 = em.get_combined_transpose()
+    assert t1 is t2, "transpose must be the same cached object, not recomputed"
+
+
+def test_combined_transpose_invalidated_on_rebuild():
+    """Rebuild must invalidate the combined transpose cache."""
+    from graphstore.core.edges import EdgeMatrices
+    em = EdgeMatrices()
+    em.rebuild({"knows": [(0, 1, {})]}, num_nodes=2)
+    t1 = em.get_combined_transpose()
+    em.rebuild({"knows": [(0, 1, {}), (1, 0, {})]}, num_nodes=2)
+    t2 = em.get_combined_transpose()
+    assert t1 is not t2, "after rebuild, transpose cache must be refreshed"

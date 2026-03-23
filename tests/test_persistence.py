@@ -821,3 +821,51 @@ class TestColumnPersistence:
         assert store2.columns._dtypes["weight"] == "float64"
         assert store2.columns._dtypes["name"] == "int32_interned"
         conn.close()
+
+
+def test_wal_manager_is_wired(tmp_path):
+    """GraphStore must have _wal attribute (WALManager)."""
+    from graphstore import GraphStore
+    gs = GraphStore(path=str(tmp_path))
+    assert hasattr(gs, '_wal'), "GraphStore must have _wal attribute (WALManager)"
+    from graphstore.wal import WALManager
+    assert isinstance(gs._wal, WALManager)
+    gs.close()
+
+
+def test_wal_manager_no_inline_methods(tmp_path):
+    """Inline WAL methods must be deleted from GraphStore."""
+    from graphstore import GraphStore
+    gs = GraphStore(path=str(tmp_path))
+    assert not hasattr(gs, '_wal_append'), "inline _wal_append must be deleted"
+    assert not hasattr(gs, '_replay_wal'), "inline _replay_wal must be deleted"
+    assert not hasattr(gs, '_maybe_auto_checkpoint'), "inline _maybe_auto_checkpoint must be deleted"
+    assert not hasattr(gs, '_rotate_query_log'), "inline _rotate_query_log must be deleted"
+    assert not hasattr(gs, '_log_query'), "inline _log_query must be deleted"
+    gs.close()
+
+
+def test_graphstore_has_public_api():
+    """GraphStore must expose public methods so server.py does not need private access."""
+    from graphstore import GraphStore
+    gs = GraphStore()
+    assert hasattr(gs, 'get_all_nodes'), "missing get_all_nodes()"
+    assert hasattr(gs, 'get_all_edges'), "missing get_all_edges()"
+    assert hasattr(GraphStore, 'cost_threshold'), "missing cost_threshold property"
+    assert hasattr(GraphStore, 'ceiling_mb'), "missing ceiling_mb property"
+
+
+def test_cost_threshold_property():
+    from graphstore import GraphStore
+    gs = GraphStore()
+    original = gs.cost_threshold
+    gs.cost_threshold = 50_000
+    assert gs.cost_threshold == 50_000
+    gs.cost_threshold = original
+
+
+def test_ceiling_mb_property():
+    from graphstore import GraphStore
+    gs = GraphStore()
+    gs.ceiling_mb = 512
+    assert gs.ceiling_mb == 512
