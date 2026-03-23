@@ -33,6 +33,8 @@ from graphstore.dsl.ast_nodes import (
     SysReembed,
     SysRegisterEdgeKind,
     SysRegisterNodeKind,
+    SysHealth,
+    SysOptimize,
     SysRetain,
     SysRollback,
     SysSlowQueries,
@@ -103,6 +105,8 @@ class SystemExecutor:
             SysReembed: self._reembed,
             SysStatus: self._status,
             SysRetain: self._retain,
+            SysHealth: self._health,
+            SysOptimize: self._optimize,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -803,3 +807,35 @@ class SystemExecutor:
             "archived": archived_count,
             "blob_deleted": deleted_count,
         }, count=archived_count + deleted_count)
+
+    def _health(self, q: SysHealth) -> Result:
+        """SYS HEALTH: pressure metrics for self-balancing decisions."""
+        from graphstore.core.optimizer import health_check, needs_optimization
+        health = health_check(self.store, self._vector_store, self._document_store)
+        health["recommended"] = needs_optimization(health)
+        return Result(kind="health", data=health, count=1)
+
+    def _optimize(self, q: SysOptimize) -> Result:
+        """SYS OPTIMIZE: run optimization operations under exclusive lock."""
+        from graphstore.core.optimizer import (
+            optimize_all, compact_tombstones, gc_strings,
+            defrag_edges, cleanup_vectors, sweep_orphans, clear_caches,
+        )
+        target = q.target
+        if target is None:
+            data = optimize_all(self.store, self._vector_store, self._document_store)
+        elif target == "COMPACT":
+            data = compact_tombstones(self.store, self._vector_store, self._document_store)
+        elif target == "STRINGS":
+            data = gc_strings(self.store)
+        elif target == "EDGES":
+            data = defrag_edges(self.store)
+        elif target == "VECTORS":
+            data = cleanup_vectors(self.store, self._vector_store)
+        elif target == "BLOBS":
+            data = sweep_orphans(self.store, self._document_store)
+        elif target == "CACHE":
+            data = clear_caches(self.store)
+        else:
+            raise GraphStoreError(f"Unknown optimize target: {target}")
+        return Result(kind="ok", data=data, count=1)

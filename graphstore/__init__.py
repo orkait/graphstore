@@ -14,6 +14,7 @@ from graphstore.core.errors import (
     CeilingExceeded, VersionMismatch, SchemaError,
     CostThresholdExceeded, BatchRollback, AggregationError,
     VectorError, EmbedderRequired, VectorNotFound,
+    OptimizationInProgress,
 )
 from graphstore.core.memory import DEFAULT_CEILING_BYTES
 from graphstore.config import (

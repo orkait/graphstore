@@ -30,6 +30,8 @@ class DocumentConfig(msgspec.Struct, frozen=True):
 class DslConfig(msgspec.Struct, frozen=True):
     cost_threshold: int = 100_000
     plan_cache_size: int = 256
+    auto_optimize: bool = False
+    optimize_interval: int = 500
 
 
 class VaultConfig(msgspec.Struct, frozen=True):

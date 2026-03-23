@@ -523,3 +523,12 @@ class ForgetNode:
 @dataclass
 class SysRetain:
     pass
+
+# --- Self-balancing ---
+@dataclass
+class SysHealth:
+    pass
+
+@dataclass
+class SysOptimize:
+    target: str | None = None  # None=all, or "COMPACT","STRINGS","EDGES","VECTORS","BLOBS","CACHE"

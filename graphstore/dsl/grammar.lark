@@ -216,6 +216,7 @@ system_query: "SYS" sys_command
             | sys_duplicates | sys_embedders
             | sys_connect | sys_reembed | sys_status
             | sys_retain
+            | sys_health | sys_optimize
 
 sys_stats:      "STATS" STATS_TARGET?
 STATS_TARGET:   "NODES" | "EDGES" | "MEMORY" | "WAL"
@@ -259,6 +260,9 @@ sys_connect: "CONNECT" where_clause? threshold_clause?
 sys_reembed: "REEMBED"
 sys_status: "STATUS"
 sys_retain: "RETAIN"
+sys_health: "HEALTH"
+sys_optimize: "OPTIMIZE" OPTIMIZE_TARGET?
+OPTIMIZE_TARGET: "COMPACT" | "STRINGS" | "EDGES" | "VECTORS" | "BLOBS" | "CACHE"
 
 CLEAR_TARGET: "LOG" | "CACHE"
 WAL_ACTION: "STATUS" | "REPLAY"

@@ -99,6 +99,8 @@ from graphstore.dsl.ast_nodes import (
     LexicalSearchQuery,
     ForgetNode,
     SysRetain,
+    SysHealth,
+    SysOptimize,
 )
 
 
@@ -919,6 +921,13 @@ class DSLTransformer(Transformer):
 
     def sys_retain(self, args):
         return SysRetain()
+
+    def sys_health(self, args):
+        return SysHealth()
+
+    def sys_optimize(self, args):
+        target = str(args[0]) if args else None
+        return SysOptimize(target=target)
 
     def sys_contradictions(self, args):
         where = self._find(args, WhereClause)

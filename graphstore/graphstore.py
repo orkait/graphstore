@@ -15,7 +15,7 @@ from graphstore.dsl import ast_nodes
 from graphstore.persistence.database import open_database
 from graphstore.persistence.serializer import checkpoint as _checkpoint_fn
 from graphstore.persistence.deserializer import load as _load_fn
-from graphstore.core.errors import GraphStoreError
+from graphstore.core.errors import GraphStoreError, OptimizationInProgress
 from graphstore.core.memory import estimate as _estimate_memory
 from graphstore.config import GraphStoreConfig, load_config, merge_kwargs
 
@@ -109,6 +109,11 @@ class GraphStore:
         # Vector store (lazy init on first vector operation)
         self._vector_store = None
 
+        # Self-balancing state
+        self._optimizing = False
+        self._write_counter = 0
+        self._needs_optimize = False
+
         # Initialize store
         p = self._path
         if p is not None:
@@ -187,6 +192,14 @@ class GraphStore:
 
     def execute(self, query: str) -> Result:
         """Execute a single DSL query (user or system). Returns Result."""
+        # Reject during optimization (lock gate)
+        if self._optimizing:
+            raise OptimizationInProgress()
+
+        # Auto-optimize at safe point (between execute calls)
+        if self._needs_optimize:
+            self._run_auto_optimize()
+
         start = time.perf_counter_ns()
 
         # Sync vector store reference (may have been lazily created)
@@ -214,6 +227,13 @@ class GraphStore:
                 elif isinstance(ast, ast_nodes.SysWal) and ast.action == "REPLAY":  # type: ignore[attr-defined]
                     self._replay_wal()
                     result = Result(kind="ok", data=None, count=0)
+                elif isinstance(ast, ast_nodes.SysOptimize):
+                    self._optimizing = True
+                    try:
+                        result = self._sys_executor.execute(ast)
+                    finally:
+                        self._optimizing = False
+                        self._needs_optimize = False
                 else:
                     result = self._sys_executor.execute(ast)
                     # Sync vector store back from sys executor (rollback may change it)
@@ -243,9 +263,15 @@ class GraphStore:
 
                 result = self._executor.execute(ast)
 
-                # Auto-checkpoint check
-                if is_write and self._conn:
-                    self._maybe_auto_checkpoint()
+                # Auto-checkpoint check + write counter for auto-optimize
+                if is_write:
+                    self._write_counter += 1
+                    if self._conn:
+                        self._maybe_auto_checkpoint()
+                    if self._config.dsl.auto_optimize:
+                        interval = self._config.dsl.optimize_interval
+                        if self._write_counter % interval == 0:
+                            self._check_health_for_auto()
 
             elapsed = (time.perf_counter_ns() - start) // 1000
             result.elapsed_us = elapsed
@@ -415,6 +441,25 @@ class GraphStore:
             conn.commit()
         except Exception:
             pass
+
+    def _check_health_for_auto(self):
+        """Lightweight health check - sets _needs_optimize if pressure detected."""
+        from graphstore.core.optimizer import health_check, needs_optimization
+        health = health_check(self._store, self._vector_store, self._document_store)
+        if needs_optimization(health):
+            self._needs_optimize = True
+
+    def _run_auto_optimize(self):
+        """Run optimization at safe point (top of execute). No lock needed - we're between calls."""
+        self._optimizing = True
+        try:
+            from graphstore.core.optimizer import optimize_all
+            optimize_all(self._store, self._vector_store, self._document_store)
+        except Exception:
+            pass
+        finally:
+            self._optimizing = False
+            self._needs_optimize = False
 
     def _log_query(self, query: str, elapsed_us: int, result_count: int, error: str | None):
         """Log query to sqlite query_log table."""
