@@ -96,6 +96,11 @@ from graphstore.dsl.ast_nodes import (
     ConnectNode,
     SysReembed,
     SysStatus,
+    LexicalSearchQuery,
+    ForgetNode,
+    SysRetain,
+    SysHealth,
+    SysOptimize,
 )
 
 
@@ -668,6 +673,12 @@ class DSLTransformer(Transformer):
     def similar_node(self, args):
         return SimilarQuery(target_node_id=self._str(args[0]))
 
+    def lexical_q(self, args):
+        query = self._str(args[0])
+        limit = self._find(args[1:], LimitClause)
+        where = self._find(args[1:], WhereClause)
+        return LexicalSearchQuery(query=query, limit=limit, where=where)
+
     def vector_literal(self, args):
         return [self._num(a) for a in args]
 
@@ -899,11 +910,24 @@ class DSLTransformer(Transformer):
                 threshold = a[1]
         return ConnectNode(node_id=node_id, threshold=threshold)
 
+    def forget_node(self, args):
+        return ForgetNode(id=self._str(args[0]))
+
     def sys_reembed(self, args):
         return SysReembed()
 
     def sys_status(self, args):
         return SysStatus()
+
+    def sys_retain(self, args):
+        return SysRetain()
+
+    def sys_health(self, args):
+        return SysHealth()
+
+    def sys_optimize(self, args):
+        target = str(args[0]) if args else None
+        return SysOptimize(target=target)
 
     def sys_contradictions(self, args):
         where = self._find(args, WhereClause)

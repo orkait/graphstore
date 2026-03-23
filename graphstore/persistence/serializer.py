@@ -4,9 +4,10 @@ checkpoint() writes the full graph state into the blobs and metadata
 tables within a single transaction.
 """
 
-import json
 import time
 from urllib.parse import quote
+
+import msgspec.json as mjson
 
 from graphstore.persistence.database import SCHEMA_VERSION
 from graphstore.core.store import CoreStore
@@ -18,7 +19,7 @@ def checkpoint(store: CoreStore, schema: SchemaRegistry, conn):
     with conn:
         # String table
         conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                     ("strings", json.dumps(store.string_table.to_list()).encode(), "json"))
+                     ("strings", mjson.encode(store.string_table.to_list()), "json"))
 
         # Node kinds array
         kinds_data = store.node_kinds[:store._next_slot]
@@ -57,7 +58,7 @@ def checkpoint(store: CoreStore, schema: SchemaRegistry, conn):
             conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
                         (f"edges:{etype}:data", matrix.data.tobytes(), str(matrix.data.dtype)))
             conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                        (f"edges:{etype}:shape", json.dumps(list(matrix.shape)).encode(), "json"))
+                        (f"edges:{etype}:shape", mjson.encode(list(matrix.shape)), "json"))
 
         # Raw edge lists for store reconstruction
         conn.execute("DELETE FROM blobs WHERE key LIKE 'raw_edges:%'")
@@ -65,27 +66,27 @@ def checkpoint(store: CoreStore, schema: SchemaRegistry, conn):
             # edge_list is [(src_slot, tgt_slot, data_dict), ...]
             serializable = [(int(s), int(t), d) for s, t, d in edge_list]
             conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                        (f"raw_edges:{etype}", json.dumps(serializable).encode(), "json"))
+                        (f"raw_edges:{etype}", mjson.encode(serializable), "json"))
 
         # Tombstones
         conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                     ("tombstones", json.dumps(list(store.node_tombstones)).encode(), "json"))
+                     ("tombstones", mjson.encode(list(store.node_tombstones)), "json"))
 
         # Secondary index field names (not data)
         conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                     ("indexed_fields", json.dumps(list(store._indexed_fields)).encode(), "json"))
+                     ("indexed_fields", mjson.encode(list(store._indexed_fields)), "json"))
 
         # Store metadata
         conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                     ("store_meta", json.dumps({
+                     ("store_meta", mjson.encode({
                          "next_slot": store._next_slot,
                          "count": store._count,
                          "capacity": store._capacity,
-                     }).encode(), "json"))
+                     }), "json"))
 
         # Schema
         conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                     ("schema", json.dumps(schema.to_dict()).encode(), "json"))
+                     ("schema", mjson.encode(schema.to_dict()), "json"))
 
         # Vector index
         vectors = getattr(store, 'vectors', None)

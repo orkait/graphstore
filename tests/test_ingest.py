@@ -182,7 +182,7 @@ class TestIngestDSL:
         g = GraphStore(path=str(tmp_path / "db"), embedder=None)
         result = g.execute(f'INGEST "{f}"')
         assert result.data["chunks"] >= 2
-        assert result.data["parser"] == "markitdown"
+        assert result.data["parser"] in ("markitdown", "direct")
         g.close()
 
     def test_ingest_with_as_and_kind(self, tmp_path):

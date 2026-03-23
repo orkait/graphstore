@@ -506,3 +506,29 @@ class VaultDaily:
 @dataclass
 class VaultArchive:
     title: str
+
+# --- Lexical search ---
+@dataclass
+class LexicalSearchQuery:
+    query: str
+    limit: LimitClause | None = None
+    where: WhereClause | None = None
+
+# --- Forget (hard delete blob + memory) ---
+@dataclass
+class ForgetNode:
+    id: str
+
+# --- Retention policy scan ---
+@dataclass
+class SysRetain:
+    pass
+
+# --- Self-balancing ---
+@dataclass
+class SysHealth:
+    pass
+
+@dataclass
+class SysOptimize:
+    target: str | None = None  # None=all, or "COMPACT","STRINGS","EDGES","VECTORS","BLOBS","CACHE"

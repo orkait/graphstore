@@ -56,12 +56,23 @@ class DocumentStore:
                 description TEXT
             );
         """)
+        self._conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS doc_fts
+            USING fts5(summary, tokenize='porter unicode61')
+        """)
 
     # --- Documents ---
     def put_document(self, slot: int, content: bytes, content_type: str) -> None:
         self._conn.execute(
             "INSERT OR REPLACE INTO documents (slot, content, content_type, size) VALUES (?, ?, ?, ?)",
             (slot, content, content_type, len(content)))
+        self._conn.commit()
+
+    def put_documents_batch(self, rows: list[tuple[int, bytes, str]]) -> None:
+        """Batch insert documents with single commit."""
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO documents (slot, content, content_type, size) VALUES (?, ?, ?, ?)",
+            [(slot, content, ctype, len(content)) for slot, content, ctype in rows])
         self._conn.commit()
 
     def get_document(self, slot: int) -> tuple[bytes, str] | None:
@@ -71,6 +82,11 @@ class DocumentStore:
 
     def delete_document(self, slot: int) -> None:
         self._conn.execute("DELETE FROM documents WHERE slot = ?", (slot,))
+        self._conn.commit()
+
+    def delete_documents_batch(self, slots: list[int]) -> None:
+        """Batch delete documents with single commit."""
+        self._conn.executemany("DELETE FROM documents WHERE slot = ?", [(s,) for s in slots])
         self._conn.commit()
 
     def has_document(self, slot: int) -> bool:
@@ -83,6 +99,9 @@ class DocumentStore:
         self._conn.execute(
             "INSERT OR REPLACE INTO summaries VALUES (?, ?, ?, ?, ?, ?)",
             (slot, summary, heading, page, chunk_index, doc_slot))
+        self._conn.execute(
+            "INSERT OR REPLACE INTO doc_fts (rowid, summary) VALUES (?, ?)",
+            (slot, summary))
         self._conn.commit()
 
     def get_summary(self, slot: int) -> dict | None:
@@ -100,6 +119,15 @@ class DocumentStore:
             (doc_slot,)).fetchall()
         return [{"slot": r[0], "summary": r[1], "heading": r[2], "page": r[3],
                  "chunk_index": r[4]} for r in rows]
+
+    # --- Full-text search ---
+    def search_text(self, query: str, limit: int = 10) -> list[tuple[int, float]]:
+        """BM25 full-text search over summaries. Returns [(slot, bm25_score), ...]."""
+        rows = self._conn.execute(
+            "SELECT rowid, rank FROM doc_fts WHERE doc_fts MATCH ? ORDER BY rank LIMIT ?",
+            (query, limit)
+        ).fetchall()
+        return [(int(row[0]), float(row[1])) for row in rows]
 
     # --- Metadata ---
     def put_metadata(self, doc_slot: int, metadata: dict) -> None:
@@ -164,6 +192,10 @@ class DocumentStore:
         for s in chunk_slots:
             r = self._conn.execute("DELETE FROM images WHERE slot = ?", (s,))
             count += r.rowcount
+        # Clean FTS index
+        self._conn.execute("DELETE FROM doc_fts WHERE rowid = ?", (doc_slot,))
+        for s in chunk_slots:
+            self._conn.execute("DELETE FROM doc_fts WHERE rowid = ?", (s,))
 
         self._conn.commit()
         return count
@@ -193,6 +225,10 @@ class DocumentStore:
         all_meta_slots = {r[0] for r in self._conn.execute("SELECT doc_slot FROM doc_metadata").fetchall()}
         for s in all_meta_slots - live_slots:
             self._conn.execute("DELETE FROM doc_metadata WHERE doc_slot = ?", (s,))
+
+        # Clean FTS for orphaned summaries
+        for s in orphan_sums:
+            self._conn.execute("DELETE FROM doc_fts WHERE rowid = ?", (s,))
 
         self._conn.commit()
         return count

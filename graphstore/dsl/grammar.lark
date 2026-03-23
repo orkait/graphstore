@@ -17,6 +17,7 @@ start: statement
            | recall_q
            | counterfactual
            | similar_q
+           | lexical_q
 
 node_q:        "NODE" STRING with_doc?
 nodes_q:       "NODES" where_clause? order_clause? limit_clause? offset_clause?
@@ -43,6 +44,7 @@ recall_q: "RECALL" "FROM" STRING "DEPTH" NUMBER limit_clause? where_clause?
 counterfactual: "WHAT" "IF" "RETRACT" STRING
 
 similar_q: "SIMILAR" "TO" similar_target limit_clause? where_clause?
+lexical_q: "LEXICAL" "SEARCH" STRING limit_clause? where_clause?
 similar_target: vector_literal      -> similar_vector
               | STRING              -> similar_text
               | "NODE" STRING       -> similar_node
@@ -81,8 +83,10 @@ arrow: "-[" expr "]->"
             | bind_context | discard_context
             | ingest_stmt
             | connect_node
+            | forget_node
 
 connect_node: "CONNECT" "NODE" STRING threshold_clause?
+forget_node: "FORGET" "NODE" STRING
 
 create_node:  "CREATE" "NODE" STRING field_pairs vector_clause? expires_clause? document_clause?
             | "CREATE" "NODE" "AUTO" field_pairs vector_clause? expires_clause? document_clause? -> create_node_auto
@@ -135,7 +139,7 @@ _batch_stmt: var_assign
            | create_edge | update_edge | delete_edge | delete_edges
            | increment
            | assert_stmt | retract_stmt | update_nodes | merge_stmt
-           | connect_node
+           | connect_node | forget_node
 
 var_assign: VARIABLE "=" write_query
 
@@ -211,6 +215,8 @@ system_query: "SYS" sys_command
             | sys_snapshot | sys_rollback | sys_snapshots
             | sys_duplicates | sys_embedders
             | sys_connect | sys_reembed | sys_status
+            | sys_retain
+            | sys_health | sys_optimize
 
 sys_stats:      "STATS" STATS_TARGET?
 STATS_TARGET:   "NODES" | "EDGES" | "MEMORY" | "WAL"
@@ -253,6 +259,10 @@ sys_embedders: "EMBEDDERS"
 sys_connect: "CONNECT" where_clause? threshold_clause?
 sys_reembed: "REEMBED"
 sys_status: "STATUS"
+sys_retain: "RETAIN"
+sys_health: "HEALTH"
+sys_optimize: "OPTIMIZE" OPTIMIZE_TARGET?
+OPTIMIZE_TARGET: "COMPACT" | "STRINGS" | "EDGES" | "VECTORS" | "BLOBS" | "CACHE"
 
 CLEAR_TARGET: "LOG" | "CACHE"
 WAL_ACTION: "STATUS" | "REPLAY"
