@@ -11,6 +11,7 @@ class EdgeMatrices:
         self._cache: dict[frozenset, csr_matrix] = {} # combination cache
         self._edge_data: dict[str, list[dict]] = {}  # per-type edge data lists
         self._transpose_cache: dict[str, csr_matrix] = {} # CSC for incoming edges
+        self._combined_transpose: csr_matrix | None = None  # cached combined-all transpose
 
         # Degree arrays - precomputed on rebuild
         self._out_degree: dict[str, np.ndarray] = {}
@@ -49,6 +50,14 @@ class EdgeMatrices:
         if edge_type not in self._transpose_cache:
             self._transpose_cache[edge_type] = self._typed[edge_type].T.tocsr()
         return self._transpose_cache[edge_type]
+
+    def get_combined_transpose(self) -> csr_matrix | None:
+        """Cached transpose of combined-all matrix. Used by RECALL spreading activation."""
+        if self._combined_all is None:
+            return None
+        if self._combined_transpose is None:
+            self._combined_transpose = self._combined_all.T.tocsr()
+        return self._combined_transpose
 
     def get_edge_data(self, edge_type: str) -> list[dict]:
         """Get edge data for a given type."""
@@ -91,6 +100,7 @@ class EdgeMatrices:
         self._typed.clear()
         self._cache.clear()
         self._transpose_cache.clear()
+        self._combined_transpose = None  # invalidate on rebuild
         self._edge_data.clear()
         self._out_degree.clear()
         self._in_degree.clear()
