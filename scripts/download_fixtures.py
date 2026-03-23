@@ -175,45 +175,61 @@ def download_images():
 
 # ─── Voice: AI4Bharat Svarah ──────────────────────────────────────────────────
 def download_voice():
-    print("\n[voice] espeak-ng generated clips (English + Hindi)")
+    print("\n[voice] OpenSLR 118 — real Hindi speech (Gram Vaani)")
     d = FIXTURES / "voice"
     d.mkdir(parents=True, exist_ok=True)
 
-    import subprocess
-    clips = [
-        # English clips (various lengths and content types)
-        ("en", "The quick brown fox jumps over the lazy dog"),
-        ("en", "Graphstore is an agent memory substrate"),
-        ("en", "Please create a new node with kind memory"),
-        ("en", "What is the shortest path from Paris to London"),
-        ("en", "The system returned forty two results"),
-        # Hindi clips (Indian language, tests non-ASCII transcripts)
-        ("hi", "नमस्ते यह एक परीक्षा है"),
-        ("hi", "भारत एक विविधताओं वाला देश है"),
-        ("hi", "कृपया मुझे रास्ता दिखाइए"),
-        ("hi", "आज का मौसम बहुत अच्छा है"),
-        ("hi", "ग्राफ डेटाबेस में नोड बनाएं"),
-    ]
-    manifest = []
-    for i, (lang, text) in enumerate(clips):
-        fname = f"clip_{i:02d}_{lang}.wav"
-        wav_path = d / fname
-        if not wav_path.exists():
-            try:
-                subprocess.run(
-                    ["espeak-ng", "-v", lang, "-w", str(wav_path), text],
-                    check=True, capture_output=True
-                )
-            except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                print(f"  {fname} FAILED: {e}")
-                continue
-        kb = wav_path.stat().st_size // 1024
-        print(f"  {fname} ({kb}KB)")
-        manifest.append({"file": fname, "lang": lang, "transcript": text})
+    import subprocess, tarfile, shutil
 
-    (d / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+    archive = d / "_eval.tar.gz"
+    extract_dir = d / "_extract"
+    manifest_path = d / "manifest.json"
+
+    if manifest_path.exists():
+        print("  skip (manifest exists)")
+        return
+
+    # Download the 62MB eval set
+    dl("https://openslr.org/resources/118/GV_Eval_3h.tar.gz", archive, "GV_Eval_3h.tar.gz")
+    if not archive.exists():
+        print("  FAILED to download archive")
+        return
+
+    # Extract
+    print("  extracting...", end="", flush=True)
+    extract_dir.mkdir(exist_ok=True)
+    with tarfile.open(archive, "r:gz") as tar:
+        tar.extractall(extract_dir, filter="data")
+    print(" done")
+
+    # Find audio files + transcript (format: "utt_id transcript_text")
+    audio_files = sorted(extract_dir.rglob("*.mp3"))[:15]
+    transcripts = {}
+    for tf in extract_dir.rglob("text"):
+        for line in tf.read_text(encoding="utf-8", errors="replace").strip().splitlines():
+            idx = line.find(" ")
+            if idx > 0:
+                utt_id = line[:idx].strip()
+                text = line[idx + 1:].strip()
+                transcripts[utt_id] = text
+
+    manifest = []
+    for i, src in enumerate(audio_files):
+        fname = f"clip_{i:02d}.mp3"
+        dest = d / fname
+        if not dest.exists():
+            shutil.copy2(src, dest)
+        kb = dest.stat().st_size // 1024
+        transcript = transcripts.get(src.stem, "")
+        print(f"  {fname} ({kb}KB)")
+        manifest.append({"file": fname, "lang": "hi", "transcript": transcript})
+
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
     print(f"  manifest.json ({len(manifest)} clips)")
-    print("  NOTE: These are TTS-generated. Replace with real human recordings for production STT testing.")
+
+    # Cleanup archive and extract dir
+    archive.unlink(missing_ok=True)
+    shutil.rmtree(extract_dir, ignore_errors=True)
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
