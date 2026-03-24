@@ -144,15 +144,15 @@ class TestOptimizeVectors:
         gs = GraphStore(path=str(tmp_path / "db"), embedder=None)
         gs.execute('CREATE NODE "a" kind = "test" VECTOR [1.0, 0.0, 0.0, 0.0]')
         gs.execute('CREATE NODE "b" kind = "test" VECTOR [0.0, 1.0, 0.0, 0.0]')
-        # Retract instead of delete - retracted nodes are invisible but vectors remain
-        gs.execute('RETRACT "a"')
+        # RETRACT now immediately removes the vector (no ghost until optimize)
         str_id = gs._store.string_table.intern("a")
         slot = gs._store.id_to_slot[str_id]
         assert gs._vector_store.has_vector(slot)
+        gs.execute('RETRACT "a"')
+        assert not gs._vector_store.has_vector(slot)
 
         result = gs.execute('SYS OPTIMIZE VECTORS')
-        assert result.data["removed"] == 1
-        assert not gs._vector_store.has_vector(slot)
+        assert result.data["removed"] == 0
         gs.close()
 
 
