@@ -63,11 +63,13 @@ class IntelligenceHandlers:
             mat_t = resize_csr(combined, n).T.tocsr()
         else:
             mat_t = self.store.edge_matrices.get_combined_transpose()
+        decay = getattr(self, '_recall_decay', 0.7)
         for _ in range(q.depth):
-            activation = mat_t.dot(activation)
-            activation *= importance[:len(activation)]
-            activation *= recency[:len(activation)]
+            spread = mat_t.dot(activation) * decay
+            activation = activation + spread
             activation[:n] *= live_mask.astype(np.float64)
+        activation *= importance[:len(activation)]
+        activation *= recency[:len(activation)]
 
         activation[cue_slot] = 0.0
 
@@ -347,11 +349,12 @@ class IntelligenceHandlers:
                     scores["recall_boost"] = float(col_data[slot]) / max_recalls
 
         # --- Weighted fusion ---
-        W_VECTOR = 0.30
-        W_BM25 = 0.20
-        W_RECENCY = 0.15
-        W_CONFIDENCE = 0.20
-        W_RECALL = 0.15
+        weights = getattr(self, '_remember_weights', [0.30, 0.20, 0.15, 0.20, 0.15])
+        W_VECTOR = weights[0] if len(weights) > 0 else 0.30
+        W_BM25 = weights[1] if len(weights) > 1 else 0.20
+        W_RECENCY = weights[2] if len(weights) > 2 else 0.15
+        W_CONFIDENCE = weights[3] if len(weights) > 3 else 0.20
+        W_RECALL = weights[4] if len(weights) > 4 else 0.15
 
         scored = []
         for slot, scores in candidates.items():

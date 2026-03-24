@@ -155,6 +155,10 @@ class GraphStore:
                                   ingest_root=self._ingest_root)
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
         self._executor.cost_threshold = cfg.dsl.cost_threshold
+        self._executor._fts_full_text = cfg.document.fts_full_text
+        self._executor._recall_decay = cfg.dsl.recall_decay
+        self._executor._remember_weights = cfg.dsl.remember_weights
+        self._executor._chunk_max_size = cfg.document.chunk_max_size
         retention_dict = {
             "blob_warm_days": cfg.retention.blob_warm_days,
             "blob_archive_days": cfg.retention.blob_archive_days,

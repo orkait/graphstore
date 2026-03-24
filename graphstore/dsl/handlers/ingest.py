@@ -43,7 +43,8 @@ class IngestHandlers:
 
         result = ingest_file(safe_path, using=q.using)
 
-        chunks = chunk_by_heading(result.markdown)
+        chunk_size = getattr(self, '_chunk_max_size', 2000)
+        chunks = chunk_by_heading(result.markdown, max_chunk_size=chunk_size)
 
         parent_id = q.node_id
         if not parent_id:
@@ -122,9 +123,10 @@ class IngestHandlers:
                 ds._conn.execute(
                     "INSERT OR REPLACE INTO summaries VALUES (?, ?, ?, ?, ?, ?)",
                     (chunk_slot, chunk.summary, chunk.heading, chunk.page, chunk.index, parent_slot))
+                fts_text = chunk.text if getattr(self, '_fts_full_text', True) else chunk.summary
                 ds._conn.execute(
                     "INSERT OR REPLACE INTO doc_fts (rowid, summary) VALUES (?, ?)",
-                    (chunk_slot, chunk.summary))
+                    (chunk_slot, fts_text))
 
             embed_text = f"{chunk.heading}: {chunk.text}" if chunk.heading else chunk.text
             embed_batch.append((chunk_slot, embed_text))

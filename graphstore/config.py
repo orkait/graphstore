@@ -21,10 +21,15 @@ class VectorConfig(msgspec.Struct, frozen=True):
     embedder: str = "default"
     similarity_threshold: float = 0.85
     duplicate_threshold: float = 0.95
+    search_oversample: int = 5
 
 
 class DocumentConfig(msgspec.Struct, frozen=True):
     fts_tokenizer: str = "porter unicode61"
+    chunk_max_size: int = 2000
+    chunk_overlap: int = 50
+    summary_max_length: int = 200
+    fts_full_text: bool = True
 
 
 class DslConfig(msgspec.Struct, frozen=True):
@@ -32,6 +37,8 @@ class DslConfig(msgspec.Struct, frozen=True):
     plan_cache_size: int = 256
     auto_optimize: bool = False
     optimize_interval: int = 500
+    recall_decay: float = 0.7
+    remember_weights: list[float] = msgspec.field(default_factory=lambda: [0.30, 0.20, 0.15, 0.20, 0.15])
 
 
 class VaultConfig(msgspec.Struct, frozen=True):
