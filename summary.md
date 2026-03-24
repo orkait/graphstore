@@ -6,7 +6,7 @@ Everything a new session needs to understand this codebase.
 
 An agent-first memory substrate. Not a user-facing app. It provides all the memory tools an AI agent needs: graph recall, semantic recall, lexical recall, belief tracking, document ingestion, and structured note management.
 
-One agent per DB instance. Single-threaded. No locks.
+Opt-in threaded mode (`GraphStore(threaded=True)`) for multi-agent access via single-writer command queue. Default single-threaded with zero overhead.
 
 ## Core architecture
 
@@ -121,7 +121,7 @@ graphstore/
 
 ## Dependencies
 
-Core: `numpy`, `scipy`, `lark`, `usearch`, `model2vec`, `pyyaml`, `markitdown`, `pymupdf4llm`, `pymupdf`, `msgspec`
+Core: `numpy`, `scipy`, `lark`, `usearch`, `model2vec`, `pyyaml`, `markitdown`, `pymupdf4llm`, `pymupdf`, `msgspec`, `croniter`
 
 Optional: `fastapi`/`uvicorn` (playground), `docling`/`openai` (ingest-pro)
 
@@ -129,16 +129,18 @@ Optional: `fastapi`/`uvicorn` (playground), `docling`/`openai` (ingest-pro)
 
 One JSON file (`graphstore.json`), sectioned by engine. All sections have typed defaults via frozen msgspec Structs. Missing keys auto-fill.
 
+54 config fields across 8 sections, all wired to code with zero hardcoded magic numbers:
+
 ```json
 {
-  "core": {"ceiling_mb": 256, "initial_capacity": 1024},
-  "vector": {"embedder": "default", "similarity_threshold": 0.85},
-  "document": {"fts_tokenizer": "porter unicode61"},
-  "dsl": {"cost_threshold": 100000, "plan_cache_size": 256, "auto_optimize": false, "optimize_interval": 500},
+  "core": {"ceiling_mb": 256, "initial_capacity": 1024, "compact_threshold": 0.2, "string_gc_threshold": 3.0, "protected_kinds": ["schema", "config", "system"]},
+  "vector": {"embedder": "default", "similarity_threshold": 0.85, "duplicate_threshold": 0.95, "search_oversample": 5, "model2vec_model": "minishlab/M2V_base_output", "model_cache_dir": null},
+  "document": {"fts_tokenizer": "porter unicode61", "chunk_max_size": 2000, "chunk_overlap": 50, "summary_max_length": 200, "fts_full_text": true, "vision_model": "smolvlm2:2.2b", "vision_base_url": "http://localhost:11434/v1", "vision_max_tokens": 300},
+  "dsl": {"cost_threshold": 100000, "plan_cache_size": 256, "auto_optimize": false, "optimize_interval": 500, "recall_decay": 0.7, "remember_weights": [0.30, 0.20, 0.15, 0.20, 0.15], "cache_gc_threshold": 200},
   "vault": {"enabled": false, "path": null, "auto_sync": true},
-  "persistence": {"wal_hard_limit": 100000, "auto_checkpoint_threshold": 50000, "log_retention_days": 7},
+  "persistence": {"wal_hard_limit": 100000, "auto_checkpoint_threshold": 50000, "log_retention_days": 7, "busy_timeout_ms": 5000},
   "retention": {"blob_warm_days": 30, "blob_archive_days": 90, "blob_delete_days": 365},
-  "server": {"cors_origins": ["*"], "ingest_root": null}
+  "server": {"cors_origins": ["*"], "ingest_root": null, "auth_token": null, "rate_limit_rpm": 120, "rate_limit_window": 60, "max_query_length": 10000, "max_batch_size": 1000}
 }
 ```
 
@@ -166,6 +168,7 @@ AGGREGATE NODES [WHERE ...] GROUP BY field SELECT COUNT(), AVG(f) [HAVING ...] [
 RECALL FROM "id" DEPTH N [LIMIT N] [WHERE ...]
 SIMILAR TO "text"|[vector]|NODE "id" [LIMIT N] [WHERE ...]
 LEXICAL SEARCH "query" [LIMIT N] [WHERE ...]
+REMEMBER "query" [TOKENS N] [LIMIT N] [WHERE ...]
 WHAT IF RETRACT "id"
 ```
 
@@ -216,6 +219,11 @@ SYS CHECKPOINT / SYS REBUILD INDICES / SYS CLEAR LOG|CACHE
 SYS EXPLAIN <read_query>
 SYS SLOW QUERIES [SINCE "iso"] [LIMIT N] / SYS FAILED QUERIES [LIMIT N]
 SYS WAL STATUS|REPLAY
+SYS LOG [WHERE ...] [SINCE "iso"] [TRACE "id"] [LIMIT N]
+SYS CRON ADD "name" SCHEDULE "cron-expr" QUERY "dsl-query"
+SYS CRON DELETE|ENABLE|DISABLE "name"
+SYS CRON LIST / SYS CRON RUN "name"
+SYS EVICT [LIMIT N]
 ```
 
 ### Vault
@@ -325,9 +333,135 @@ Concepts from two repos influenced graphstore's retrieval architecture (see `mcp
 | uvloop | N/A | No event loop (single-threaded sync DB) |
 | robyn | N/A | Server is 200 LOC wrapper, not bottleneck |
 
+### Session 3: Implementation improvements + agentic memory hardening (PR #18, #20)
+
+#### Bug fixes (7)
+- **uint8 kind truncation** - deserializer loaded node_kinds as uint8, corrupting graphs with >255 kinds
+- **Version mismatch** - `__init__.py` said 0.2.0, `pyproject.toml` said 0.3.0
+- **tempfile TOCTOU race** - DocumentStore used `mktemp` (race condition), fixed to `mkstemp`
+- **Regex monkey-patching** - LIKE evaluation cached compiled regex on shared AST nodes, fixed with module-level LRU cache
+- **ORDER BY string TypeError** - `slots` array clobbered by None when column sort returned None for interned strings
+- **UPDATE EDGE invisible** - `_edge_data_idx` not updated alongside `_edges_by_type`, making edge mutations invisible
+- **CSR shape mismatch** - scipy indptr not padded when nodes added after last edge rebuild; added `resize_csr()` utility
+
+#### Performance (4)
+- **get_edges_to CSR pre-check** - uses transpose CSR to skip edge types with zero incoming edges
+- **O(1) edge data index** - `_edge_data_idx: dict[str, dict[tuple, dict]]` replaces O(E) list scan
+- **VectorStore native buffer API** - `save(None)` / `load(bytes)` instead of temp files
+- **Incremental checkpoint** - dirty flags per subsystem; skip clean blobs on checkpoint
+
+#### Security (2)
+- **Bearer auth + rate limiter** - `GRAPHSTORE_AUTH_TOKEN` env var, sliding-window rate limiter, configurable CORS
+- **DSL input validation** - max query length, null byte rejection, batch size limit
+
+#### Concurrency (1)
+- **Command queue** - `GraphStore(threaded=True)` serializes all access through `PriorityQueue` with dedicated daemon worker thread. Interactive queries (priority 0) complete before background jobs (priority 1). `submit_background()` for fire-and-forget maintenance.
+
+#### Observability (3)
+- **Silent except -> logger.debug** - 24 locations across 10 files now log instead of swallowing
+- **Background failure logging** - `submit_background` done callback logs at WARNING
+- **Intelligent log layer** - query_log enriched with auto-tags (read/write/intelligence/belief/ingest/vault/system), trace binding (`bind_trace`/`discard_trace`), source tracking (user/cron/background), structured event emission via `graphstore.events` logger, `SYS LOG` DSL command, `GET /api/logs` REST endpoint
+
+#### Scheduled jobs (1)
+- **CRON scheduler** - persistent jobs in SQLite, full cron expressions via croniter, daemon timer thread, `SYS CRON ADD/DELETE/ENABLE/DISABLE/LIST/RUN`, survives restarts, requires `threaded=True`
+
+#### Retrieval quality (5)
+- **REMEMBER hybrid retrieval** - `REMEMBER "query" LIMIT 10` fuses 5 signals: vector similarity (0.30) + BM25 (0.20) + recency (0.15) + confidence (0.20) + recall frequency (0.15). Score breakdown exposed in results.
+- **REMEMBER TOKENS** - `REMEMBER "query" TOKENS 4000` fills up to N tokens (estimated len//4) instead of N nodes. Agent gets exactly the right context budget.
+- **Full text embedding** - INGEST embeds full `chunk.text` with heading prefix, not truncated `summary[:200]`. Dramatically improves vector search quality.
+- **Full text FTS5** - LEXICAL SEARCH indexes full chunk text, not summary. BM25 finds content anywhere in the chunk.
+- **Accumulative RECALL** - spreading activation now accumulates (`activation += spread * decay`) instead of overwriting per hop. Closer nodes retain higher activation. Configurable via `dsl.recall_decay`.
+
+#### Engine synchronization (8)
+- **Auto re-embed on UPDATE** - single `UPDATE NODE` and bulk `UPDATE NODES` both re-embed when schema EMBED field changes
+- **Bulk DELETE cleans vectors** - `DELETE NODES WHERE` removes vectors before tombstoning
+- **RETRACT removes vector immediately** - no more ghost vectors until optimize
+- **DELETE NODE cleans DocumentStore** - blob removed on regular delete (was only on FORGET)
+- **FORGET cleans FTS5** - FTS5 orphan entries removed
+- **SYS EXPIRE cleans vectors** - expired node vectors removed immediately
+- **SIMILAR TO exposes confidence** - `_confidence` field in results for transparency
+- **CREATE NODE + DOCUMENT auto-embeds** - DOCUMENT clause text gets embedded if embedder available
+
+#### Architecture (2)
+- **WALManager + OptimizerScheduler extracted** - `graphstore.py` reduced from 496 to 392 lines
+- **Vault sync uses CoreStore API** - no more direct `_edges_by_type` mutation
+
+#### Memory safety (2)
+- **Accurate memory accounting** - `measure()` returns real component breakdown (arrays, columns, strings, edges, vectors, CSR)
+- **Emergency eviction** - `SYS EVICT` removes oldest non-protected nodes; auto-eviction at 90% ceiling via health check
+
+#### Config completeness (1)
+- **54 config fields, all wired** - zero hardcoded magic numbers. Every tunable value flows through `graphstore.json`. Includes: chunk size, overlap, summary length, FTS full text, vector oversample, recall decay, REMEMBER weights, optimizer thresholds, vision defaults, rate limiter, batch limits, busy timeout, protected kinds, model paths.
+
+#### Testing (5)
+- **980 tests** (up from 843), 0 failures
+- **48 new tests** for previously untested commands (WEIGHTED PATH/DISTANCE, UPDATE EDGE, FORGET NODE, ORDER BY string, /api/logs, /api/script)
+- **26 E2E tests with real Model2Vec embedder** - ingest real ML papers, semantic search finds attention mechanism content, full agent lifecycle (ingest -> knowledge graph -> beliefs -> RECALL -> REMEMBER -> trace -> checkpoint)
+- **37 integration tests with mock embedder** - all 6 engines exercised with 86 real fixture files
+- **Core test proven**: "What do transformers and BERT have in common?" returns ML paper chunks about attention mechanisms ✅
+
+### Engine sync status (verified via behaviour analysis)
+
+Every mutation propagates to all relevant engines:
+
+| Mutation | CoreStore | VectorStore | DocumentStore | FTS5 |
+|----------|-----------|-------------|---------------|------|
+| CREATE NODE + EMBED schema | ✅ | ✅ auto-embed | - | - |
+| CREATE NODE + DOCUMENT | ✅ | ✅ auto-embed | ✅ blob | - |
+| UPDATE NODE (embed field) | ✅ | ✅ auto re-embed | - | - |
+| UPDATE NODES bulk | ✅ | ✅ auto re-embed | - | - |
+| DELETE NODE | ✅ tombstone | ✅ removed | ✅ blob removed | - |
+| DELETE NODES bulk | ✅ tombstone | ✅ removed | - | - |
+| FORGET NODE | ✅ cascade | ✅ removed | ✅ removed | ✅ cleaned |
+| RETRACT | ✅ __retracted__ | ✅ removed immediately | - | - |
+| SYS EXPIRE | ✅ tombstone | ✅ removed | - | - |
+| INGEST | ✅ nodes+edges | ✅ full text | ✅ blobs+summaries | ✅ full text |
+
+### Retrieval model
+
+| Command | Signals | Token Budget | Use Case |
+|---------|---------|-------------|----------|
+| SIMILAR TO | Vector cosine similarity | LIMIT N nodes | Pure semantic search |
+| LEXICAL SEARCH | BM25 on full text | LIMIT N nodes | Keyword/phrase search |
+| RECALL FROM | Accumulative spreading activation (decay=0.7) × importance × confidence × recency | LIMIT N nodes | Associative memory recall |
+| REMEMBER | 5-signal fusion: vector (0.30) + BM25 (0.20) + recency (0.15) + confidence (0.20) + recall_count (0.15) | **TOKENS N** or LIMIT N | Agent context retrieval |
+
+## Known gaps
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| ~~WAL not wired~~ | ~~Medium~~ | Fixed (PR #17) |
+| ~~executor_base.py bloat~~ | ~~Medium~~ | Fixed (PR #17) |
+| ~~Optimizer SQL perf~~ | ~~Low~~ | Fixed (PR #17) |
+| ~~Embedding quality (summary[:200])~~ | ~~Critical~~ | Fixed (PR #20) - full text embedded |
+| ~~Engine sync on mutation~~ | ~~Critical~~ | Fixed (PR #20) - all mutations propagate |
+| ~~RECALL model (non-cumulative)~~ | ~~High~~ | Fixed (PR #20) - accumulative with decay |
+| ~~Config not wired (5 fields)~~ | ~~High~~ | Fixed (PR #20) - 54 fields, all wired |
+| ~~Token budget retrieval~~ | ~~High~~ | Fixed (PR #20) - REMEMBER TOKENS N |
+| Memory consolidation (LLM callback) | Medium | Needs design - requires external LLM to summarize old memories |
+| Query-type routing (factual/comparative/causal) | Low | Future - REMEMBER works for 80% of queries |
+| Cross-engine transaction on INGEST | Low | Snapshot/rollback primitives exist, not wired into INGEST |
+| executor_system.py untouched | Low | 841 lines, not moved to handler registry pattern |
+| Mislabeled fixture | Low | `art-of-war.txt` is actually Origin of Species |
+
+## Architecture decisions
+
+- **Single agent per DB** - no locking, optimizer safe under exclusive access
+- **Opt-in threading** - `threaded=True` enables command queue for multi-agent access, default has zero overhead
+- **Config: one file, sectioned by engine** - 54 fields, all with backward-compatible defaults
+- **Inferred structure: durable but not sacred** - section nodes carry `__confidence__=0.6`
+- **Blob lifecycle != memory lifecycle** - `SYS RETAIN` deletes bytes, `FORGET NODE` deletes everything
+- **Auto-optimize disabled by default** - agent controls when via `SYS HEALTH` + `SYS OPTIMIZE`
+- **Adding a DSL command = 2 files** - grammar rule + handler file with `@handles`
+- **Public API over private access** - `server.py` uses `get_all_nodes()` / `cost_threshold` / `ceiling_mb` instead of `_store._ceiling_bytes`
+- **Mixin-based executor** - `ExecutorBase` inherits `VisibilityMixin` + `FilteringMixin`, each <100 lines
+- **Document truth = raw bytes** - CoreStore columns, VectorStore embeddings, FTS5 index are derived search indices that auto-sync on mutation
+- **CRON requires threaded mode** - background work needs the command queue for safe serialization
+- **Retrieval feedback loop** - REMEMBER auto-increments `__recall_count__` and `__last_recalled_at__`; frequently useful memories become stickier
+
 ## What to pick up next
 
-1. Move `executor_system.py` handlers into registry pattern
-2. Add E2E integration test for optimize cycle
-3. Wire mock test layer (`tests/fixtures/`) into pytest with `@pytest.mark.fixture` tests
-4. MCP server implementation (see `mcp_refs/` for design decisions)
+1. **Memory consolidation** - LLM callback interface for summarizing old episodic memories into semantic memories
+2. **MCP server implementation** (see `mcp_refs/` for design decisions)
+3. Move `executor_system.py` handlers into registry pattern
+4. Docker image + compose for production deployment
