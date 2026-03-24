@@ -53,7 +53,9 @@ class EdgeHandlers:
                 continue
             for i, (s, t, d) in enumerate(self.store._edges_by_type[etype]):
                 if s == src_slot and t == tgt_slot:
-                    self.store._edges_by_type[etype][i] = (s, t, {**d, **update_data})
+                    new_data = {**d, **update_data}
+                    self.store._edges_by_type[etype][i] = (s, t, new_data)
+                    self.store._edge_data_idx.setdefault(etype, {})[(src_slot, tgt_slot)] = new_data
                     updated += 1
         if updated > 0:
             self.store._edges_dirty = True
