@@ -15,6 +15,9 @@ import msgspec
 class CoreConfig(msgspec.Struct, frozen=True):
     ceiling_mb: int = 256
     initial_capacity: int = 1024
+    compact_threshold: float = 0.2
+    string_gc_threshold: float = 3.0
+    protected_kinds: list[str] = msgspec.field(default_factory=lambda: ["schema", "config", "system"])
 
 
 class VectorConfig(msgspec.Struct, frozen=True):
@@ -22,6 +25,8 @@ class VectorConfig(msgspec.Struct, frozen=True):
     similarity_threshold: float = 0.85
     duplicate_threshold: float = 0.95
     search_oversample: int = 5
+    model2vec_model: str = "minishlab/M2V_base_output"
+    model_cache_dir: str | None = None
 
 
 class DocumentConfig(msgspec.Struct, frozen=True):
@@ -30,6 +35,9 @@ class DocumentConfig(msgspec.Struct, frozen=True):
     chunk_overlap: int = 50
     summary_max_length: int = 200
     fts_full_text: bool = True
+    vision_model: str = "smolvlm2:2.2b"
+    vision_base_url: str = "http://localhost:11434/v1"
+    vision_max_tokens: int = 300
 
 
 class DslConfig(msgspec.Struct, frozen=True):
@@ -39,6 +47,7 @@ class DslConfig(msgspec.Struct, frozen=True):
     optimize_interval: int = 500
     recall_decay: float = 0.7
     remember_weights: list[float] = msgspec.field(default_factory=lambda: [0.30, 0.20, 0.15, 0.20, 0.15])
+    cache_gc_threshold: int = 200
 
 
 class VaultConfig(msgspec.Struct, frozen=True):
@@ -51,6 +60,7 @@ class PersistenceConfig(msgspec.Struct, frozen=True):
     wal_hard_limit: int = 100_000
     auto_checkpoint_threshold: int = 50_000
     log_retention_days: int = 7
+    busy_timeout_ms: int = 5000
 
 
 class RetentionConfig(msgspec.Struct, frozen=True):
@@ -64,6 +74,9 @@ class ServerConfig(msgspec.Struct, frozen=True):
     ingest_root: str | None = None
     auth_token: str | None = None
     rate_limit_rpm: int = 120
+    rate_limit_window: int = 60
+    max_query_length: int = 10_000
+    max_batch_size: int = 1000
 
 
 class GraphStoreConfig(msgspec.Struct, frozen=True):
@@ -110,6 +123,9 @@ def merge_kwargs(config: GraphStoreConfig, **kwargs) -> GraphStoreConfig:
         updates["core"] = CoreConfig(
             ceiling_mb=kwargs["ceiling_mb"],
             initial_capacity=config.core.initial_capacity,
+            compact_threshold=config.core.compact_threshold,
+            string_gc_threshold=config.core.string_gc_threshold,
+            protected_kinds=config.core.protected_kinds,
         )
 
     if "embedder" in kwargs:
@@ -122,12 +138,20 @@ def merge_kwargs(config: GraphStoreConfig, **kwargs) -> GraphStoreConfig:
                 embedder=emb_name,
                 similarity_threshold=config.vector.similarity_threshold,
                 duplicate_threshold=config.vector.duplicate_threshold,
+                search_oversample=config.vector.search_oversample,
+                model2vec_model=config.vector.model2vec_model,
+                model_cache_dir=config.vector.model_cache_dir,
             )
 
     if "ingest_root" in kwargs and kwargs["ingest_root"] is not None:
         updates["server"] = ServerConfig(
             cors_origins=config.server.cors_origins,
             ingest_root=kwargs["ingest_root"],
+            auth_token=config.server.auth_token,
+            rate_limit_rpm=config.server.rate_limit_rpm,
+            rate_limit_window=config.server.rate_limit_window,
+            max_query_length=config.server.max_query_length,
+            max_batch_size=config.server.max_batch_size,
         )
 
     if "vault" in kwargs and kwargs["vault"] is not None:

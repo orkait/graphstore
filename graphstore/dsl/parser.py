@@ -50,6 +50,12 @@ def _parse_internal(query: str):
 _plan_cache = PlanCache()
 
 
+def set_cache_size(maxsize: int):
+    """Resize the plan cache (clears existing entries)."""
+    _plan_cache._maxsize = maxsize
+    _plan_cache.clear()
+
+
 def parse(query: str):
     """Parse a DSL query string into an AST node. Uses plan cache."""
     return _plan_cache.get_or_parse(query)

@@ -271,7 +271,8 @@ class IntelligenceHandlers:
         import math
 
         target_k = q.limit.value if q.limit else 10
-        oversample = target_k * 5
+        oversample_factor = getattr(self, '_search_oversample', 5)
+        oversample = target_k * oversample_factor
 
         candidates: dict[int, dict] = {}
 
@@ -291,7 +292,7 @@ class IntelligenceHandlers:
             vs_mask[:cap] = self._vector_store._has_vector[:cap]
             combined = live_mask & vs_mask
 
-            slots, dists = self._vector_store.search(query_vec, k=oversample, mask=combined)
+            slots, dists = self._vector_store.search(query_vec, k=oversample, mask=combined, oversample_factor=oversample_factor)
             for slot_idx, dist in zip(slots, dists):
                 slot = int(slot_idx)
                 sim = max(0.0, 1.0 - float(dist))

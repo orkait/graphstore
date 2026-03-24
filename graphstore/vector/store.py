@@ -35,7 +35,7 @@ class VectorStore:
             self._index.remove(slot)
             self._has_vector[slot] = False
 
-    def search(self, query: np.ndarray, k: int, mask: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    def search(self, query: np.ndarray, k: int, mask: np.ndarray | None = None, oversample_factor: int = 5) -> tuple[np.ndarray, np.ndarray]:
         """Find k nearest neighbors. Returns (slot_indices, distances).
 
         If mask provided, only slots where mask[slot]==True are considered.
@@ -48,7 +48,7 @@ class VectorStore:
 
         if mask is not None:
             # Oversample and filter
-            oversample = min(k * 5, count)
+            oversample = min(k * oversample_factor, count)
             results = self._index.search(query, oversample)
             valid = []
             for key, dist in zip(results.keys, results.distances):
