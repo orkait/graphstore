@@ -306,7 +306,7 @@ class CoreStore:
         return result
 
     def get_edges_to(self, id: str, kind: str | None = None) -> list[dict]:
-        """Get incoming edges to a node."""
+        """Get incoming edges to a node. Uses transpose CSR to skip irrelevant edge types."""
         self._ensure_edges_built()
         if id not in self.string_table:
             return []
@@ -316,10 +316,14 @@ class CoreStore:
             return []
 
         result = []
-        types_to_check = [kind] if kind else self.edge_matrices.edge_types
+        types_to_check = [kind] if kind else self._edge_matrices.edge_types
         for etype in types_to_check:
+            incoming = self._edge_matrices.neighbors_in(slot, etype)
+            if len(incoming) == 0:
+                continue
+            incoming_set = set(int(n) for n in incoming)
             for s, t, d in self._edges_by_type.get(etype, []):
-                if t == slot:
+                if t == slot and s in incoming_set:
                     src_id = self._slot_to_id(s)
                     if src_id is not None:
                         result.append({"source": src_id, "target": id, "kind": etype, **d})
