@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import time as _time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -16,13 +20,65 @@ from graphstore.core.errors import GraphStoreError
 
 app = FastAPI(title="graphstore playground")
 
+_CORS_ORIGINS = os.environ.get("GRAPHSTORE_CORS_ORIGINS", "*").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Auth + Rate Limiting Middleware ---
+
+_AUTH_TOKEN = os.environ.get("GRAPHSTORE_AUTH_TOKEN")
+_RATE_LIMIT_RPM = int(os.environ.get("GRAPHSTORE_RATE_LIMIT_RPM", "120"))
+
+_rate_buckets: dict[str, list[float]] = defaultdict(list)
+_rate_cleanup_counter = 0
+
+
+def _check_rate_limit(client_ip: str) -> bool:
+    """Returns True if request is allowed."""
+    global _rate_cleanup_counter
+    now = _time.time()
+    window = 60.0
+    bucket = _rate_buckets[client_ip]
+    _rate_buckets[client_ip] = [t for t in bucket if now - t < window]
+    if len(_rate_buckets[client_ip]) >= _RATE_LIMIT_RPM:
+        return False
+    _rate_buckets[client_ip].append(now)
+
+    _rate_cleanup_counter += 1
+    if _rate_cleanup_counter % 100 == 0:
+        stale = [ip for ip, ts in _rate_buckets.items() if not ts or now - max(ts) > window]
+        for ip in stale:
+            del _rate_buckets[ip]
+
+    return True
+
+
+@app.middleware("http")
+async def auth_and_rate_limit(request: Request, call_next):
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
+
+    if _AUTH_TOKEN is not None:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer ") or auth_header[7:] != _AUTH_TOKEN:
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return JSONResponse(
+            status_code=429,
+            content={"error": "Rate limit exceeded"},
+            headers={"Retry-After": "60"},
+        )
+
+    return await call_next(request)
+
 
 # ---------------------------------------------------------------------------
 # Module-level store (created lazily)
@@ -30,8 +86,6 @@ app.add_middleware(
 
 _store: GraphStore | None = None
 
-
-import os
 
 def _get_store() -> GraphStore:
     global _store
@@ -97,12 +151,33 @@ class ConfigRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+
+_MAX_QUERY_LENGTH = 10_000
+
+
+def _validate_query(query: str) -> str | None:
+    """Validate query input. Returns error message or None if valid."""
+    if not query or not query.strip():
+        return "Empty query"
+    if len(query) > _MAX_QUERY_LENGTH:
+        return f"Query exceeds maximum length ({_MAX_QUERY_LENGTH} chars)"
+    if "\x00" in query:
+        return "Query contains null bytes"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 
 @app.post("/api/execute")
 def execute(req: ExecuteRequest):
+    err = _validate_query(req.query)
+    if err:
+        return {"kind": "error", "data": err, "count": 0, "elapsed_us": 0}
     store = _get_store()
     try:
         result = store.execute(req.query)
@@ -115,16 +190,20 @@ def execute(req: ExecuteRequest):
 
 @app.post("/api/execute-batch")
 def execute_batch(req: BatchRequest):
+    if len(req.queries) > 1000:
+        return [{"kind": "error", "data": "Batch exceeds 1000 queries", "count": 0, "elapsed_us": 0}]
     store = _get_store()
     results = []
     for q in req.queries:
+        err = _validate_query(q)
+        if err:
+            results.append({"kind": "error", "data": err, "count": 0, "elapsed_us": 0})
+            continue
         try:
             r = store.execute(q)
             results.append(_result_to_dict(r))
         except GraphStoreError as exc:
-            results.append(
-                {"kind": "error", "data": str(exc), "count": 0, "elapsed_us": 0}
-            )
+            results.append({"kind": "error", "data": str(exc), "count": 0, "elapsed_us": 0})
     return results
 
 
@@ -191,6 +270,56 @@ def config(req: ConfigRequest):
     if req.cost_threshold is not None:
         store.cost_threshold = req.cost_threshold
     return {"ok": True}
+
+
+@app.get("/api/logs")
+def get_logs(
+    limit: int = 50,
+    tag: str | None = None,
+    source: str | None = None,
+    trace_id: str | None = None,
+    since: str | None = None,
+):
+    """Query the enriched query log."""
+    store = _get_store()
+    conn = store._conn
+    if conn is None:
+        return []
+
+    sql = "SELECT id, timestamp, query, elapsed_us, result_count, error, tag, trace_id, source, phase FROM query_log"
+    params: list = []
+    conditions = []
+
+    if tag:
+        conditions.append("tag = ?")
+        params.append(tag)
+    if source:
+        conditions.append("source LIKE ?")
+        params.append(f"%{source}%")
+    if trace_id:
+        conditions.append("trace_id = ?")
+        params.append(trace_id)
+    if since:
+        import datetime
+        dt = datetime.datetime.fromisoformat(since)
+        conditions.append("timestamp >= ?")
+        params.append(dt.timestamp())
+
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+
+    sql += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+
+    rows = conn.execute(sql, params).fetchall()
+    return [
+        {
+            "id": r[0], "timestamp": r[1], "query": r[2],
+            "elapsed_us": r[3], "result_count": r[4], "error": r[5],
+            "tag": r[6], "trace_id": r[7], "source": r[8], "phase": r[9],
+        }
+        for r in rows
+    ]
 
 
 # ---------------------------------------------------------------------------

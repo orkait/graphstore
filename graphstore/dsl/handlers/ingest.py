@@ -2,9 +2,12 @@
 
 import time
 import hashlib
+import logging
 from pathlib import Path as _Path
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from graphstore.dsl.handlers._registry import handles
 from graphstore.dsl.ast_nodes import IngestStmt, ConnectNode
@@ -138,8 +141,8 @@ class IngestHandlers:
             try:
                 from graphstore.ingest.vision import VisionHandler
                 vision_handler = VisionHandler(model=q.vision_model)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("vision handler init failed: %s", e, exc_info=True)
 
         for i, img in enumerate(result.images):
             img_id = f"{parent_id}:image:{i}"
@@ -150,8 +153,8 @@ class IngestHandlers:
             if not img.description and vision_handler:
                 try:
                     img.description = vision_handler.describe(img.data, img.mime_type)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("image description failed: %s", e, exc_info=True)
 
             if img.description:
                 img_fields["summary"] = img.description

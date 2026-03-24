@@ -1,5 +1,8 @@
 """VisionHandler: image understanding via Ollama (SmolVLM2 / Qwen3-VL)."""
 import base64
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class VisionHandler:
@@ -40,5 +43,6 @@ class VisionHandler:
         try:
             self._client.models.list()
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug("vision availability check failed: %s", e, exc_info=True)
             return False

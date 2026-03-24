@@ -176,10 +176,10 @@ class TestOptimizeAll:
 class TestOptimizeLock:
     def test_lock_rejects_during_optimize(self, tmp_path):
         gs = GraphStore(path=str(tmp_path / "db"), embedder=None)
-        gs._optimizing = True
+        gs._optimizer._optimizing = True
         with pytest.raises(OptimizationInProgress):
             gs.execute('NODE "x"')
-        gs._optimizing = False
+        gs._optimizer._optimizing = False
         gs.close()
 
 
@@ -197,12 +197,12 @@ class TestAutoOptimize:
         assert len(gs._store.node_tombstones) == 8
 
         # Simulate what auto-optimize does: health check sets flag
-        gs._check_health_for_auto()
-        assert gs._needs_optimize is True
+        gs._optimizer._check_health()
+        assert gs._optimizer._needs_optimize is True
 
         # Next query runs auto-optimize at safe point
         result = gs.execute('NODE "n8"')
-        assert gs._needs_optimize is False
+        assert gs._optimizer._needs_optimize is False
         assert len(gs._store.node_tombstones) == 0
         assert result.data is not None
         gs.close()

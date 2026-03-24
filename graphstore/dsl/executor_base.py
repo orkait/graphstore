@@ -1,6 +1,21 @@
 """ExecutorBase: wires store/schema/embedder into the handler mixin chain."""
 
+import re
 import time
+from functools import lru_cache
+
+
+@lru_cache(maxsize=256)
+def _compile_like_pattern(pattern: str):
+    parts = []
+    for ch in pattern:
+        if ch == '%':
+            parts.append('.*')
+        elif ch == '_':
+            parts.append('.')
+        else:
+            parts.append(re.escape(ch))
+    return re.compile(''.join(parts))
 
 from graphstore.core.schema import SchemaRegistry
 from graphstore.core.store import CoreStore

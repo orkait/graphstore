@@ -1,5 +1,8 @@
 """VaultSync: sync vault directory to graphstore graph."""
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from graphstore.vault.parser import (
     parse_frontmatter, parse_sections, extract_wikilinks, title_to_slug,
@@ -51,15 +54,16 @@ class VaultSync:
                 self._sync_node(slug)
                 synced_slugs.append(slug)
                 synced += 1
-            except Exception:
+            except Exception as e:
+                logger.debug("vault node sync failed for %r: %s", slug, e, exc_info=True)
                 errors += 1
 
         # Pass 2: recreate edges for all synced notes
         for slug in synced_slugs:
             try:
                 self._sync_edges(slug)
-            except Exception:
-                pass  # Edge creation failures are non-fatal
+            except Exception as e:
+                logger.debug("vault edge sync failed for %r: %s", slug, e, exc_info=True)
 
         return {"synced": synced, "skipped": skipped, "errors": errors}
 
@@ -150,26 +154,16 @@ class VaultSync:
         wikilinks = extract_wikilinks(content)
 
         node_id = f"note:{slug}"
-        str_id = self._store.string_table.intern(node_id)
-        slot = self._store.id_to_slot.get(str_id)
-        if slot is None:
+        if node_id not in self._store.string_table:
             return
 
         # Delete old link edges from this node
-        if "links" in self._store._edges_by_type:
-            self._store._edges_by_type["links"] = [
-                (s, t, d) for s, t, d in self._store._edges_by_type["links"]
-                if s != slot
-            ]
-            if not self._store._edges_by_type["links"]:
-                del self._store._edges_by_type["links"]
-        # Rebuild edge_keys set
-        self._store._edge_keys = {
-            (s, t, k)
-            for k, edges in self._store._edges_by_type.items()
-            for s, t, _d in edges
-        }
-        self._store._edges_dirty = True
+        existing_link_edges = self._store.get_edges_from(node_id, kind="links")
+        for edge in existing_link_edges:
+            try:
+                self._store.delete_edge(edge["source"], edge["target"], "links")
+            except Exception as e:
+                logger.debug("vault link edge delete failed: %s", e, exc_info=True)
 
         # Create new link edges
         for target_slug in wikilinks:
@@ -181,5 +175,5 @@ class VaultSync:
                     if target_slot not in self._store.node_tombstones:
                         try:
                             self._store.put_edge(node_id, target_id, "links")
-                        except Exception:
-                            pass  # Duplicate or other edge error
+                        except Exception as e:
+                            logger.debug("vault link edge creation failed: %s", e, exc_info=True)

@@ -6,8 +6,11 @@ for stats, schema management, query logs, WAL, and diagnostics.
 
 import time
 import sqlite3
+import logging
 
 from graphstore.core.store import CoreStore
+
+logger = logging.getLogger(__name__)
 from graphstore.core.schema import SchemaRegistry
 from graphstore.core.types import Result
 import numpy as np
@@ -35,6 +38,7 @@ from graphstore.dsl.ast_nodes import (
     SysRegisterNodeKind,
     SysHealth,
     SysOptimize,
+    SysEvict,
     SysRetain,
     SysRollback,
     SysSlowQueries,
@@ -44,6 +48,13 @@ from graphstore.dsl.ast_nodes import (
     SysStatus,
     SysUnregister,
     SysWal,
+    SysLog,
+    SysCronAdd,
+    SysCronDelete,
+    SysCronEnable,
+    SysCronDisable,
+    SysCronList,
+    SysCronRun,
     TraverseQuery,
 )
 from graphstore.dsl.cost_estimator import estimate_match_cost, estimate_traverse_cost
@@ -61,6 +72,7 @@ class SystemExecutor:
         vector_store=None,
         document_store=None,
         retention: dict | None = None,
+        cron=None,
     ):
         self.store = store
         self.schema = schema
@@ -69,6 +81,7 @@ class SystemExecutor:
         self._vector_store = vector_store
         self._document_store = document_store
         self._retention = retention or {}
+        self._cron = cron
         self._start_time = time.time()
 
     def execute(self, ast) -> Result:
@@ -107,6 +120,14 @@ class SystemExecutor:
             SysRetain: self._retain,
             SysHealth: self._health,
             SysOptimize: self._optimize,
+            SysEvict: self._evict,
+            SysLog: self._log,
+            SysCronAdd: self._cron_add,
+            SysCronDelete: self._cron_delete,
+            SysCronEnable: self._cron_enable,
+            SysCronDisable: self._cron_disable,
+            SysCronList: self._cron_list,
+            SysCronRun: self._cron_run,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -573,8 +594,8 @@ class SystemExecutor:
             live_slots = set(int(s) for s in np.nonzero(live)[0])
             try:
                 self._document_store.orphan_cleanup(live_slots)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("orphan cleanup after rollback failed: %s", e, exc_info=True)
 
         return Result(kind="ok", data={"rollback": q.name}, count=1)
 
@@ -707,6 +728,7 @@ class SystemExecutor:
             "memory_bytes": estimate_memory(store.node_count, store.edge_count),
             "ceiling_bytes": store._ceiling_bytes,
             "column_memory_bytes": store.columns.memory_bytes,
+            "memory_measured": None,
         }
 
         # Vector store info
@@ -734,7 +756,8 @@ class SystemExecutor:
         if self._document_store:
             try:
                 data["documents"] = self._document_store.stats()
-            except Exception:
+            except Exception as e:
+                logger.debug("document store stats failed: %s", e, exc_info=True)
                 data["documents"] = {}
         else:
             data["documents"] = {}
@@ -751,6 +774,13 @@ class SystemExecutor:
 
         # Uptime
         data["uptime_seconds"] = time.time() - self._start_time
+
+        # Accurate measurement
+        try:
+            from graphstore.core.memory import measure as measure_memory
+            data["memory_measured"] = measure_memory(store, self._vector_store, self._document_store)
+        except Exception:
+            pass
 
         return Result(kind="status", data=data, count=1)
 
@@ -812,6 +842,14 @@ class SystemExecutor:
         """SYS HEALTH: pressure metrics for self-balancing decisions."""
         from graphstore.core.optimizer import health_check, needs_optimization
         health = health_check(self.store, self._vector_store, self._document_store)
+        try:
+            from graphstore.core.memory import measure as measure_memory
+            mem = measure_memory(self.store, self._vector_store, self._document_store)
+            health["memory_total"] = mem["total"]
+            health["memory_ceiling"] = self.store._ceiling_bytes
+            health["memory_utilization"] = round(mem["total"] / max(self.store._ceiling_bytes, 1), 3)
+        except Exception:
+            pass
         health["recommended"] = needs_optimization(health)
         return Result(kind="health", data=health, count=1)
 
@@ -839,3 +877,94 @@ class SystemExecutor:
         else:
             raise GraphStoreError(f"Unknown optimize target: {target}")
         return Result(kind="ok", data=data, count=1)
+
+    def _evict(self, q: SysEvict) -> Result:
+        """SYS EVICT: emergency eviction of oldest nodes to free memory."""
+        from graphstore.core.optimizer import evict_oldest
+        from graphstore.core.memory import measure
+
+        current = measure(self.store, self._vector_store, self._document_store)
+        # Evict to 80% of ceiling
+        target = int(self.store._ceiling_bytes * 0.8)
+        if q.limit:
+            # LIMIT overrides - evict exactly N nodes
+            target = 0  # will evict up to limit
+
+        data = evict_oldest(self.store, self._vector_store, self._document_store, target_bytes=target)
+        return Result(kind="ok", data=data, count=data["evicted"])
+
+    def _log(self, q: SysLog) -> Result:
+        """SYS LOG: query the enriched query log."""
+        if not self.conn:
+            return Result(kind="log_entries", data=[], count=0)
+
+        sql = "SELECT id, timestamp, query, elapsed_us, result_count, error, tag, trace_id, source, phase FROM query_log"
+        params: list = []
+        conditions = []
+
+        if q.trace_id:
+            conditions.append("trace_id = ?")
+            params.append(q.trace_id)
+        if q.since:
+            import datetime
+            dt = datetime.datetime.fromisoformat(q.since)
+            conditions.append("timestamp >= ?")
+            params.append(dt.timestamp())
+
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+
+        sql += " ORDER BY timestamp DESC"
+
+        if q.limit:
+            sql += " LIMIT ?"
+            params.append(q.limit.value)
+        else:
+            sql += " LIMIT 50"
+
+        rows = self.conn.execute(sql, params).fetchall()
+        entries = [
+            {
+                "id": r[0], "timestamp": r[1], "query": r[2],
+                "elapsed_us": r[3], "result_count": r[4], "error": r[5],
+                "tag": r[6], "trace_id": r[7], "source": r[8], "phase": r[9],
+            }
+            for r in rows
+        ]
+        return Result(kind="log_entries", data=entries, count=len(entries))
+
+    def _cron_add(self, q: SysCronAdd) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured. Use GraphStore(threaded=True)")
+        data = self._cron.add(q.name, q.schedule, q.query)
+        return Result(kind="ok", data=data, count=1)
+
+    def _cron_delete(self, q: SysCronDelete) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured")
+        self._cron.delete(q.name)
+        return Result(kind="ok", data={"deleted": q.name}, count=1)
+
+    def _cron_enable(self, q: SysCronEnable) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured")
+        self._cron.enable(q.name)
+        return Result(kind="ok", data={"enabled": q.name}, count=1)
+
+    def _cron_disable(self, q: SysCronDisable) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured")
+        self._cron.disable(q.name)
+        return Result(kind="ok", data={"disabled": q.name}, count=1)
+
+    def _cron_list(self, q: SysCronList) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured")
+        jobs = self._cron.list_jobs()
+        return Result(kind="cron_jobs", data=jobs, count=len(jobs))
+
+    def _cron_run(self, q: SysCronRun) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured")
+        self._cron.run_now(q.name)
+        return Result(kind="ok", data={"triggered": q.name}, count=1)

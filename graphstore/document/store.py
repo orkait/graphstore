@@ -16,7 +16,8 @@ class DocumentStore:
             self._conn = sqlite3.connect(db_path)
             self._temp = False
         else:
-            self._path = tempfile.mktemp(suffix=".graphstore-docs.db")
+            fd, self._path = tempfile.mkstemp(suffix=".graphstore-docs.db")
+            os.close(fd)  # close fd, sqlite will reopen
             self._conn = sqlite3.connect(self._path)
             self._temp = True
         self._conn.execute("PRAGMA journal_mode=WAL")

@@ -1,6 +1,9 @@
 """Auto-wire cross-document relationships via vector similarity."""
+import logging
 import numpy as np
 from graphstore.core.types import Result
+
+logger = logging.getLogger(__name__)
 
 
 def connect_all(store, vector_store, threshold=0.85, where_expr=None, executor=None):
@@ -45,8 +48,8 @@ def connect_all(store, vector_store, threshold=0.85, where_expr=None, executor=N
                     try:
                         store.put_edge(src_id, tgt_id, "similar_to", {"similarity": round(similarity, 4)})
                         edges_created += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("similar_to edge creation skipped: %s", e, exc_info=True)
 
     return Result(kind="ok", data={"edges_created": edges_created}, count=edges_created)
 
@@ -87,7 +90,7 @@ def connect_node(store, vector_store, node_id, threshold=0.8):
                 try:
                     store.put_edge(node_id, tgt_id, "similar_to", {"similarity": round(similarity, 4)})
                     edges_created += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("similar_to edge creation skipped: %s", e, exc_info=True)
 
     return Result(kind="ok", data={"edges_created": edges_created}, count=edges_created)
