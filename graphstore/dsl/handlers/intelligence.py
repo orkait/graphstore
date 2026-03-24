@@ -153,6 +153,7 @@ class IntelligenceHandlers:
         search_k = k * 3 if q.where else k
         slots, dists = self._vector_store.search(query_vec, k=search_k, mask=combined_mask)
 
+        conf_col = self.store.columns.get_column("__confidence__", n)
         results = []
         target_k = q.limit.value if q.limit else 10
         for slot_idx, dist in zip(slots, dists):
@@ -163,6 +164,10 @@ class IntelligenceHandlers:
             if q.where and not self._eval_where(q.where.expr, node):
                 continue
             node["_similarity_score"] = round(1.0 - float(dist), 4)
+            if conf_col is not None:
+                col_data, col_pres, _ = conf_col
+                if col_pres[slot]:
+                    node["_confidence"] = round(float(col_data[slot]), 4)
             results.append(node)
             if len(results) >= target_k:
                 break
@@ -384,7 +389,15 @@ class IntelligenceHandlers:
             node["_confidence"] = round(scores["confidence"], 4)
             results.append(node)
             retrieved_slots.append(slot)
-            if len(results) >= target_k:
+            if q.tokens is not None:
+                # Token budget mode: estimate tokens from text length
+                total_tokens = sum(
+                    len(r.get("summary", "") + r.get("claim", "") + r.get("text", "")) // 4
+                    for r in results
+                )
+                if total_tokens >= q.tokens:
+                    break
+            elif len(results) >= target_k:
                 break
 
         # --- Retrieval feedback: increment recall count for returned nodes ---

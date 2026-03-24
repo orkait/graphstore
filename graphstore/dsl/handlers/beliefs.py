@@ -51,6 +51,8 @@ class BeliefHandlers:
         self.store.columns.set_reserved(slot, "__retracted_at__", now_ms)
         if q.reason:
             self.store.columns.set_reserved(slot, "__retract_reason__", q.reason)
+        if self._vector_store:
+            self._vector_store.remove(slot)
 
         kind_str_id = int(self.store.node_kinds[slot])
         kind_name = self.store.string_table.lookup(kind_str_id)
