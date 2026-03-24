@@ -47,6 +47,13 @@ from graphstore.dsl.ast_nodes import (
     SysStatus,
     SysUnregister,
     SysWal,
+    SysLog,
+    SysCronAdd,
+    SysCronDelete,
+    SysCronEnable,
+    SysCronDisable,
+    SysCronList,
+    SysCronRun,
     TraverseQuery,
 )
 from graphstore.dsl.cost_estimator import estimate_match_cost, estimate_traverse_cost
@@ -64,6 +71,7 @@ class SystemExecutor:
         vector_store=None,
         document_store=None,
         retention: dict | None = None,
+        cron=None,
     ):
         self.store = store
         self.schema = schema
@@ -72,6 +80,7 @@ class SystemExecutor:
         self._vector_store = vector_store
         self._document_store = document_store
         self._retention = retention or {}
+        self._cron = cron
         self._start_time = time.time()
 
     def execute(self, ast) -> Result:
@@ -110,6 +119,13 @@ class SystemExecutor:
             SysRetain: self._retain,
             SysHealth: self._health,
             SysOptimize: self._optimize,
+            SysLog: self._log,
+            SysCronAdd: self._cron_add,
+            SysCronDelete: self._cron_delete,
+            SysCronEnable: self._cron_enable,
+            SysCronDisable: self._cron_disable,
+            SysCronList: self._cron_list,
+            SysCronRun: self._cron_run,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -843,3 +859,79 @@ class SystemExecutor:
         else:
             raise GraphStoreError(f"Unknown optimize target: {target}")
         return Result(kind="ok", data=data, count=1)
+
+    def _log(self, q: SysLog) -> Result:
+        """SYS LOG: query the enriched query log."""
+        if not self.conn:
+            return Result(kind="log_entries", data=[], count=0)
+
+        sql = "SELECT id, timestamp, query, elapsed_us, result_count, error, tag, trace_id, source, phase FROM query_log"
+        params: list = []
+        conditions = []
+
+        if q.trace_id:
+            conditions.append("trace_id = ?")
+            params.append(q.trace_id)
+        if q.since:
+            import datetime
+            dt = datetime.datetime.fromisoformat(q.since)
+            conditions.append("timestamp >= ?")
+            params.append(dt.timestamp())
+
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+
+        sql += " ORDER BY timestamp DESC"
+
+        if q.limit:
+            sql += " LIMIT ?"
+            params.append(q.limit.value)
+        else:
+            sql += " LIMIT 50"
+
+        rows = self.conn.execute(sql, params).fetchall()
+        entries = [
+            {
+                "id": r[0], "timestamp": r[1], "query": r[2],
+                "elapsed_us": r[3], "result_count": r[4], "error": r[5],
+                "tag": r[6], "trace_id": r[7], "source": r[8], "phase": r[9],
+            }
+            for r in rows
+        ]
+        return Result(kind="log_entries", data=entries, count=len(entries))
+
+    def _cron_add(self, q: SysCronAdd) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured. Use GraphStore(threaded=True)")
+        data = self._cron.add(q.name, q.schedule, q.query)
+        return Result(kind="ok", data=data, count=1)
+
+    def _cron_delete(self, q: SysCronDelete) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured")
+        self._cron.delete(q.name)
+        return Result(kind="ok", data={"deleted": q.name}, count=1)
+
+    def _cron_enable(self, q: SysCronEnable) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured")
+        self._cron.enable(q.name)
+        return Result(kind="ok", data={"enabled": q.name}, count=1)
+
+    def _cron_disable(self, q: SysCronDisable) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured")
+        self._cron.disable(q.name)
+        return Result(kind="ok", data={"disabled": q.name}, count=1)
+
+    def _cron_list(self, q: SysCronList) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured")
+        jobs = self._cron.list_jobs()
+        return Result(kind="cron_jobs", data=jobs, count=len(jobs))
+
+    def _cron_run(self, q: SysCronRun) -> Result:
+        if not self._cron:
+            raise GraphStoreError("CRON not configured")
+        self._cron.run_now(q.name)
+        return Result(kind="ok", data={"triggered": q.name}, count=1)

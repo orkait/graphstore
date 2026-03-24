@@ -217,6 +217,7 @@ system_query: "SYS" sys_command
             | sys_connect | sys_reembed | sys_status
             | sys_retain
             | sys_health | sys_optimize
+            | sys_log | sys_cron
 
 sys_stats:      "STATS" STATS_TARGET?
 STATS_TARGET:   "NODES" | "EDGES" | "MEMORY" | "WAL"
@@ -271,6 +272,20 @@ ident_list: typed_ident ("," typed_ident)*
 typed_ident: IDENTIFIER ":" IDENTIFIER -> typed_ident_with_type
            | IDENTIFIER -> typed_ident_bare
 string_list: STRING ("," STRING)*
+
+sys_log: "LOG" log_filter? limit_clause?
+log_filter: "WHERE" expr         -> log_where
+          | "SINCE" STRING       -> log_since
+          | "TRACE" STRING       -> log_trace
+
+sys_cron: "CRON" cron_command
+?cron_command: cron_add | cron_delete | cron_enable | cron_disable | cron_list | cron_run
+cron_add: "ADD" STRING "SCHEDULE" STRING "QUERY" STRING
+cron_delete: "DELETE" STRING
+cron_enable: "ENABLE" STRING
+cron_disable: "DISABLE" STRING
+cron_list: "LIST"
+cron_run: "RUN" STRING
 
 // =============================================
 // TERMINALS

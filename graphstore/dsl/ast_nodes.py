@@ -532,3 +532,38 @@ class SysHealth:
 @dataclass
 class SysOptimize:
     target: str | None = None  # None=all, or "COMPACT","STRINGS","EDGES","VECTORS","BLOBS","CACHE"
+
+# --- Log queries ---
+@dataclass
+class SysLog:
+    where: WhereClause | None = None
+    since: str | None = None
+    trace_id: str | None = None
+    limit: LimitClause | None = None
+
+# --- Cron management ---
+@dataclass
+class SysCronAdd:
+    name: str
+    schedule: str
+    query: str
+
+@dataclass
+class SysCronDelete:
+    name: str
+
+@dataclass
+class SysCronEnable:
+    name: str
+
+@dataclass
+class SysCronDisable:
+    name: str
+
+@dataclass
+class SysCronList:
+    pass
+
+@dataclass
+class SysCronRun:
+    name: str

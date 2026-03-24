@@ -101,6 +101,13 @@ from graphstore.dsl.ast_nodes import (
     SysRetain,
     SysHealth,
     SysOptimize,
+    SysLog,
+    SysCronAdd,
+    SysCronDelete,
+    SysCronEnable,
+    SysCronDisable,
+    SysCronList,
+    SysCronRun,
 )
 
 
@@ -957,6 +964,59 @@ class DSLTransformer(Transformer):
 
     def string_list(self, args):
         return [self._str(a) for a in args]
+
+    # --- Log queries ---
+    def sys_log(self, args):
+        where = None
+        since = None
+        trace_id = None
+        limit = self._find(args, LimitClause)
+        for a in args:
+            if isinstance(a, WhereClause):
+                where = a
+            elif isinstance(a, tuple) and a[0] == "log_since":
+                since = a[1]
+            elif isinstance(a, tuple) and a[0] == "log_trace":
+                trace_id = a[1]
+        return SysLog(where=where, since=since, trace_id=trace_id, limit=limit)
+
+    def log_where(self, args):
+        return WhereClause(expr=args[0])
+
+    def log_since(self, args):
+        return ("log_since", self._str(args[0]))
+
+    def log_trace(self, args):
+        return ("log_trace", self._str(args[0]))
+
+    # --- Cron commands ---
+    def sys_cron(self, args):
+        return args[0]
+
+    def cron_command(self, args):
+        return args[0]
+
+    def cron_add(self, args):
+        return SysCronAdd(
+            name=self._str(args[0]),
+            schedule=self._str(args[1]),
+            query=self._str(args[2]),
+        )
+
+    def cron_delete(self, args):
+        return SysCronDelete(name=self._str(args[0]))
+
+    def cron_enable(self, args):
+        return SysCronEnable(name=self._str(args[0]))
+
+    def cron_disable(self, args):
+        return SysCronDisable(name=self._str(args[0]))
+
+    def cron_list(self, args):
+        return SysCronList()
+
+    def cron_run(self, args):
+        return SysCronRun(name=self._str(args[0]))
 
     # --- Helpers ---
     def _str(self, token) -> str:

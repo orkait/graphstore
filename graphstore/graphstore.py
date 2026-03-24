@@ -21,6 +21,7 @@ from graphstore.persistence.database import open_database
 from graphstore.persistence.deserializer import load as _load_fn
 from graphstore.wal import WALManager
 from graphstore.core.scheduler import OptimizerScheduler
+from graphstore.cron import CronScheduler
 from graphstore.core.errors import OptimizationInProgress
 from graphstore.dsl.handlers import is_write_op
 from graphstore.core.memory import estimate as _estimate_memory
@@ -165,6 +166,9 @@ class GraphStore:
                                                document_store=self._document_store,
                                                retention=retention_dict)
 
+        # Cron scheduler (requires threaded mode for background execution)
+        self._cron: CronScheduler | None = None
+
         # WAL manager
         self._wal = WALManager(
             self._conn, self._store, self._schema, self._executor,
@@ -217,6 +221,12 @@ class GraphStore:
         if threaded:
             from graphstore.core.queue import CommandQueue
             self._queue = CommandQueue(self._execute_internal)
+
+        # Start cron scheduler if threaded and persistent
+        if threaded and self._conn is not None:
+            self._cron = CronScheduler(self._conn, self.submit_background)
+            self._cron.start()
+            self._sys_executor._cron = self._cron
 
     def execute(self, query: str) -> Result:
         """Execute a DSL query. Thread-safe if threaded=True."""
@@ -372,6 +382,9 @@ class GraphStore:
 
     def close(self) -> None:
         """Checkpoint + close sqlite connection."""
+        if self._cron is not None:
+            self._cron.stop()
+            self._cron = None
         if self._queue is not None:
             self._queue.shutdown()
             self._queue = None
