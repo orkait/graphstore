@@ -12,7 +12,7 @@ SCHEMA_VERSION = 1
 
 def open_database(path: str | Path) -> sqlite3.Connection:
     """Open or create the graphstore database."""
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=OFF")
