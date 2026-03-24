@@ -37,6 +37,7 @@ class CoreStore:
         # Edge storage
         self._edges_by_type: dict[str, list[tuple]] = {}
         self._edge_keys: set[tuple[int, int, str]] = set()  # (src_slot, tgt_slot, kind) for O(1) duplicate check
+        self._edge_data_idx: dict[str, dict[tuple[int, int], dict]] = {}  # edge_type -> {(src, tgt): data}
         self._edges_dirty = False  # deferred CSR rebuild flag
 
         # Secondary indices
@@ -275,6 +276,7 @@ class CoreStore:
         self._edges_by_type.setdefault(kind, []).append(
             (src_slot, tgt_slot, edge_data)
         )
+        self._edge_data_idx.setdefault(kind, {})[(src_slot, tgt_slot)] = edge_data
         self._edges_dirty = True
         self._dirty_edges = True
         self._dirty_strings = True
@@ -294,6 +296,10 @@ class CoreStore:
             ]
             if not self._edges_by_type[kind]:
                 del self._edges_by_type[kind]
+        if kind in self._edge_data_idx:
+            self._edge_data_idx[kind].pop((src_slot, tgt_slot), None)
+            if not self._edge_data_idx[kind]:
+                del self._edge_data_idx[kind]
         self._edge_keys.discard((src_slot, tgt_slot, kind))
         self._rebuild_edges()
         self._dirty_edges = True
@@ -314,12 +320,13 @@ class CoreStore:
             neighbors = self._edge_matrices.neighbors_out(slot, etype)
             if len(neighbors) == 0:
                 continue
-            neighbor_set = set(int(n) for n in neighbors)
-            for s, t, d in self._edges_by_type.get(etype, []):
-                if s == slot and t in neighbor_set:
-                    tgt_id = self._slot_to_id(t)
-                    if tgt_id is not None:
-                        result.append({"source": id, "target": tgt_id, "kind": etype, **d})
+            idx = self._edge_data_idx.get(etype, {})
+            for nb in neighbors:
+                nb = int(nb)
+                tgt_id = self._slot_to_id(nb)
+                if tgt_id is not None:
+                    d = idx.get((slot, nb), {})
+                    result.append({"source": id, "target": tgt_id, "kind": etype, **d})
         return result
 
     def get_edges_to(self, id: str, kind: str | None = None) -> list[dict]:
@@ -338,12 +345,13 @@ class CoreStore:
             incoming = self._edge_matrices.neighbors_in(slot, etype)
             if len(incoming) == 0:
                 continue
-            incoming_set = set(int(n) for n in incoming)
-            for s, t, d in self._edges_by_type.get(etype, []):
-                if t == slot and s in incoming_set:
-                    src_id = self._slot_to_id(s)
-                    if src_id is not None:
-                        result.append({"source": src_id, "target": id, "kind": etype, **d})
+            idx = self._edge_data_idx.get(etype, {})
+            for nb in incoming:
+                nb = int(nb)
+                src_id = self._slot_to_id(nb)
+                if src_id is not None:
+                    d = idx.get((nb, slot), {})
+                    result.append({"source": src_id, "target": id, "kind": etype, **d})
         return result
 
     # -- cascade / rebuild ---------------------------------------------------
@@ -368,6 +376,10 @@ class CoreStore:
                 for k, edges in self._edges_by_type.items()
                 for s, t, _d in edges
             }
+            self._edge_data_idx = {
+                k: {(s, t): d for s, t, d in edges}
+                for k, edges in self._edges_by_type.items()
+            }
         self._edges_dirty = True
         self._ensure_edges_built()
 
@@ -384,6 +396,10 @@ class CoreStore:
         self._edges_dirty = False
         num_nodes = max(self._next_slot, 1)
         self._edge_matrices.rebuild(self._edges_by_type, num_nodes)
+        self._edge_data_idx = {
+            k: {(s, t): d for s, t, d in edges}
+            for k, edges in self._edges_by_type.items()
+        }
 
     # -- helpers -------------------------------------------------------------
 
