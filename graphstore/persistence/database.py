@@ -39,14 +39,46 @@ def _create_tables(conn: sqlite3.Connection):
             query TEXT NOT NULL,
             elapsed_us INTEGER NOT NULL,
             result_count INTEGER NOT NULL,
-            error TEXT
+            error TEXT,
+            tag TEXT,
+            trace_id TEXT,
+            source TEXT DEFAULT 'user',
+            phase TEXT
         );
         CREATE TABLE IF NOT EXISTS metadata (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS cron_jobs (
+            name TEXT PRIMARY KEY,
+            schedule TEXT NOT NULL,
+            query TEXT NOT NULL,
+            enabled INTEGER DEFAULT 1,
+            created_at REAL NOT NULL,
+            last_run REAL,
+            next_run REAL NOT NULL,
+            run_count INTEGER DEFAULT 0,
+            error_count INTEGER DEFAULT 0,
+            last_error TEXT
+        );
     """)
+    _migrate_query_log(conn)
     conn.commit()
+
+
+def _migrate_query_log(conn: sqlite3.Connection):
+    """Add new columns to query_log if they don't exist (backwards compat)."""
+    cursor = conn.execute("PRAGMA table_info(query_log)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    migrations = [
+        ("tag", "TEXT"),
+        ("trace_id", "TEXT"),
+        ("source", "TEXT DEFAULT 'user'"),
+        ("phase", "TEXT"),
+    ]
+    for col_name, col_type in migrations:
+        if col_name not in existing_cols:
+            conn.execute(f"ALTER TABLE query_log ADD COLUMN {col_name} {col_type}")
 
 
 def get_metadata(conn: sqlite3.Connection, key: str) -> str | None:

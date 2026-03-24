@@ -13,6 +13,7 @@ from graphstore.core.store import CoreStore
 from graphstore.core.schema import SchemaRegistry
 from graphstore.core.types import Result
 from graphstore.dsl.parser import parse
+from graphstore.dsl.tagger import infer_tag, infer_phase
 from graphstore.dsl.executor import Executor
 from graphstore.dsl.executor_system import SystemExecutor
 from graphstore.dsl import ast_nodes
@@ -207,6 +208,9 @@ class GraphStore:
             self._vault_sync = None
             self._vault_executor = None
 
+        # Trace binding for log layer
+        self._active_trace: str | None = None
+
         # Command queue for thread-safe access
         self._threaded = threaded
         self._queue = None
@@ -227,6 +231,8 @@ class GraphStore:
 
         self._optimizer.maybe_optimize()
 
+        tag, phase, source, trace_id = "system", "system", getattr(self, '_current_source', 'user'), self._active_trace
+
         start = time.perf_counter_ns()
 
         # Sync vector store reference (may have been lazily created)
@@ -241,6 +247,8 @@ class GraphStore:
 
         try:
             ast = parse(query)
+            tag = infer_tag(ast)
+            phase = infer_phase(tag)
 
             # Route to correct executor
             if isinstance(ast, _SYS_TYPES):
@@ -287,13 +295,19 @@ class GraphStore:
             elapsed = (time.perf_counter_ns() - start) // 1000
             result.elapsed_us = elapsed
 
-            self._wal.log_query(query, elapsed, result.count, None)
+            self._wal.log_query(query, elapsed, result.count, None,
+                                tag=tag, trace_id=trace_id, source=source, phase=phase)
+            self._wal.emit_event(query, elapsed, result.count, None,
+                                 tag=tag, trace_id=trace_id, source=source, phase=phase)
 
             return result
 
         except Exception as e:
             elapsed = (time.perf_counter_ns() - start) // 1000
-            self._wal.log_query(query, elapsed, 0, str(e))
+            self._wal.log_query(query, elapsed, 0, str(e),
+                                tag=tag, trace_id=trace_id, source=source, phase=phase)
+            self._wal.emit_event(query, elapsed, 0, str(e),
+                                 tag=tag, trace_id=trace_id, source=source, phase=phase)
             raise
 
     def execute_batch(self, queries: list[str]) -> list[Result]:
@@ -312,6 +326,14 @@ class GraphStore:
         if self._conn is None:
             return
         self._wal.checkpoint(vector_store=self._vector_store)
+
+    def bind_trace(self, trace_id: str) -> None:
+        """Set active trace ID for log correlation."""
+        self._active_trace = trace_id
+
+    def discard_trace(self) -> None:
+        """Clear active trace ID."""
+        self._active_trace = None
 
     def set_script(self, script: str) -> None:
         """Store a DSL script in metadata so the playground can load it."""

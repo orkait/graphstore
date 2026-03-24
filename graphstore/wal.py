@@ -5,6 +5,7 @@ import sqlite3
 import logging
 
 logger = logging.getLogger(__name__)
+_event_logger = logging.getLogger("graphstore.events")
 
 from graphstore.core.errors import GraphStoreError
 from graphstore.dsl.parser import parse
@@ -83,18 +84,40 @@ class WALManager:
             self.checkpoint()
         self._rotate_query_log()
 
-    def log_query(self, query: str, elapsed_us: int, result_count: int, error: str | None) -> None:
+    def log_query(self, query: str, elapsed_us: int, result_count: int, error: str | None,
+                  tag: str | None = None, trace_id: str | None = None,
+                  source: str = "user", phase: str | None = None) -> None:
         conn = self._conn
         if conn is None:
             return
         try:
             conn.execute(
-                "INSERT INTO query_log (timestamp, query, elapsed_us, result_count, error) VALUES (?,?,?,?,?)",
-                (time.time(), query, elapsed_us, result_count, error)
+                "INSERT INTO query_log (timestamp, query, elapsed_us, result_count, error, tag, trace_id, source, phase) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (time.time(), query, elapsed_us, result_count, error, tag, trace_id, source, phase)
             )
             conn.commit()
         except Exception as e:
             logger.debug("query log insert failed: %s", e, exc_info=True)
+
+    def emit_event(self, query: str, elapsed_us: int, result_count: int, error: str | None,
+                   tag: str | None = None, trace_id: str | None = None,
+                   source: str = "user", phase: str | None = None) -> None:
+        """Emit structured log event via graphstore.events logger."""
+        _event_logger.info(
+            "%s [%s] %dus %d results",
+            tag or "unknown", source, elapsed_us, result_count,
+            extra={
+                "gs_query": query,
+                "gs_tag": tag,
+                "gs_source": source,
+                "gs_trace_id": trace_id,
+                "gs_phase": phase,
+                "gs_elapsed_us": elapsed_us,
+                "gs_result_count": result_count,
+                "gs_error": error,
+            },
+        )
 
     def _rotate_query_log(self) -> None:
         conn = self._conn
