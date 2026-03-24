@@ -132,10 +132,13 @@ class VaultSync:
                                                   page=None, chunk_index=0, doc_slot=slot)
 
         # Embed summary
-        if self._embedder and self._vector_store and summary and slot is not None:
-            vec = self._embedder.encode_documents([summary])[0]
-            if self._vector_store is not None:
-                self._vector_store.add(slot, vec)
+        if self._embedder and self._vector_store and slot is not None:
+            body = sections.get("body", "")
+            embed_text = f"{slug}: {summary} {body}"[:2000] if summary else body[:2000]
+            if embed_text.strip():
+                vec = self._embedder.encode_documents([embed_text])[0]
+                if self._vector_store is not None:
+                    self._vector_store.add(slot, vec)
 
         # Fact kind: auto-ASSERT into graphstore belief store
         if fm.get("kind") == "fact" and slot is not None:

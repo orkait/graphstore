@@ -96,7 +96,8 @@ class IngestHandlers:
                 set_reserved(sec_slot, "__confidence__", 0.6)
                 set_reserved(sec_slot, "__blob_state__", "warm")
                 self.store.put_edge(parent_id, section_id, "has_section")
-                embed_batch.append((sec_slot, chunk.summary[:200]))
+                embed_text = f"{chunk.heading}: {chunk.text[:1800]}" if chunk.heading else chunk.text[:2000]
+                embed_batch.append((sec_slot, embed_text))
                 sections[chunk.heading] = section_id
                 section_slots[chunk.heading] = sec_slot
 
@@ -125,7 +126,10 @@ class IngestHandlers:
                     "INSERT OR REPLACE INTO doc_fts (rowid, summary) VALUES (?, ?)",
                     (chunk_slot, chunk.summary))
 
-            embed_batch.append((chunk_slot, chunk.summary))
+            embed_text = chunk.text[:2000]
+            if chunk.heading:
+                embed_text = f"{chunk.heading}: {embed_text}"
+            embed_batch.append((chunk_slot, embed_text))
 
             if chunk.heading and chunk.heading in sections:
                 self.store.put_edge(sections[chunk.heading], chunk_id, "has_chunk")
