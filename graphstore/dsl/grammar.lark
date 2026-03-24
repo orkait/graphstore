@@ -18,6 +18,7 @@ start: statement
            | counterfactual
            | similar_q
            | lexical_q
+           | remember_q
 
 node_q:        "NODE" STRING with_doc?
 nodes_q:       "NODES" where_clause? order_clause? limit_clause? offset_clause?
@@ -45,6 +46,7 @@ counterfactual: "WHAT" "IF" "RETRACT" STRING
 
 similar_q: "SIMILAR" "TO" similar_target limit_clause? where_clause?
 lexical_q: "LEXICAL" "SEARCH" STRING limit_clause? where_clause?
+remember_q: "REMEMBER" STRING limit_clause? where_clause?
 similar_target: vector_literal      -> similar_vector
               | STRING              -> similar_text
               | "NODE" STRING       -> similar_node

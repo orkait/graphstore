@@ -514,6 +514,12 @@ class LexicalSearchQuery:
     limit: LimitClause | None = None
     where: WhereClause | None = None
 
+@dataclass
+class RememberQuery:
+    query: str
+    limit: LimitClause | None = None
+    where: WhereClause | None = None
+
 # --- Forget (hard delete blob + memory) ---
 @dataclass
 class ForgetNode:

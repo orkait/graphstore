@@ -97,6 +97,7 @@ from graphstore.dsl.ast_nodes import (
     SysReembed,
     SysStatus,
     LexicalSearchQuery,
+    RememberQuery,
     ForgetNode,
     SysRetain,
     SysHealth,
@@ -685,6 +686,12 @@ class DSLTransformer(Transformer):
         limit = self._find(args[1:], LimitClause)
         where = self._find(args[1:], WhereClause)
         return LexicalSearchQuery(query=query, limit=limit, where=where)
+
+    def remember_q(self, args):
+        query = self._str(args[0])
+        limit = self._find(args[1:], LimitClause)
+        where = self._find(args[1:], WhereClause)
+        return RememberQuery(query=query, limit=limit, where=where)
 
     def vector_literal(self, args):
         return [self._num(a) for a in args]

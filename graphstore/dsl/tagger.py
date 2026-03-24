@@ -23,6 +23,7 @@ TAG_MAP = {
     ast_nodes.RecallQuery: "intelligence",
     ast_nodes.SimilarQuery: "intelligence",
     ast_nodes.LexicalSearchQuery: "intelligence",
+    ast_nodes.RememberQuery: "intelligence",
     ast_nodes.CounterfactualQuery: "intelligence",
     ast_nodes.CreateNode: "write",
     ast_nodes.UpdateNode: "write",

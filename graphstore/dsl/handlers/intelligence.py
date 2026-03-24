@@ -8,7 +8,7 @@ from scipy.sparse import csr_matrix
 
 from graphstore.dsl.handlers._registry import handles
 from graphstore.dsl.ast_nodes import (
-    RecallQuery, SimilarQuery, LexicalSearchQuery, CounterfactualQuery,
+    RecallQuery, SimilarQuery, LexicalSearchQuery, CounterfactualQuery, RememberQuery,
 )
 from graphstore.core.types import Result
 from graphstore.core.errors import EmbedderRequired, NodeNotFound, VectorError, VectorNotFound
@@ -259,3 +259,96 @@ class IntelligenceHandlers:
             self.store.node_ids[:saved_next_slot] = saved_node_ids
             self.store.node_kinds[:saved_next_slot] = saved_node_kinds
             self.store._rebuild_edges()
+
+    @handles(RememberQuery)
+    def _remember(self, q: RememberQuery) -> Result:
+        """REMEMBER: hybrid retrieval fusing vector + BM25 + recency."""
+        import math
+
+        target_k = q.limit.value if q.limit else 10
+        oversample = target_k * 5
+
+        candidates: dict[int, dict] = {}  # slot -> {vector_sim, bm25, recency}
+
+        n = self.store._next_slot
+        if n == 0:
+            return Result(kind="nodes", data=[], count=0)
+
+        live_mask = self._compute_live_mask(n)
+        now_ms = int(time.time() * 1000)
+
+        # --- Vector candidates ---
+        if self._embedder and self._vector_store and self._vector_store.count() > 0:
+            query_vec = self._embedder.encode_queries([q.query])[0]
+            vs_cap = self._vector_store._capacity
+            vs_mask = np.zeros(n, dtype=bool)
+            cap = min(n, vs_cap)
+            vs_mask[:cap] = self._vector_store._has_vector[:cap]
+            combined = live_mask & vs_mask
+
+            slots, dists = self._vector_store.search(query_vec, k=oversample, mask=combined)
+            for slot_idx, dist in zip(slots, dists):
+                slot = int(slot_idx)
+                sim = max(0.0, 1.0 - float(dist))
+                candidates[slot] = {"vector_sim": sim, "bm25": 0.0, "recency": 0.0}
+
+        # --- BM25 candidates ---
+        if self._document_store:
+            hits = self._document_store.search_text(q.query, limit=oversample)
+            for slot, score in hits:
+                if slot < n and live_mask[slot]:
+                    if slot not in candidates:
+                        candidates[slot] = {"vector_sim": 0.0, "bm25": 0.0, "recency": 0.0}
+                    candidates[slot]["bm25"] = abs(float(score))
+
+        if not candidates:
+            return Result(kind="nodes", data=[], count=0)
+
+        # Normalize BM25 scores to 0-1
+        max_bm25 = max((c["bm25"] for c in candidates.values()), default=0.0)
+        if max_bm25 > 0:
+            for c in candidates.values():
+                c["bm25"] = c["bm25"] / max_bm25
+
+        # --- Recency scoring ---
+        updated_col = self.store.columns.get_column("__updated_at__", n)
+        for slot, scores in candidates.items():
+            age_days = 0.0
+            if updated_col is not None:
+                col_data, col_pres, _ = updated_col
+                if col_pres[slot]:
+                    age_ms = now_ms - int(col_data[slot])
+                    age_days = max(0.0, age_ms / 86400000.0)
+            scores["recency"] = math.exp(-age_days / 30.0)
+
+        # --- Weighted fusion ---
+        W_VECTOR = 0.4
+        W_BM25 = 0.3
+        W_RECENCY = 0.3
+
+        scored = []
+        for slot, scores in candidates.items():
+            final = (W_VECTOR * scores["vector_sim"]
+                     + W_BM25 * scores["bm25"]
+                     + W_RECENCY * scores["recency"])
+            scored.append((slot, final, scores))
+
+        scored.sort(key=lambda x: -x[1])
+
+        # --- Materialize and filter ---
+        results = []
+        for slot, final_score, scores in scored:
+            node = self.store._materialize_slot(slot)
+            if node is None:
+                continue
+            if q.where and not self._eval_where(q.where.expr, node):
+                continue
+            node["_remember_score"] = round(final_score, 4)
+            node["_vector_sim"] = round(scores["vector_sim"], 4)
+            node["_bm25_score"] = round(scores["bm25"], 4)
+            node["_recency_score"] = round(scores["recency"], 4)
+            results.append(node)
+            if len(results) >= target_k:
+                break
+
+        return Result(kind="nodes", data=results, count=len(results))
