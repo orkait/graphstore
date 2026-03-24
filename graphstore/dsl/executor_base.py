@@ -1,6 +1,21 @@
 """Shared executor infrastructure: helpers, predicates, column filters."""
 
+import re
 import time
+from functools import lru_cache
+
+
+@lru_cache(maxsize=256)
+def _compile_like_pattern(pattern: str):
+    parts = []
+    for ch in pattern:
+        if ch == '%':
+            parts.append('.*')
+        elif ch == '_':
+            parts.append('.')
+        else:
+            parts.append(re.escape(ch))
+    return re.compile(''.join(parts))
 
 import numpy as np
 
@@ -132,19 +147,7 @@ class ExecutorBase:
             actual = data.get(expr.field)
             if actual is None:
                 return False
-            # Use cached compiled regex
-            if not hasattr(expr, '_compiled_re'):
-                import re
-                parts = []
-                for ch in expr.pattern:
-                    if ch == '%':
-                        parts.append('.*')
-                    elif ch == '_':
-                        parts.append('.')
-                    else:
-                        parts.append(re.escape(ch))
-                expr._compiled_re = re.compile(''.join(parts))  # type: ignore[attr-defined]
-            return bool(expr._compiled_re.fullmatch(str(actual)))
+            return bool(_compile_like_pattern(expr.pattern).fullmatch(str(actual)))
         elif isinstance(expr, InCondition):
             actual = data.get(expr.field)
             return actual in expr.values
