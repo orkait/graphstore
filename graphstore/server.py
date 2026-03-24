@@ -272,6 +272,56 @@ def config(req: ConfigRequest):
     return {"ok": True}
 
 
+@app.get("/api/logs")
+def get_logs(
+    limit: int = 50,
+    tag: str | None = None,
+    source: str | None = None,
+    trace_id: str | None = None,
+    since: str | None = None,
+):
+    """Query the enriched query log."""
+    store = _get_store()
+    conn = store._conn
+    if conn is None:
+        return []
+
+    sql = "SELECT id, timestamp, query, elapsed_us, result_count, error, tag, trace_id, source, phase FROM query_log"
+    params: list = []
+    conditions = []
+
+    if tag:
+        conditions.append("tag = ?")
+        params.append(tag)
+    if source:
+        conditions.append("source LIKE ?")
+        params.append(f"%{source}%")
+    if trace_id:
+        conditions.append("trace_id = ?")
+        params.append(trace_id)
+    if since:
+        import datetime
+        dt = datetime.datetime.fromisoformat(since)
+        conditions.append("timestamp >= ?")
+        params.append(dt.timestamp())
+
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+
+    sql += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+
+    rows = conn.execute(sql, params).fetchall()
+    return [
+        {
+            "id": r[0], "timestamp": r[1], "query": r[2],
+            "elapsed_us": r[3], "result_count": r[4], "error": r[5],
+            "tag": r[6], "trace_id": r[7], "source": r[8], "phase": r[9],
+        }
+        for r in rows
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Static files helper
 # ---------------------------------------------------------------------------
