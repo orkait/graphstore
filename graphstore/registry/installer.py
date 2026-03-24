@@ -3,7 +3,10 @@
 import subprocess
 import sys
 import shutil
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from graphstore.registry.models import get_model_info, SUPPORTED_MODELS
 
 
@@ -59,8 +62,8 @@ def install_embedder(name: str, variant: str | None = None) -> Path:
     for tok_file in ["tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"]:
         try:
             hf_hub_download(repo_id, tok_file, local_dir=str(model_dir))
-        except Exception:
-            pass  # Some files may not exist
+        except Exception as e:
+            logger.debug("tokenizer file %r download skipped: %s", tok_file, e, exc_info=True)
 
     # Download ONNX model files
     for f in variant_info["files"]:

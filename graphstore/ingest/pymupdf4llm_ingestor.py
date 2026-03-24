@@ -1,5 +1,8 @@
 """PyMuPDF4LLM ingestor: Tier 2 - PDF with structure + image extraction."""
+import logging
 from graphstore.ingest.base import Ingestor, IngestResult, ExtractedImage
+
+logger = logging.getLogger(__name__)
 
 
 class PyMuPDF4LLMIngestor(Ingestor):
@@ -29,8 +32,8 @@ class PyMuPDF4LLMIngestor(Ingestor):
                             mime_type=f"image/{base_image['ext']}",
                             page=page_num,
                         ))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("image extraction skipped for xref %s: %s", img_info[0], e, exc_info=True)
         doc.close()
 
         # Scanned PDF detection

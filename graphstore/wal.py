@@ -2,6 +2,9 @@
 
 import time
 import sqlite3
+import logging
+
+logger = logging.getLogger(__name__)
 
 from graphstore.core.errors import GraphStoreError
 from graphstore.dsl.parser import parse
@@ -31,8 +34,8 @@ class WALManager:
         if row and row[0] >= self._wal_hard_limit:
             try:
                 self.checkpoint()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("WAL checkpoint before hard-limit failed: %s", e, exc_info=True)
             row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
             if row and row[0] >= self._wal_hard_limit:
                 raise GraphStoreError(
@@ -58,8 +61,8 @@ class WALManager:
                 if isinstance(ast, ast_nodes.CreateNode):
                     ast = ast_nodes.UpsertNode(id=ast.id, fields=ast.fields)
                 self._executor.execute(ast)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("WAL replay statement skipped: %s", e, exc_info=True)
         if rows:
             _checkpoint_fn(self._store, self._schema, conn)
 
@@ -89,8 +92,8 @@ class WALManager:
                 (time.time(), query, elapsed_us, result_count, error)
             )
             conn.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("query log insert failed: %s", e, exc_info=True)
 
     def _rotate_query_log(self) -> None:
         conn = self._conn
@@ -100,5 +103,5 @@ class WALManager:
             cutoff = time.time() - self._log_retention_days * 86400
             conn.execute("DELETE FROM query_log WHERE timestamp < ?", (cutoff,))
             conn.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("query log rotation failed: %s", e, exc_info=True)

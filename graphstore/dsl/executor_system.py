@@ -6,8 +6,11 @@ for stats, schema management, query logs, WAL, and diagnostics.
 
 import time
 import sqlite3
+import logging
 
 from graphstore.core.store import CoreStore
+
+logger = logging.getLogger(__name__)
 from graphstore.core.schema import SchemaRegistry
 from graphstore.core.types import Result
 import numpy as np
@@ -573,8 +576,8 @@ class SystemExecutor:
             live_slots = set(int(s) for s in np.nonzero(live)[0])
             try:
                 self._document_store.orphan_cleanup(live_slots)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("orphan cleanup after rollback failed: %s", e, exc_info=True)
 
         return Result(kind="ok", data={"rollback": q.name}, count=1)
 
@@ -734,7 +737,8 @@ class SystemExecutor:
         if self._document_store:
             try:
                 data["documents"] = self._document_store.stats()
-            except Exception:
+            except Exception as e:
+                logger.debug("document store stats failed: %s", e, exc_info=True)
                 data["documents"] = {}
         else:
             data["documents"] = {}

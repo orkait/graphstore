@@ -3,7 +3,10 @@
 import os
 import time
 import sqlite3
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from concurrent.futures import Future
 from graphstore.core.store import CoreStore
@@ -398,8 +401,8 @@ class GraphStore:
                 # Try checkpoint first to clear WAL
                 try:
                     self.checkpoint()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("WAL checkpoint before hard-limit failed: %s", e, exc_info=True)
                 # Re-check after checkpoint
                 row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
                 if row and row[0] >= wal_limit:
@@ -429,8 +432,8 @@ class GraphStore:
                 if isinstance(ast, ast_nodes.CreateNode):
                     ast = ast_nodes.UpsertNode(id=ast.id, fields=ast.fields)
                 self._executor.execute(ast)
-            except Exception:
-                pass  # Skip failed statements during replay
+            except Exception as e:
+                logger.debug("WAL replay statement skipped: %s", e, exc_info=True)
 
         # Checkpoint to clean state
         if rows:
@@ -455,8 +458,8 @@ class GraphStore:
             cutoff = time.time() - self._config.persistence.log_retention_days * 86400
             conn.execute("DELETE FROM query_log WHERE timestamp < ?", (cutoff,))
             conn.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("query log rotation failed: %s", e, exc_info=True)
 
     def _check_health_for_auto(self):
         """Lightweight health check - sets _needs_optimize if pressure detected."""
@@ -471,8 +474,8 @@ class GraphStore:
         try:
             from graphstore.core.optimizer import optimize_all
             optimize_all(self._store, self._vector_store, self._document_store)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("auto-optimize failed: %s", e, exc_info=True)
         finally:
             self._optimizing = False
             self._needs_optimize = False
@@ -488,5 +491,5 @@ class GraphStore:
                 (time.time(), query, elapsed_us, result_count, error)
             )
             conn.commit()
-        except Exception:
-            pass  # Don't fail on log errors
+        except Exception as e:
+            logger.debug("query log insert failed: %s", e, exc_info=True)

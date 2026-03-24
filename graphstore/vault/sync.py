@@ -1,5 +1,8 @@
 """VaultSync: sync vault directory to graphstore graph."""
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from graphstore.vault.parser import (
     parse_frontmatter, parse_sections, extract_wikilinks, title_to_slug,
@@ -51,15 +54,16 @@ class VaultSync:
                 self._sync_node(slug)
                 synced_slugs.append(slug)
                 synced += 1
-            except Exception:
+            except Exception as e:
+                logger.debug("vault node sync failed for %r: %s", slug, e, exc_info=True)
                 errors += 1
 
         # Pass 2: recreate edges for all synced notes
         for slug in synced_slugs:
             try:
                 self._sync_edges(slug)
-            except Exception:
-                pass  # Edge creation failures are non-fatal
+            except Exception as e:
+                logger.debug("vault edge sync failed for %r: %s", slug, e, exc_info=True)
 
         return {"synced": synced, "skipped": skipped, "errors": errors}
 
@@ -158,8 +162,8 @@ class VaultSync:
         for edge in existing_link_edges:
             try:
                 self._store.delete_edge(edge["source"], edge["target"], "links")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("vault link edge delete failed: %s", e, exc_info=True)
 
         # Create new link edges
         for target_slug in wikilinks:
@@ -171,5 +175,5 @@ class VaultSync:
                     if target_slot not in self._store.node_tombstones:
                         try:
                             self._store.put_edge(node_id, target_id, "links")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("vault link edge creation failed: %s", e, exc_info=True)
