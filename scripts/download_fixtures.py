@@ -138,36 +138,57 @@ def download_csv():
         dl(url, d / name)
 
 
-# ─── Images: HuggingFace beans dataset (ungated, real photos, 3 classes) ──────
+# ─── Images: Wikimedia Commons CC0 (diverse categories, 320px) ────────────────
 def download_images():
-    print("\n[images] HuggingFace beans dataset (20 images, 3 classes)")
+    print("\n[images] Wikimedia Commons (diverse, 320px, CC0)")
     d = FIXTURES / "images"
     d.mkdir(parents=True, exist_ok=True)
-    try:
-        from datasets import load_dataset
-    except ImportError:
-        print("  SKIP — need: pip install datasets pillow")
+
+    if (d / "manifest.json").exists():
+        print("  skip (manifest exists)")
         return
 
-    ds = load_dataset("beans", split="test", streaming=True)
-    label_names = ["angular_leaf_spot", "bean_rust", "healthy"]
+    import time as _time
+
+    # Curated: (filename on Commons, label, local name)
+    # Using Special:FilePath which is more reliable than /thumb/ URLs
+    WIKI = "https://commons.wikimedia.org/wiki/Special:FilePath"
+    imgs = [
+        # Animals
+        ("YellowLabradorLooking_new.jpg",            "dog",       "dog_01.jpg"),
+        ("Cat_November_2010-1a.jpg",                 "cat",       "cat_01.jpg"),
+        ("Camponotus_flavomarginatus_ant.jpg",       "ant",       "ant_01.jpg"),
+        ("Ara_ararauna_Luc_Viatour.jpg",             "parrot",    "parrot_01.jpg"),
+        ("Elephants_at_Amboseli_national_park_against_Mount_Kilimanjaro.jpg", "elephant", "elephant_01.jpg"),
+        # Vehicles
+        ("2012_Fiat_500_Lounge_--_02-22-2012.jpg",     "car",       "car_01.jpg"),
+        ("Left_side_of_Flying_Pigeon.jpg",           "bicycle",   "bicycle_01.jpg"),
+        ("GoldenGateBridge-001.jpg",                  "bridge",    "bridge_01.jpg"),
+        # Food
+        ("Eq_it-na_pizza-margherita_sep2005_sml.jpg","pizza",     "pizza_01.jpg"),
+        ("Red_Apple.jpg",                            "apple",     "apple_01.jpg"),
+        ("Bananas.jpg",                              "banana",    "banana_01.jpg"),
+        # Architecture / scenes
+        ("Leaning_Tower_of_Pisa.jpg",                "tower",     "tower_01.jpg"),
+        ("Taipei_101_2009_amk.jpg",                  "skyscraper","skyscraper_01.jpg"),
+        # Nature
+        ("Sunflower_from_Silesia2.jpg",              "flower",    "flower_01.jpg"),
+        ("Pleiades_large.jpg",                       "stars",     "stars_01.jpg"),
+        # Objects
+        ("Rubiks_cube_by_keqs.jpg",                  "cube",      "cube_01.jpg"),
+        ("Fender_Stratocaster.jpg",                  "guitar",    "guitar_01.jpg"),
+        # Art / misc
+        ("Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg", "painting", "painting_01.jpg"),
+        ("Tux.png",                                  "penguin",   "penguin_01.png"),
+        ("Tennis_Racket_and_Balls.jpg",              "tennis",    "tennis_01.jpg"),
+    ]
     manifest = []
-    counts = {l: 0 for l in label_names}
-    for sample in ds:
-        label = label_names[sample["labels"]]
-        if counts[label] >= 7:
-            continue
-        if len(manifest) >= 20:
-            break
-        idx = len(manifest)
-        fname = f"img_{idx:02d}_{label}.jpg"
-        path = d / fname
-        if not path.exists():
-            sample["image"].save(path)
-        kb = path.stat().st_size // 1024
-        print(f"  {fname} ({kb}KB)")
-        manifest.append({"file": fname, "label": label})
-        counts[label] += 1
+    for wiki_name, label, fname in imgs:
+        url = f"{WIKI}/{wiki_name}?width=320"
+        dl(url, d / fname, label=f"{fname} [{label}]")
+        _time.sleep(1.5)  # respect Wikimedia rate limits
+        if (d / fname).exists():
+            manifest.append({"file": fname, "label": label})
 
     (d / "manifest.json").write_text(json.dumps(manifest, indent=2))
     print(f"  manifest.json ({len(manifest)} images)")
@@ -175,61 +196,105 @@ def download_images():
 
 # ─── Voice: AI4Bharat Svarah ──────────────────────────────────────────────────
 def download_voice():
-    print("\n[voice] OpenSLR 118 — real Hindi speech (Gram Vaani)")
+    print("\n[voice] Multi-language real speech (6 Indian + English)")
+    print("  NOTE: Temp downloads ~2GB, cleaned up after extracting 5 clips per lang")
     d = FIXTURES / "voice"
     d.mkdir(parents=True, exist_ok=True)
 
-    import subprocess, tarfile, shutil
+    import tarfile, shutil, zipfile
 
-    archive = d / "_eval.tar.gz"
-    extract_dir = d / "_extract"
     manifest_path = d / "manifest.json"
-
     if manifest_path.exists():
         print("  skip (manifest exists)")
         return
 
-    # Download the 62MB eval set
-    dl("https://openslr.org/resources/118/GV_Eval_3h.tar.gz", archive, "GV_Eval_3h.tar.gz")
-    if not archive.exists():
-        print("  FAILED to download archive")
-        return
-
-    # Extract
-    print("  extracting...", end="", flush=True)
-    extract_dir.mkdir(exist_ok=True)
-    with tarfile.open(archive, "r:gz") as tar:
-        tar.extractall(extract_dir, filter="data")
-    print(" done")
-
-    # Find audio files + transcript (format: "utt_id transcript_text")
-    audio_files = sorted(extract_dir.rglob("*.mp3"))[:15]
-    transcripts = {}
-    for tf in extract_dir.rglob("text"):
-        for line in tf.read_text(encoding="utf-8", errors="replace").strip().splitlines():
-            idx = line.find(" ")
-            if idx > 0:
-                utt_id = line[:idx].strip()
-                text = line[idx + 1:].strip()
-                transcripts[utt_id] = text
-
     manifest = []
-    for i, src in enumerate(audio_files):
-        fname = f"clip_{i:02d}.mp3"
-        dest = d / fname
-        if not dest.exists():
-            shutil.copy2(src, dest)
-        kb = dest.stat().st_size // 1024
-        transcript = transcripts.get(src.stem, "")
-        print(f"  {fname} ({kb}KB)")
-        manifest.append({"file": fname, "lang": "hi", "transcript": transcript})
+
+    def _extract_slr_tar(lang_code, url, label, audio_ext="mp3"):
+        """Download OpenSLR tar.gz, extract 5 clips + transcripts, cleanup."""
+        print(f"  [{lang_code}] {label}...")
+        archive = d / f"_{lang_code}.tar.gz"
+        xdir = d / f"_{lang_code}_x"
+        dl(url, archive, label)
+        if not archive.exists():
+            print(f"    FAILED to download")
+            return
+        xdir.mkdir(exist_ok=True)
+        with tarfile.open(archive, "r:gz") as tar:
+            tar.extractall(xdir, filter="data")
+        # Parse transcripts (Kaldi-style "utt_id text")
+        transcripts = {}
+        for tf in xdir.rglob("text"):
+            for line in tf.read_text(encoding="utf-8", errors="replace").strip().splitlines():
+                idx = line.find(" ")
+                if idx > 0:
+                    transcripts[line[:idx].strip()] = line[idx + 1:].strip()
+        for i, src in enumerate(sorted(xdir.rglob(f"*.{audio_ext}"))[:5]):
+            fname = f"{lang_code}_{i:02d}.{audio_ext}"
+            shutil.copy2(src, d / fname)
+            kb = (d / fname).stat().st_size // 1024
+            print(f"    {fname} ({kb}KB)")
+            manifest.append({"file": fname, "lang": lang_code, "transcript": transcripts.get(src.stem, "")})
+        archive.unlink(missing_ok=True)
+        shutil.rmtree(xdir, ignore_errors=True)
+
+    def _extract_slr_zip(lang_code, url, label):
+        """Download OpenSLR zip, extract 5 clips + transcripts, cleanup."""
+        print(f"  [{lang_code}] {label}...")
+        archive = d / f"_{lang_code}.zip"
+        xdir = d / f"_{lang_code}_x"
+        dl(url, archive, label)
+        if not archive.exists():
+            print(f"    FAILED to download")
+            return
+        xdir.mkdir(exist_ok=True)
+        with zipfile.ZipFile(archive, "r") as zf:
+            zf.extractall(xdir)
+        # Parse line_index TSV (Google Crowdsourced format: "filename \t text")
+        transcripts = {}
+        for tf in list(xdir.rglob("line_index*.tsv")) + list(xdir.rglob("line_index*.csv")):
+            for line in tf.read_text(encoding="utf-8", errors="replace").strip().splitlines():
+                parts = line.split("\t")
+                if len(parts) >= 2:
+                    transcripts[Path(parts[0]).stem] = parts[1]
+        for i, src in enumerate(sorted(xdir.rglob("*.wav"))[:5]):
+            fname = f"{lang_code}_{i:02d}.wav"
+            shutil.copy2(src, d / fname)
+            kb = (d / fname).stat().st_size // 1024
+            print(f"    {fname} ({kb}KB)")
+            manifest.append({"file": fname, "lang": lang_code, "transcript": transcripts.get(src.stem, "")})
+        archive.unlink(missing_ok=True)
+        shutil.rmtree(xdir, ignore_errors=True)
+
+    # Hindi: SLR118 eval (62MB, Gram Vaani telephone, real Indian speakers)
+    _extract_slr_tar("hi",
+        "https://openslr.org/resources/118/GV_Eval_3h.tar.gz",
+        "OpenSLR 118 Hindi eval (62MB)")
+
+    # English: SLR83 midlands_english_female (103MB, UK English)
+    _extract_slr_zip("en",
+        "https://openslr.trmal.net/resources/83/midlands_english_female.zip",
+        "OpenSLR 83 English midlands (103MB)")
+
+    # Tamil: SLR65 (603MB, Indian Tamil speakers)
+    _extract_slr_zip("ta",
+        "https://openslr.trmal.net/resources/65/ta_in_male.zip",
+        "OpenSLR 65 Tamil (603MB)")
+
+    # Telugu: SLR66 (505MB, Indian Telugu speakers)
+    _extract_slr_zip("te",
+        "https://openslr.trmal.net/resources/66/te_in_female.zip",
+        "OpenSLR 66 Telugu (505MB)")
+
+    # Marathi: SLR64 (712MB, Indian Marathi speakers)
+    _extract_slr_zip("mr",
+        "https://openslr.trmal.net/resources/64/mr_in_female.zip",
+        "OpenSLR 64 Marathi (712MB)")
+
+    # Gujarati skipped — 895MB archive, requires >2GB free disk for extraction
 
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
-    print(f"  manifest.json ({len(manifest)} clips)")
-
-    # Cleanup archive and extract dir
-    archive.unlink(missing_ok=True)
-    shutil.rmtree(extract_dir, ignore_errors=True)
+    print(f"  manifest.json ({len(manifest)} clips, 5 languages)")
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
