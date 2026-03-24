@@ -53,6 +53,12 @@ class CoreStore:
         self._snapshots: dict[str, dict] = {}
         self._tombstone_mask_cache: tuple[int, int, np.ndarray] | None = None  # (n, len(tombstones), mask)
 
+        # Dirty tracking for incremental checkpoint
+        self._dirty_nodes = True
+        self._dirty_columns = True
+        self._dirty_edges = True
+        self._dirty_strings = True
+
     # -- slot management -----------------------------------------------------
 
     def _alloc_slot(self) -> int:
@@ -121,6 +127,9 @@ class CoreStore:
         self.columns.set(slot, data)
         self.id_to_slot[str_id] = slot
         self._count += 1
+        self._dirty_nodes = True
+        self._dirty_columns = True
+        self._dirty_strings = True
         now_ms = int(time.time() * 1000)
         self.columns.set_reserved(slot, "__created_at__", now_ms)
         self.columns.set_reserved(slot, "__updated_at__", now_ms)
@@ -175,6 +184,8 @@ class CoreStore:
             if field in data:
                 self.secondary_indices[field].setdefault(data[field], []).append(slot)
         self.columns.set_reserved(slot, "__updated_at__", int(time.time() * 1000))
+        self._dirty_columns = True
+        self._dirty_strings = True
 
     def upsert_node(self, id: str, kind: str, data: dict) -> int:
         """Create or update node."""
@@ -216,6 +227,9 @@ class CoreStore:
         self._tombstone_mask_cache = None
         del self.id_to_slot[str_id]
         self._count -= 1
+        self._dirty_nodes = True
+        self._dirty_columns = True
+        self._dirty_edges = True
 
         # Cascade-delete edges touching this node
         self._cascade_delete_edges(slot)
@@ -262,6 +276,8 @@ class CoreStore:
             (src_slot, tgt_slot, edge_data)
         )
         self._edges_dirty = True
+        self._dirty_edges = True
+        self._dirty_strings = True
 
     def delete_edge(self, source_id: str, target_id: str, kind: str):
         """Delete a specific edge."""
@@ -280,6 +296,7 @@ class CoreStore:
                 del self._edges_by_type[kind]
         self._edge_keys.discard((src_slot, tgt_slot, kind))
         self._rebuild_edges()
+        self._dirty_edges = True
 
     def get_edges_from(self, id: str, kind: str | None = None) -> list[dict]:
         """Get outgoing edges from a node. Uses CSR for neighbor lookup."""
@@ -624,3 +641,11 @@ class CoreStore:
         new_val = current + amount
         self.columns.set_field(slot, field, new_val)
         self.columns.set_reserved(slot, "__updated_at__", int(time.time() * 1000))
+        self._dirty_columns = True
+
+    def reset_dirty_flags(self):
+        """Reset all dirty tracking flags after checkpoint."""
+        self._dirty_nodes = False
+        self._dirty_columns = False
+        self._dirty_edges = False
+        self._dirty_strings = False

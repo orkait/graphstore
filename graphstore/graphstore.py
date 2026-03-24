@@ -286,6 +286,7 @@ class GraphStore:
             return
         self._store.vectors = self._vector_store  # expose to serializer
         _checkpoint_fn(self._store, self._schema, self._conn)
+        self._store.reset_dirty_flags()
 
     def set_script(self, script: str) -> None:
         """Store a DSL script in metadata so the playground can load it."""
@@ -408,7 +409,7 @@ class GraphStore:
 
         # Checkpoint to clean state
         if rows:
-            _checkpoint_fn(self._store, self._schema, conn)
+            _checkpoint_fn(self._store, self._schema, conn, force=True)
 
     def _maybe_auto_checkpoint(self):
         """Auto-checkpoint if WAL exceeds thresholds."""
