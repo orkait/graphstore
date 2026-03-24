@@ -5,6 +5,7 @@ import time
 import sqlite3
 from pathlib import Path
 
+from concurrent.futures import Future
 from graphstore.core.store import CoreStore
 from graphstore.core.schema import SchemaRegistry
 from graphstore.core.types import Result
@@ -46,7 +47,8 @@ class GraphStore:
                  voice: bool = False, ingest_root=_UNSET,
                  vault=_UNSET, retention=_UNSET,
                  config: GraphStoreConfig | None = None,
-                 config_path: str | None = None):
+                 config_path: str | None = None,
+                 threaded: bool = False):
         # Load config: explicit object > explicit path > env var > db dir > defaults
         if config is not None:
             self._config = config
@@ -191,8 +193,21 @@ class GraphStore:
             self._vault_sync = None
             self._vault_executor = None
 
+        # Command queue for thread-safe access
+        self._threaded = threaded
+        self._queue = None
+        if threaded:
+            from graphstore.core.queue import CommandQueue
+            self._queue = CommandQueue(self._execute_internal)
+
     def execute(self, query: str) -> Result:
-        """Execute a single DSL query (user or system). Returns Result."""
+        """Execute a DSL query. Thread-safe if threaded=True."""
+        if self._queue is not None:
+            return self._queue.submit(query)
+        return self._execute_internal(query)
+
+    def _execute_internal(self, query: str) -> Result:
+        """Execute a DSL query directly (no queue). Internal use only."""
         # Reject during optimization (lock gate)
         if self._optimizing:
             raise OptimizationInProgress()
@@ -280,6 +295,13 @@ class GraphStore:
         """Execute multiple queries. Each is independent (not transactional)."""
         return [self.execute(q) for q in queries]
 
+    def submit_background(self, query: str) -> "Future":
+        """Submit a background query (low priority). Only available in threaded mode.
+        Returns a Future that resolves to a Result."""
+        if self._queue is None:
+            raise RuntimeError("submit_background requires GraphStore(threaded=True)")
+        return self._queue.submit_background(query)
+
     def checkpoint(self) -> None:
         """Force persist to disk. No-op if path is None."""
         if self._conn is None:
@@ -325,6 +347,9 @@ class GraphStore:
 
     def close(self) -> None:
         """Checkpoint + close sqlite connection."""
+        if self._queue is not None:
+            self._queue.shutdown()
+            self._queue = None
         conn = self._conn
         if conn is not None:
             self.checkpoint()
