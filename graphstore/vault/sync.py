@@ -150,26 +150,16 @@ class VaultSync:
         wikilinks = extract_wikilinks(content)
 
         node_id = f"note:{slug}"
-        str_id = self._store.string_table.intern(node_id)
-        slot = self._store.id_to_slot.get(str_id)
-        if slot is None:
+        if node_id not in self._store.string_table:
             return
 
         # Delete old link edges from this node
-        if "links" in self._store._edges_by_type:
-            self._store._edges_by_type["links"] = [
-                (s, t, d) for s, t, d in self._store._edges_by_type["links"]
-                if s != slot
-            ]
-            if not self._store._edges_by_type["links"]:
-                del self._store._edges_by_type["links"]
-        # Rebuild edge_keys set
-        self._store._edge_keys = {
-            (s, t, k)
-            for k, edges in self._store._edges_by_type.items()
-            for s, t, _d in edges
-        }
-        self._store._edges_dirty = True
+        existing_link_edges = self._store.get_edges_from(node_id, kind="links")
+        for edge in existing_link_edges:
+            try:
+                self._store.delete_edge(edge["source"], edge["target"], "links")
+            except Exception:
+                pass
 
         # Create new link edges
         for target_slug in wikilinks:
@@ -182,4 +172,4 @@ class VaultSync:
                         try:
                             self._store.put_edge(node_id, target_id, "links")
                         except Exception:
-                            pass  # Duplicate or other edge error
+                            pass
