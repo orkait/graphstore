@@ -36,6 +36,7 @@ class ExecutorBase(VisibilityMixin, FilteringMixin):
         self._ingest_root = ingest_root
         self.cost_threshold = 100_000
         self._embedder_dirty = False
+        self._fts_full_text = True  # default, overridden by config
 
     def execute(self, ast) -> Result:
         """Execute a parsed AST node and return a Result."""
