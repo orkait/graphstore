@@ -154,28 +154,69 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
             vector_store._index.add(new_slot, vec)
             vector_store._has_vector[new_slot] = True
 
-    # Remap DocumentStore slot keys
+    # Remap DocumentStore slot keys via temp-table batch (O(1) statements vs O(N))
     if document_store is not None:
         conn = document_store._conn
-        for old_slot, new_slot in old_to_new_dict.items():
-            if old_slot == new_slot:
-                continue
-            conn.execute("UPDATE documents SET slot = ? WHERE slot = ?", (-old_slot - 1, old_slot))
-            conn.execute("UPDATE summaries SET slot = ? WHERE slot = ?", (-old_slot - 1, old_slot))
-            conn.execute("UPDATE summaries SET doc_slot = ? WHERE doc_slot = ?", (-old_slot - 1, old_slot))
-            conn.execute("UPDATE images SET slot = ? WHERE slot = ?", (-old_slot - 1, old_slot))
-            conn.execute("UPDATE doc_metadata SET doc_slot = ? WHERE doc_slot = ?", (-old_slot - 1, old_slot))
-            conn.execute("DELETE FROM doc_fts WHERE rowid = ?", (old_slot,))
-        for old_slot, new_slot in old_to_new_dict.items():
-            if old_slot == new_slot:
-                continue
-            temp = -old_slot - 1
-            conn.execute("UPDATE documents SET slot = ? WHERE slot = ?", (new_slot, temp))
-            conn.execute("UPDATE summaries SET slot = ? WHERE slot = ?", (new_slot, temp))
-            conn.execute("UPDATE summaries SET doc_slot = ? WHERE doc_slot = ?", (new_slot, temp))
-            conn.execute("UPDATE images SET slot = ? WHERE slot = ?", (new_slot, temp))
-            conn.execute("UPDATE doc_metadata SET doc_slot = ? WHERE doc_slot = ?", (new_slot, temp))
-        # Rebuild FTS from summaries
+
+        # Build live-slot temp table — used for both orphan deletion and remap.
+        conn.execute(
+            "CREATE TEMP TABLE _live_slots (slot INT PRIMARY KEY)"
+        )
+        conn.executemany(
+            "INSERT INTO _live_slots VALUES (?)",
+            [(s,) for s in old_to_new_dict.keys()]
+        )
+
+        # Delete tombstoned slot rows. Tombstoned slots are not in _live_slots
+        # but may still occupy rows in document tables; leaving them causes
+        # UNIQUE constraint violations when a live slot remaps onto that number.
+        _ORPHAN_COLS = [
+            ("documents", "slot"),
+            ("summaries", "slot"),
+            ("images", "slot"),
+            ("doc_metadata", "doc_slot"),
+        ]
+        for tbl, col in _ORPHAN_COLS:
+            conn.execute(
+                f"DELETE FROM {tbl} WHERE {col} >= 0 AND {col} < ?"  # noqa: S608
+                f" AND {col} NOT IN (SELECT slot FROM _live_slots)",
+                (n,),
+            )
+
+        # Remap live slots that change position (old_slot != new_slot)
+        remapped = [(old, new) for old, new in old_to_new_dict.items() if old != new]
+        if remapped:
+            conn.execute(
+                "CREATE TEMP TABLE _slot_remap (old_slot INT PRIMARY KEY, new_slot INT)"
+            )
+            conn.executemany("INSERT INTO _slot_remap VALUES (?,?)", remapped)
+
+            _REMAP_COLS = [
+                ("documents", "slot"),
+                ("summaries", "slot"),
+                ("summaries", "doc_slot"),
+                ("images", "slot"),
+                ("doc_metadata", "doc_slot"),
+            ]
+            # Pass 1: old slot → negative sentinel (avoids collision with valid new slots)
+            for tbl, col in _REMAP_COLS:
+                conn.execute(
+                    f"UPDATE {tbl} SET {col} = -(({col}) + 1)"  # noqa: S608
+                    f" WHERE {col} IN (SELECT old_slot FROM _slot_remap)"
+                )
+            # Pass 2: negative sentinel → new slot
+            for tbl, col in _REMAP_COLS:
+                conn.execute(
+                    f"UPDATE {tbl} SET {col} = ("  # noqa: S608
+                    f"  SELECT new_slot FROM _slot_remap"
+                    f"  WHERE old_slot = -(({tbl}.{col}) + 1)"
+                    f") WHERE {col} IN (SELECT -(old_slot + 1) FROM _slot_remap)"
+                )
+            conn.execute("DROP TABLE _slot_remap")
+
+        conn.execute("DROP TABLE _live_slots")
+
+        # Rebuild FTS from remapped summaries
         conn.execute("DELETE FROM doc_fts")
         rows = conn.execute("SELECT slot, summary FROM summaries").fetchall()
         for slot, summary in rows:

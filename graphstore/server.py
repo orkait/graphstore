@@ -210,8 +210,8 @@ def execute_batch(req: BatchRequest):
 @app.get("/api/graph")
 def get_graph():
     store = _get_store()
-    nodes = store._store.get_all_nodes()
-    edges = store._store.get_all_edges()
+    nodes = store.get_all_nodes()
+    edges = store.get_all_edges()
     return {"nodes": nodes, "edges": edges}
 
 
@@ -266,9 +266,9 @@ def put_script(req: ExecuteRequest):
 def config(req: ConfigRequest):
     store = _get_store()
     if req.ceiling_mb is not None:
-        store._store._ceiling_bytes = req.ceiling_mb * 1_000_000
+        store.ceiling_mb = req.ceiling_mb
     if req.cost_threshold is not None:
-        store._executor.cost_threshold = req.cost_threshold
+        store.cost_threshold = req.cost_threshold
     return {"ok": True}
 
 

@@ -31,10 +31,6 @@ class IntelligenceHandlers:
         if combined is None:
             return Result(kind="nodes", data=[], count=0)
 
-        mat = combined
-        if mat.shape[0] < n:
-            mat = csr_matrix((mat.data, mat.indices, mat.indptr), shape=(n, n))
-
         activation = np.zeros(n, dtype=np.float64)
         activation[cue_slot] = 1.0
 
@@ -59,7 +55,12 @@ class IntelligenceHandlers:
 
         live_mask = self._compute_live_mask(n)
 
-        mat_t = mat.T.tocsr()
+        if combined.shape[0] < n:
+            # Rare path: matrix predates latest node additions, resize then transpose.
+            # Intentionally NOT cached — resized matrix differs from _combined_all.
+            mat_t = csr_matrix((combined.data, combined.indices, combined.indptr), shape=(n, n)).T.tocsr()
+        else:
+            mat_t = self.store.edge_matrices.get_combined_transpose()
         for _ in range(q.depth):
             activation = mat_t.dot(activation)
             activation *= importance[:len(activation)]

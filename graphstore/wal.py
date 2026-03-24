@@ -26,6 +26,11 @@ class WALManager:
         self._wal_hard_limit = wal_hard_limit
         self._auto_checkpoint_threshold = auto_checkpoint_threshold
         self._log_retention_days = log_retention_days
+        self._vector_store = None  # set lazily via update_vector_store()
+
+    def update_vector_store(self, vs) -> None:
+        """Keep vector store reference in sync (lazily created in GraphStore)."""
+        self._vector_store = vs
 
     def append(self, statement: str) -> None:
         conn = self._conn
@@ -71,7 +76,8 @@ class WALManager:
         conn = self._conn
         if conn is None:
             return
-        self._store.vectors = vector_store
+        if self._vector_store is not None:
+            self._store.vectors = self._vector_store
         _checkpoint_fn(self._store, self._schema, conn)
         self._store.reset_dirty_flags()
 

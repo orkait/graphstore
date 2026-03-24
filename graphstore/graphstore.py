@@ -409,6 +409,32 @@ class GraphStore:
     def memory_usage(self) -> int:
         return _estimate_memory(self._store.node_count, self._store.edge_count)
 
+    def get_all_nodes(self) -> list[dict]:
+        """Return all live nodes. Used by server /api/graph endpoint."""
+        return self._store.get_all_nodes()
+
+    def get_all_edges(self) -> list[dict]:
+        """Return all live edges. Used by server /api/graph endpoint."""
+        return self._store.get_all_edges()
+
+    @property
+    def cost_threshold(self) -> int:
+        """DSL query cost threshold. Queries exceeding this are rejected."""
+        return self._executor.cost_threshold
+
+    @cost_threshold.setter
+    def cost_threshold(self, value: int) -> None:
+        self._executor.cost_threshold = value
+
+    @property
+    def ceiling_mb(self) -> int:
+        """Memory ceiling in MB. Writes exceeding this raise CeilingExceeded."""
+        return self._store._ceiling_bytes // 1_000_000
+
+    @ceiling_mb.setter
+    def ceiling_mb(self, value: int) -> None:
+        self._store._ceiling_bytes = value * 1_000_000
+
     def __enter__(self) -> "GraphStore":
         return self
 
@@ -421,7 +447,9 @@ class GraphStore:
             from graphstore.vector.store import VectorStore
             self._vector_store = VectorStore(dims=dims, capacity=self._store._capacity)
             self._executor._vector_store = self._vector_store
+            self._wal.update_vector_store(self._vector_store)
             if hasattr(self, '_optimizer'):
                 self._optimizer.sync_vector_store(self._vector_store)
         return self._vector_store
+
 

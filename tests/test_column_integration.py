@@ -218,3 +218,34 @@ class TestEndToEnd:
         with GraphStore(str(tmp_path / "db")) as gs:
             r = gs.execute('NODES WHERE score = 42')
             assert r.count == 1
+
+
+def test_compact_preserves_document_slots(tmp_path):
+    """After compaction, document search must still find nodes by their new slots."""
+    from graphstore import GraphStore
+    gs = GraphStore(path=str(tmp_path))
+
+    gs.execute('CREATE NODE "a" kind = "doc"')
+    gs.execute('CREATE NODE "b" kind = "doc"')
+    gs.execute('CREATE NODE "c" kind = "doc"')
+
+    # Populate FTS summaries (same pattern as test_gaps.py::TestLexicalRecall)
+    for nid, summary in [("a", "alpha content"), ("b", "beta content"), ("c", "gamma content")]:
+        str_id = gs._store.string_table.intern(nid)
+        slot = gs._store.id_to_slot[str_id]
+        gs._document_store.put_summary(slot, summary)
+
+    gs.execute('DELETE NODE "a"')  # creates tombstone at slot 0
+
+    gs.execute("SYS OPTIMIZE COMPACT")
+
+    # After compaction, b and c must still be reachable via lexical search
+    r = gs.execute('LEXICAL SEARCH "beta" LIMIT 5')
+    ids = [n["id"] for n in r.data]
+    assert "b" in ids, f"'b' missing after compaction; got {ids}"
+
+    r2 = gs.execute('LEXICAL SEARCH "gamma" LIMIT 5')
+    ids2 = [n["id"] for n in r2.data]
+    assert "c" in ids2, f"'c' missing after compaction; got {ids2}"
+
+    gs.close()
