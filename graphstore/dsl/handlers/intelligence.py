@@ -265,13 +265,13 @@ class IntelligenceHandlers:
 
     @handles(RememberQuery)
     def _remember(self, q: RememberQuery) -> Result:
-        """REMEMBER: hybrid retrieval fusing vector + BM25 + recency."""
+        """REMEMBER: hybrid retrieval fusing vector + BM25 + recency + confidence."""
         import math
 
         target_k = q.limit.value if q.limit else 10
         oversample = target_k * 5
 
-        candidates: dict[int, dict] = {}  # slot -> {vector_sim, bm25, recency}
+        candidates: dict[int, dict] = {}
 
         n = self.store._next_slot
         if n == 0:
@@ -293,7 +293,8 @@ class IntelligenceHandlers:
             for slot_idx, dist in zip(slots, dists):
                 slot = int(slot_idx)
                 sim = max(0.0, 1.0 - float(dist))
-                candidates[slot] = {"vector_sim": sim, "bm25": 0.0, "recency": 0.0}
+                candidates[slot] = {"vector_sim": sim, "bm25": 0.0, "recency": 0.0,
+                                    "confidence": 1.0, "recall_boost": 0.0}
 
         # --- BM25 candidates ---
         if self._document_store:
@@ -301,7 +302,8 @@ class IntelligenceHandlers:
             for slot, score in hits:
                 if slot < n and live_mask[slot]:
                     if slot not in candidates:
-                        candidates[slot] = {"vector_sim": 0.0, "bm25": 0.0, "recency": 0.0}
+                        candidates[slot] = {"vector_sim": 0.0, "bm25": 0.0, "recency": 0.0,
+                                            "confidence": 1.0, "recall_boost": 0.0}
                     candidates[slot]["bm25"] = abs(float(score))
 
         if not candidates:
@@ -324,22 +326,47 @@ class IntelligenceHandlers:
                     age_days = max(0.0, age_ms / 86400000.0)
             scores["recency"] = math.exp(-age_days / 30.0)
 
+        # --- Confidence scoring ---
+        conf_col = self.store.columns.get_column("__confidence__", n)
+        if conf_col is not None:
+            col_data, col_pres, _ = conf_col
+            for slot, scores in candidates.items():
+                if col_pres[slot]:
+                    scores["confidence"] = max(0.0, min(1.0, float(col_data[slot])))
+
+        # --- Recall frequency boost ---
+        recall_col = self.store.columns.get_column("__recall_count__", n)
+        if recall_col is not None:
+            col_data, col_pres, _ = recall_col
+            max_recalls = 1.0
+            for slot in candidates:
+                if col_pres[slot]:
+                    max_recalls = max(max_recalls, float(col_data[slot]))
+            for slot, scores in candidates.items():
+                if col_pres[slot] and max_recalls > 0:
+                    scores["recall_boost"] = float(col_data[slot]) / max_recalls
+
         # --- Weighted fusion ---
-        W_VECTOR = 0.4
-        W_BM25 = 0.3
-        W_RECENCY = 0.3
+        W_VECTOR = 0.30
+        W_BM25 = 0.20
+        W_RECENCY = 0.15
+        W_CONFIDENCE = 0.20
+        W_RECALL = 0.15
 
         scored = []
         for slot, scores in candidates.items():
             final = (W_VECTOR * scores["vector_sim"]
                      + W_BM25 * scores["bm25"]
-                     + W_RECENCY * scores["recency"])
+                     + W_RECENCY * scores["recency"]
+                     + W_CONFIDENCE * scores["confidence"]
+                     + W_RECALL * scores["recall_boost"])
             scored.append((slot, final, scores))
 
         scored.sort(key=lambda x: -x[1])
 
-        # --- Materialize and filter ---
+        # --- Materialize, filter, and record retrieval feedback ---
         results = []
+        retrieved_slots = []
         for slot, final_score, scores in scored:
             node = self.store._materialize_slot(slot)
             if node is None:
@@ -350,8 +377,25 @@ class IntelligenceHandlers:
             node["_vector_sim"] = round(scores["vector_sim"], 4)
             node["_bm25_score"] = round(scores["bm25"], 4)
             node["_recency_score"] = round(scores["recency"], 4)
+            node["_confidence"] = round(scores["confidence"], 4)
             results.append(node)
+            retrieved_slots.append(slot)
             if len(results) >= target_k:
                 break
+
+        # --- Retrieval feedback: increment recall count for returned nodes ---
+        for slot in retrieved_slots:
+            try:
+                if self.store.columns.has_column("__recall_count__"):
+                    if self.store.columns._presence["__recall_count__"][slot]:
+                        current = int(self.store.columns._columns["__recall_count__"][slot])
+                        self.store.columns.set_reserved(slot, "__recall_count__", current + 1)
+                    else:
+                        self.store.columns.set_reserved(slot, "__recall_count__", 1)
+                else:
+                    self.store.columns.set_reserved(slot, "__recall_count__", 1)
+                self.store.columns.set_reserved(slot, "__last_recalled_at__", int(time.time() * 1000))
+            except Exception:
+                pass  # Don't fail retrieval on feedback errors
 
         return Result(kind="nodes", data=results, count=len(results))
