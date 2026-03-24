@@ -151,6 +151,24 @@ class MutationHandlers:
     def _update_node(self, q: UpdateNode) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
         self.store.update_node(q.id, data)
+
+        # Auto re-embed if an embed field was updated
+        if self._embedder and self._vector_store is not None:
+            str_id = self.store.string_table.intern(q.id)
+            slot = self.store.id_to_slot.get(str_id)
+            if slot is not None:
+                node_data = self.store.get_node(q.id)
+                if node_data:
+                    kind = node_data.get("kind", "default")
+                    kind_def = self.schema.describe_node_kind(kind)
+                    if kind_def and kind_def.get("embed_field"):
+                        embed_field = kind_def["embed_field"]
+                        if embed_field in data:
+                            text = data[embed_field]
+                            if text and isinstance(text, str):
+                                vec = self._embedder.encode_documents([text])[0]
+                                self._vector_store.add(slot, vec)
+
         node = self.store.get_node(q.id)
         return Result(kind="node", data=node, count=1)
 
