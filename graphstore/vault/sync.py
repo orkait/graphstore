@@ -14,13 +14,15 @@ class VaultSync:
     """Syncs vault markdown files to graphstore nodes + edges."""
 
     def __init__(self, manager: VaultManager, store, schema=None,
-                 embedder=None, vector_store=None, document_store=None):
+                 embedder=None, vector_store=None, document_store=None,
+                 summary_max_length: int = 200):
         self._manager = manager
         self._store = store
         self._schema = schema
         self._embedder = embedder
         self._vector_store = vector_store
         self._document_store = document_store
+        self._summary_max_length = summary_max_length
 
     def sync_all(self) -> dict:
         """Walk vault dir, sync all notes to graph. Returns {synced, skipped, errors}.
@@ -111,7 +113,7 @@ class VaultSync:
         # Store summary for columnar search
         summary = sections.get("summary", "")
         if summary:
-            fields["summary"] = summary[:500]
+            fields["summary"] = summary[:self._summary_max_length]
 
         # Upsert node
         self._store.upsert_node(node_id, "note", fields)
@@ -128,14 +130,17 @@ class VaultSync:
         if self._document_store and slot is not None:
             self._document_store.put_document(slot, content.encode("utf-8"), "text/markdown")
             if summary:
-                self._document_store.put_summary(slot, summary[:200], heading=None,
+                self._document_store.put_summary(slot, summary[:self._summary_max_length], heading=None,
                                                   page=None, chunk_index=0, doc_slot=slot)
 
         # Embed summary
-        if self._embedder and self._vector_store and summary and slot is not None:
-            vec = self._embedder.encode_documents([summary])[0]
-            if self._vector_store is not None:
-                self._vector_store.add(slot, vec)
+        if self._embedder and self._vector_store and slot is not None:
+            body = sections.get("body", "")
+            embed_text = f"{slug}: {summary} {body}" if summary else body
+            if embed_text.strip():
+                vec = self._embedder.encode_documents([embed_text])[0]
+                if self._vector_store is not None:
+                    self._vector_store.add(slot, vec)
 
         # Fact kind: auto-ASSERT into graphstore belief store
         if fm.get("kind") == "fact" and slot is not None:

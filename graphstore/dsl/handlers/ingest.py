@@ -43,7 +43,10 @@ class IngestHandlers:
 
         result = ingest_file(safe_path, using=q.using)
 
-        chunks = chunk_by_heading(result.markdown)
+        chunk_size = getattr(self, '_chunk_max_size', 2000)
+        summary_len = getattr(self, '_summary_max_length', 200)
+        chunk_overlap = getattr(self, '_chunk_overlap', 50)
+        chunks = chunk_by_heading(result.markdown, max_chunk_size=chunk_size, summary_max_len=summary_len, overlap=chunk_overlap)
 
         parent_id = q.node_id
         if not parent_id:
@@ -96,7 +99,8 @@ class IngestHandlers:
                 set_reserved(sec_slot, "__confidence__", 0.6)
                 set_reserved(sec_slot, "__blob_state__", "warm")
                 self.store.put_edge(parent_id, section_id, "has_section")
-                embed_batch.append((sec_slot, chunk.summary[:200]))
+                embed_text = f"{chunk.heading}: {chunk.text}" if chunk.heading else chunk.text
+                embed_batch.append((sec_slot, embed_text))
                 sections[chunk.heading] = section_id
                 section_slots[chunk.heading] = sec_slot
 
@@ -121,11 +125,13 @@ class IngestHandlers:
                 ds._conn.execute(
                     "INSERT OR REPLACE INTO summaries VALUES (?, ?, ?, ?, ?, ?)",
                     (chunk_slot, chunk.summary, chunk.heading, chunk.page, chunk.index, parent_slot))
+                fts_text = chunk.text if getattr(self, '_fts_full_text', True) else chunk.summary
                 ds._conn.execute(
                     "INSERT OR REPLACE INTO doc_fts (rowid, summary) VALUES (?, ?)",
-                    (chunk_slot, chunk.summary))
+                    (chunk_slot, fts_text))
 
-            embed_batch.append((chunk_slot, chunk.summary))
+            embed_text = f"{chunk.heading}: {chunk.text}" if chunk.heading else chunk.text
+            embed_batch.append((chunk_slot, embed_text))
 
             if chunk.heading and chunk.heading in sections:
                 self.store.put_edge(sections[chunk.heading], chunk_id, "has_chunk")
@@ -140,7 +146,11 @@ class IngestHandlers:
         if q.vision_model:
             try:
                 from graphstore.ingest.vision import VisionHandler
-                vision_handler = VisionHandler(model=q.vision_model)
+                vision_handler = VisionHandler(
+                    model=q.vision_model,
+                    base_url=getattr(self, '_vision_base_url', 'http://localhost:11434/v1'),
+                    max_tokens=getattr(self, '_vision_max_tokens', 300),
+                )
             except Exception as e:
                 logger.debug("vision handler init failed: %s", e, exc_info=True)
 
@@ -194,7 +204,11 @@ class IngestHandlers:
                     "tiff": "image/tiff"}
         mime_type = mime_map.get(ext, "image/png")
 
-        vh = VisionHandler(model=q.vision_model)
+        vh = VisionHandler(
+            model=q.vision_model,
+            base_url=getattr(self, '_vision_base_url', 'http://localhost:11434/v1'),
+            max_tokens=getattr(self, '_vision_max_tokens', 300),
+        )
         description = vh.describe(image_bytes, mime_type)
 
         node_id = q.node_id

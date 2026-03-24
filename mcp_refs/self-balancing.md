@@ -46,15 +46,30 @@ Disabled by default in config (`auto_optimize: false`).
 
 ## Key Constraint
 
-Tombstone compaction and string GC renumber slot indices and string IDs. Every data structure uses these as keys. They are only safe because the agent guarantees no concurrent calls during `SYS OPTIMIZE`. The lock in `execute()` enforces this.
+Tombstone compaction and string GC renumber slot indices and string IDs. Every data structure uses these as keys. They are only safe because the agent guarantees no concurrent calls during `SYS OPTIMIZE`. The lock in `execute()` enforces this. With `threaded=True`, the command queue serializes access automatically.
 
-## Health Metrics
+## Health Metrics (all configurable via graphstore.json)
 
-| Metric | Threshold | Triggers |
-|---|---|---|
-| `tombstone_ratio` | > 0.2 | COMPACT |
-| `string_bloat` | string_table / live_nodes > 3 | STRINGS |
-| `dead_vectors` | dead / total > 0.2 | VECTORS |
-| `orphan_blobs` | checked via DocumentStore scan | BLOBS |
-| `stale_edges` | edge_keys size vs actual edges | EDGES |
-| `cache_size` | plan cache entries > threshold | CACHE |
+| Metric | Threshold | Triggers | Config key |
+|---|---|---|---|
+| `tombstone_ratio` | > 0.2 | COMPACT | `core.compact_threshold` |
+| `string_bloat` | string_table / live_nodes > 3 | STRINGS | `core.string_gc_threshold` |
+| `dead_vectors` | any dead vectors | VECTORS | - |
+| `stale_edges` | edge_keys size vs actual edges | EDGES | - |
+| `cache_size` | plan cache entries > 200 | CACHE | `dsl.cache_gc_threshold` |
+
+## Emergency Eviction
+
+When memory exceeds 90% of ceiling, `SYS EVICT` removes oldest non-protected nodes (LRU by `__updated_at__`). Protected kinds (`core.protected_kinds`: schema, config, system) are never evicted.
+
+## CRON Integration
+
+Maintenance can be scheduled via persistent cron jobs:
+
+```
+SYS CRON ADD "hourly-expire" SCHEDULE "@hourly" QUERY "SYS EXPIRE"
+SYS CRON ADD "nightly-optimize" SCHEDULE "0 3 * * *" QUERY "SYS OPTIMIZE"
+SYS CRON ADD "weekly-retain" SCHEDULE "0 0 * * 0" QUERY "SYS RETAIN"
+```
+
+Jobs submit via `submit_background()` (priority 1), so interactive queries always complete first.

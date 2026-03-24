@@ -51,18 +51,20 @@ def health_check(store: CoreStore, vector_store=None, document_store=None) -> di
     }
 
 
-def needs_optimization(health: dict) -> list[str]:
+def needs_optimization(health: dict, compact_threshold: float = 0.2,
+                       string_gc_threshold: float = 3.0,
+                       cache_gc_threshold: int = 200) -> list[str]:
     """Determine which operations are needed based on health metrics."""
     ops = []
-    if health["tombstone_ratio"] > 0.2:
+    if health["tombstone_ratio"] > compact_threshold:
         ops.append("COMPACT")
-    if health["string_bloat"] > 3.0 and health["live_nodes"] > 0:
+    if health["string_bloat"] > string_gc_threshold and health["live_nodes"] > 0:
         ops.append("STRINGS")
     if health["dead_vectors"] > 0:
         ops.append("VECTORS")
     if health["stale_edge_keys"] > 0:
         ops.append("EDGES")
-    if health["cache_size"] > 200:
+    if health["cache_size"] > cache_gc_threshold:
         ops.append("CACHE")
     return ops
 
@@ -401,16 +403,17 @@ def optimize_all(store: CoreStore, vector_store=None, document_store=None) -> di
     return results
 
 
-def evict_oldest(store: CoreStore, vector_store=None, document_store=None, target_bytes: int = 0) -> dict:
+def evict_oldest(store: CoreStore, vector_store=None, document_store=None,
+                 target_bytes: int = 0, protected_kinds: set | None = None) -> dict:
     """Emergency eviction: delete oldest non-essential nodes until under target.
 
     Evicts nodes in order of __updated_at__ (oldest first).
-    Skips nodes with kind in PROTECTED_KINDS.
+    Skips nodes with kind in protected_kinds.
     Returns {"evicted": count, "bytes_before": N, "bytes_after": N}.
     """
     from graphstore.core.memory import measure
 
-    PROTECTED_KINDS = {"schema", "config", "system"}
+    PROTECTED_KINDS = protected_kinds if protected_kinds is not None else {"schema", "config", "system"}
 
     before = measure(store, vector_store)
     if target_bytes <= 0 or before["total"] <= target_bytes:

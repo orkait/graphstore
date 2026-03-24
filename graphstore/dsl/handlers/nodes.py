@@ -91,15 +91,15 @@ class NodeHandlers:
 
         if q.order:
             reverse = q.order.direction == "DESC"
-            slots = self._order_slots_by_column(
+            col_sorted_slots = self._order_slots_by_column(
                 slots, q.order.field, reverse,
                 q.limit.value if q.limit else None,
                 q.offset.value if q.offset else None,
                 fallback_predicate,
             )
-            if slots is not None:
+            if col_sorted_slots is not None:
                 result = []
-                for s in slots:
+                for s in col_sorted_slots:
                     node = self.store._materialize_slot(int(s))
                     if node is not None:
                         if fallback_predicate and not fallback_predicate(node):

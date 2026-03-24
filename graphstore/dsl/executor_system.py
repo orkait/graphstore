@@ -422,6 +422,12 @@ class SystemExecutor:
             expired_slot_set.add(slot)
             expired_count += 1
 
+        # Clean vectors for expired nodes
+        if self._vector_store:
+            for slot_idx in expired_slots:
+                slot = int(slot_idx)
+                self._vector_store.remove(slot)
+
         # Single pass: remove all expired slots from all edge lists at once
         if expired_slot_set:
             any_removed = False
