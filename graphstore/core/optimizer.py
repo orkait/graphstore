@@ -358,3 +358,109 @@ def optimize_all(store: CoreStore, vector_store=None, document_store=None) -> di
     results["blobs"] = sweep_orphans(store, document_store)
     results["cache"] = clear_caches(store)
     return results
+
+
+def evict_oldest(store: CoreStore, vector_store=None, document_store=None, target_bytes: int = 0) -> dict:
+    """Emergency eviction: delete oldest non-essential nodes until under target.
+
+    Evicts nodes in order of __updated_at__ (oldest first).
+    Skips nodes with kind in PROTECTED_KINDS.
+    Returns {"evicted": count, "bytes_before": N, "bytes_after": N}.
+    """
+    from graphstore.core.memory import measure
+
+    PROTECTED_KINDS = {"schema", "config", "system"}
+
+    before = measure(store, vector_store)
+    if target_bytes <= 0 or before["total"] <= target_bytes:
+        return {"evicted": 0, "bytes_before": before["total"], "bytes_after": before["total"]}
+
+    n = store._next_slot
+    if n == 0:
+        return {"evicted": 0, "bytes_before": before["total"], "bytes_after": before["total"]}
+
+    live = store.compute_live_mask(n)
+    live_slots = np.nonzero(live)[0]
+
+    if len(live_slots) == 0:
+        return {"evicted": 0, "bytes_before": before["total"], "bytes_after": before["total"]}
+
+    # Get updated_at for sorting
+    updated_col = store.columns.get_column("__updated_at__", n)
+    if updated_col is not None:
+        col_data, col_pres, _ = updated_col
+        # Slots without updated_at get timestamp 0 (oldest, evict first)
+        timestamps = np.where(col_pres[:n], col_data[:n].astype(np.float64), 0.0)
+    else:
+        timestamps = np.zeros(n, dtype=np.float64)
+
+    # Sort live slots by timestamp ascending (oldest first)
+    slot_times = [(int(s), timestamps[s]) for s in live_slots]
+    slot_times.sort(key=lambda x: x[1])
+
+    evicted = 0
+    for slot, ts in slot_times:
+        # Check if we're under target
+        if evicted > 0 and evicted % 100 == 0:
+            current = measure(store, vector_store)
+            if current["total"] <= target_bytes:
+                break
+
+        # Skip protected kinds
+        kind_id = int(store.node_kinds[slot])
+        if kind_id >= 0:
+            try:
+                kind_name = store.string_table.lookup(kind_id)
+                if kind_name in PROTECTED_KINDS:
+                    continue
+            except KeyError:
+                pass
+
+        # Evict: tombstone the node
+        str_id = int(store.node_ids[slot])
+        if str_id < 0:
+            continue
+        try:
+            node_id = store.string_table.lookup(str_id)
+        except KeyError:
+            continue
+
+        # Remove from vector store
+        if vector_store is not None:
+            vector_store.remove(slot)
+
+        # Remove from document store
+        if document_store is not None:
+            try:
+                document_store.delete_document(slot)
+            except Exception:
+                pass
+
+        # Tombstone
+        store.columns.clear(slot)
+        store.node_tombstones.add(slot)
+        if str_id in store.id_to_slot:
+            del store.id_to_slot[str_id]
+        store._count -= 1
+        evicted += 1
+
+    # Cascade edge cleanup for all evicted slots
+    if evicted > 0:
+        store._edge_keys = {
+            (s, t, k)
+            for k, edges in store._edges_by_type.items()
+            for s, t, _d in edges
+            if s not in store.node_tombstones and t not in store.node_tombstones
+        }
+        for etype in list(store._edges_by_type.keys()):
+            store._edges_by_type[etype] = [
+                (s, t, d) for s, t, d in store._edges_by_type[etype]
+                if s not in store.node_tombstones and t not in store.node_tombstones
+            ]
+            if not store._edges_by_type[etype]:
+                del store._edges_by_type[etype]
+        store._edges_dirty = True
+        store._ensure_edges_built()
+
+    after = measure(store, vector_store)
+    return {"evicted": evicted, "bytes_before": before["total"], "bytes_after": after["total"]}

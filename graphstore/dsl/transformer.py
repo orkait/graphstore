@@ -102,6 +102,7 @@ from graphstore.dsl.ast_nodes import (
     SysRetain,
     SysHealth,
     SysOptimize,
+    SysEvict,
     SysLog,
     SysCronAdd,
     SysCronDelete,
@@ -942,6 +943,10 @@ class DSLTransformer(Transformer):
     def sys_optimize(self, args):
         target = str(args[0]) if args else None
         return SysOptimize(target=target)
+
+    def sys_evict(self, args):
+        limit = self._find(args, LimitClause)
+        return SysEvict(limit=limit)
 
     def sys_contradictions(self, args):
         where = self._find(args, WhereClause)

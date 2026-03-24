@@ -54,5 +54,11 @@ class OptimizerScheduler:
             health = health_check(self._store, self._vector_store, self._document_store)
             if needs_optimization(health):
                 self._needs_optimize = True
+            # Emergency eviction if memory > 90% ceiling
+            from graphstore.core.memory import check_ceiling_accurate
+            if check_ceiling_accurate(self._store, self._vector_store, self._store._ceiling_bytes):
+                from graphstore.core.optimizer import evict_oldest
+                target = int(self._store._ceiling_bytes * 0.8)
+                evict_oldest(self._store, self._vector_store, self._document_store, target_bytes=target)
         except Exception as e:
             logger.debug("health check failed: %s", e)

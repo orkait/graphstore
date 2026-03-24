@@ -220,6 +220,7 @@ system_query: "SYS" sys_command
             | sys_retain
             | sys_health | sys_optimize
             | sys_log | sys_cron
+            | sys_evict
 
 sys_stats:      "STATS" STATS_TARGET?
 STATS_TARGET:   "NODES" | "EDGES" | "MEMORY" | "WAL"
@@ -274,6 +275,8 @@ ident_list: typed_ident ("," typed_ident)*
 typed_ident: IDENTIFIER ":" IDENTIFIER -> typed_ident_with_type
            | IDENTIFIER -> typed_ident_bare
 string_list: STRING ("," STRING)*
+
+sys_evict: "EVICT" limit_clause?
 
 sys_log: "LOG" log_filter? limit_clause?
 log_filter: "WHERE" expr         -> log_where

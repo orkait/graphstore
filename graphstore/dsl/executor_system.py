@@ -38,6 +38,7 @@ from graphstore.dsl.ast_nodes import (
     SysRegisterNodeKind,
     SysHealth,
     SysOptimize,
+    SysEvict,
     SysRetain,
     SysRollback,
     SysSlowQueries,
@@ -119,6 +120,7 @@ class SystemExecutor:
             SysRetain: self._retain,
             SysHealth: self._health,
             SysOptimize: self._optimize,
+            SysEvict: self._evict,
             SysLog: self._log,
             SysCronAdd: self._cron_add,
             SysCronDelete: self._cron_delete,
@@ -726,6 +728,7 @@ class SystemExecutor:
             "memory_bytes": estimate_memory(store.node_count, store.edge_count),
             "ceiling_bytes": store._ceiling_bytes,
             "column_memory_bytes": store.columns.memory_bytes,
+            "memory_measured": None,
         }
 
         # Vector store info
@@ -771,6 +774,13 @@ class SystemExecutor:
 
         # Uptime
         data["uptime_seconds"] = time.time() - self._start_time
+
+        # Accurate measurement
+        try:
+            from graphstore.core.memory import measure as measure_memory
+            data["memory_measured"] = measure_memory(store, self._vector_store, self._document_store)
+        except Exception:
+            pass
 
         return Result(kind="status", data=data, count=1)
 
@@ -832,6 +842,14 @@ class SystemExecutor:
         """SYS HEALTH: pressure metrics for self-balancing decisions."""
         from graphstore.core.optimizer import health_check, needs_optimization
         health = health_check(self.store, self._vector_store, self._document_store)
+        try:
+            from graphstore.core.memory import measure as measure_memory
+            mem = measure_memory(self.store, self._vector_store, self._document_store)
+            health["memory_total"] = mem["total"]
+            health["memory_ceiling"] = self.store._ceiling_bytes
+            health["memory_utilization"] = round(mem["total"] / max(self.store._ceiling_bytes, 1), 3)
+        except Exception:
+            pass
         health["recommended"] = needs_optimization(health)
         return Result(kind="health", data=health, count=1)
 
@@ -859,6 +877,21 @@ class SystemExecutor:
         else:
             raise GraphStoreError(f"Unknown optimize target: {target}")
         return Result(kind="ok", data=data, count=1)
+
+    def _evict(self, q: SysEvict) -> Result:
+        """SYS EVICT: emergency eviction of oldest nodes to free memory."""
+        from graphstore.core.optimizer import evict_oldest
+        from graphstore.core.memory import measure
+
+        current = measure(self.store, self._vector_store, self._document_store)
+        # Evict to 80% of ceiling
+        target = int(self.store._ceiling_bytes * 0.8)
+        if q.limit:
+            # LIMIT overrides - evict exactly N nodes
+            target = 0  # will evict up to limit
+
+        data = evict_oldest(self.store, self._vector_store, self._document_store, target_bytes=target)
+        return Result(kind="ok", data=data, count=data["evicted"])
 
     def _log(self, q: SysLog) -> Result:
         """SYS LOG: query the enriched query log."""

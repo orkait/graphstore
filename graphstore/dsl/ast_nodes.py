@@ -547,6 +547,11 @@ class SysLog:
     trace_id: str | None = None
     limit: LimitClause | None = None
 
+# --- Emergency eviction ---
+@dataclass
+class SysEvict:
+    limit: LimitClause | None = None
+
 # --- Cron management ---
 @dataclass
 class SysCronAdd:
