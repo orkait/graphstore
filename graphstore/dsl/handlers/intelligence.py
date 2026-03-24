@@ -6,6 +6,8 @@ from collections import deque
 import numpy as np
 from scipy.sparse import csr_matrix
 
+from graphstore.core.edges import resize_csr
+
 from graphstore.dsl.handlers._registry import handles
 from graphstore.dsl.ast_nodes import (
     RecallQuery, SimilarQuery, LexicalSearchQuery, CounterfactualQuery, RememberQuery,
@@ -58,7 +60,7 @@ class IntelligenceHandlers:
         if combined.shape[0] < n:
             # Rare path: matrix predates latest node additions, resize then transpose.
             # Intentionally NOT cached — resized matrix differs from _combined_all.
-            mat_t = csr_matrix((combined.data, combined.indices, combined.indptr), shape=(n, n)).T.tocsr()
+            mat_t = resize_csr(combined, n).T.tocsr()
         else:
             mat_t = self.store.edge_matrices.get_combined_transpose()
         for _ in range(q.depth):
@@ -218,7 +220,7 @@ class IntelligenceHandlers:
             if combined is not None:
                 mat = combined
                 if mat.shape[0] < n:
-                    mat = csr_matrix((mat.data, mat.indices, mat.indptr), shape=(n, n))
+                    mat = resize_csr(mat, n)
 
                 frontier = deque([src_slot])
                 visited = {src_slot}

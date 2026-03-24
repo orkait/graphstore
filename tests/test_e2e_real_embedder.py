@@ -256,16 +256,12 @@ class TestAgentLifecycle:
 
     def test_counterfactual_reasoning(self, brain):
         """WHAT IF RETRACT simulates removing a belief."""
-        try:
-            result = brain.execute('WHAT IF RETRACT "belief:attention-key"')
-            assert result.kind == "counterfactual"
-            assert result.data["affected_count"] >= 1
-            # Original belief should still be intact (simulation only)
-            result = brain.execute('NODE "belief:attention-key"')
-            assert result.data is not None
-        except ValueError as e:
-            if "index pointer size" in str(e):
-                pytest.xfail("Known CSR shape bug with large graphs (scipy indptr mismatch)")
+        result = brain.execute('WHAT IF RETRACT "belief:attention-key"')
+        assert result.kind == "counterfactual"
+        assert result.data["affected_count"] >= 1
+        # Original belief should still be intact (simulation only)
+        result = brain.execute('NODE "belief:attention-key"')
+        assert result.data is not None
 
     def test_system_health(self, brain):
         """Check system health after all operations."""

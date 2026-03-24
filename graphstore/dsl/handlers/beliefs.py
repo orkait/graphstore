@@ -6,6 +6,8 @@ from collections import deque
 import numpy as np
 from scipy.sparse import csr_matrix
 
+from graphstore.core.edges import resize_csr
+
 from graphstore.dsl.handlers._registry import handles
 from graphstore.dsl.ast_nodes import AssertStmt, RetractStmt, PropagateStmt
 from graphstore.core.types import Result
@@ -83,7 +85,7 @@ class BeliefHandlers:
 
         mat = combined
         if mat.shape[0] < n:
-            mat = csr_matrix((mat.data, mat.indices, mat.indptr), shape=(n, n))
+            mat = resize_csr(mat, n)
 
         visited = set()
         visited.add(src_slot)
