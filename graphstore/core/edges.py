@@ -4,6 +4,25 @@ import numpy as np
 from scipy.sparse import csr_matrix
 
 
+def resize_csr(mat: csr_matrix, n: int) -> csr_matrix:
+    """Safely resize a CSR matrix to (n, n) by padding indptr.
+
+    When nodes are added after the last edge rebuild, the CSR matrix
+    has fewer rows than _next_slot. Padding indptr with the last value
+    (meaning "no edges for these rows") fixes the shape mismatch.
+    """
+    if mat.shape[0] >= n:
+        return mat
+    old_size = len(mat.indptr)
+    needed = n + 1
+    if old_size < needed:
+        pad = np.full(needed - old_size, mat.indptr[-1], dtype=mat.indptr.dtype)
+        new_indptr = np.concatenate([mat.indptr, pad])
+    else:
+        new_indptr = mat.indptr
+    return csr_matrix((mat.data, mat.indices, new_indptr), shape=(n, n))
+
+
 class EdgeMatrices:
     def __init__(self):
         self._typed: dict[str, csr_matrix] = {}     # per-type CSR
