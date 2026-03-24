@@ -151,12 +151,33 @@ class ConfigRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+
+_MAX_QUERY_LENGTH = 10_000
+
+
+def _validate_query(query: str) -> str | None:
+    """Validate query input. Returns error message or None if valid."""
+    if not query or not query.strip():
+        return "Empty query"
+    if len(query) > _MAX_QUERY_LENGTH:
+        return f"Query exceeds maximum length ({_MAX_QUERY_LENGTH} chars)"
+    if "\x00" in query:
+        return "Query contains null bytes"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 
 @app.post("/api/execute")
 def execute(req: ExecuteRequest):
+    err = _validate_query(req.query)
+    if err:
+        return {"kind": "error", "data": err, "count": 0, "elapsed_us": 0}
     store = _get_store()
     try:
         result = store.execute(req.query)
@@ -169,16 +190,20 @@ def execute(req: ExecuteRequest):
 
 @app.post("/api/execute-batch")
 def execute_batch(req: BatchRequest):
+    if len(req.queries) > 1000:
+        return [{"kind": "error", "data": "Batch exceeds 1000 queries", "count": 0, "elapsed_us": 0}]
     store = _get_store()
     results = []
     for q in req.queries:
+        err = _validate_query(q)
+        if err:
+            results.append({"kind": "error", "data": err, "count": 0, "elapsed_us": 0})
+            continue
         try:
             r = store.execute(q)
             results.append(_result_to_dict(r))
         except GraphStoreError as exc:
-            results.append(
-                {"kind": "error", "data": str(exc), "count": 0, "elapsed_us": 0}
-            )
+            results.append({"kind": "error", "data": str(exc), "count": 0, "elapsed_us": 0})
     return results
 
 

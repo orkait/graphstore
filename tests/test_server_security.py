@@ -87,3 +87,35 @@ def test_rate_limit_returns_429(open_client):
     finally:
         srv._RATE_LIMIT_RPM = original
         srv._rate_buckets.clear()
+
+
+def test_rejects_empty_query(open_client):
+    resp = open_client.post("/api/execute", json={"query": ""})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "error"
+    assert "Empty" in data["data"]
+
+
+def test_rejects_oversized_query(open_client):
+    resp = open_client.post("/api/execute", json={"query": "A" * 20000})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "error"
+    assert "maximum length" in data["data"]
+
+
+def test_rejects_null_bytes(open_client):
+    resp = open_client.post("/api/execute", json={"query": "NODE \x00"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["kind"] == "error"
+    assert "null" in data["data"]
+
+
+def test_batch_limit(open_client):
+    resp = open_client.post("/api/execute-batch", json={"queries": ["SYS STATS"] * 1001})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["kind"] == "error"
+    assert "1000" in data[0]["data"]
