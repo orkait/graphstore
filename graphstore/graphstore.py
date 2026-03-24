@@ -17,9 +17,10 @@ from graphstore.dsl.executor import Executor
 from graphstore.dsl.executor_system import SystemExecutor
 from graphstore.dsl import ast_nodes
 from graphstore.persistence.database import open_database
-from graphstore.persistence.serializer import checkpoint as _checkpoint_fn
 from graphstore.persistence.deserializer import load as _load_fn
-from graphstore.core.errors import GraphStoreError, OptimizationInProgress
+from graphstore.wal import WALManager
+from graphstore.core.scheduler import OptimizerScheduler
+from graphstore.core.errors import OptimizationInProgress
 from graphstore.dsl.handlers import is_write_op
 from graphstore.core.memory import estimate as _estimate_memory
 from graphstore.config import GraphStoreConfig, load_config, merge_kwargs
@@ -115,11 +116,6 @@ class GraphStore:
         # Vector store (lazy init on first vector operation)
         self._vector_store = None
 
-        # Self-balancing state
-        self._optimizing = False
-        self._write_counter = 0
-        self._needs_optimize = False
-
         # Initialize store
         p = self._path
         if p is not None:
@@ -168,9 +164,24 @@ class GraphStore:
                                                document_store=self._document_store,
                                                retention=retention_dict)
 
+        # WAL manager
+        self._wal = WALManager(
+            self._conn, self._store, self._schema, self._executor,
+            wal_hard_limit=cfg.persistence.wal_hard_limit,
+            auto_checkpoint_threshold=cfg.persistence.auto_checkpoint_threshold,
+            log_retention_days=cfg.persistence.log_retention_days,
+        )
+
         # Replay WAL (must happen after executor is created)
         if self._path and self._conn:
-            self._replay_wal()
+            self._wal.replay()
+
+        # Optimizer scheduler
+        self._optimizer = OptimizerScheduler(
+            self._store, self._vector_store, self._document_store,
+            auto_optimize=cfg.dsl.auto_optimize,
+            optimize_interval=cfg.dsl.optimize_interval,
+        )
 
         # Vault: markdown note system
         vault_path = cfg.vault.path if cfg.vault.enabled else None
@@ -211,13 +222,10 @@ class GraphStore:
 
     def _execute_internal(self, query: str) -> Result:
         """Execute a DSL query directly (no queue). Internal use only."""
-        # Reject during optimization (lock gate)
-        if self._optimizing:
+        if self._optimizer.optimizing:
             raise OptimizationInProgress()
 
-        # Auto-optimize at safe point (between execute calls)
-        if self._needs_optimize:
-            self._run_auto_optimize()
+        self._optimizer.maybe_optimize()
 
         start = time.perf_counter_ns()
 
@@ -244,15 +252,15 @@ class GraphStore:
                     self.checkpoint()
                     result = Result(kind="ok", data=None, count=0)
                 elif isinstance(ast, ast_nodes.SysWal) and ast.action == "REPLAY":  # type: ignore[attr-defined]
-                    self._replay_wal()
+                    self._wal.replay()
                     result = Result(kind="ok", data=None, count=0)
                 elif isinstance(ast, ast_nodes.SysOptimize):
-                    self._optimizing = True
+                    self._optimizer._optimizing = True
                     try:
                         result = self._sys_executor.execute(ast)
                     finally:
-                        self._optimizing = False
-                        self._needs_optimize = False
+                        self._optimizer._optimizing = False
+                        self._optimizer._needs_optimize = False
                 else:
                     result = self._sys_executor.execute(ast)
                     # Sync vector store back from sys executor (rollback may change it)
@@ -267,31 +275,25 @@ class GraphStore:
                 is_write = is_write_op(ast)
 
                 if is_write and self._conn:
-                    self._wal_append(query)
+                    self._wal.append(query)
 
                 result = self._executor.execute(ast)
 
-                # Auto-checkpoint check + write counter for auto-optimize
                 if is_write:
-                    self._write_counter += 1
                     if self._conn:
-                        self._maybe_auto_checkpoint()
-                    if self._config.dsl.auto_optimize:
-                        interval = self._config.dsl.optimize_interval
-                        if self._write_counter % interval == 0:
-                            self._check_health_for_auto()
+                        self._wal.maybe_auto_checkpoint()
+                    self._optimizer.on_write()
 
             elapsed = (time.perf_counter_ns() - start) // 1000
             result.elapsed_us = elapsed
 
-            # Log query
-            self._log_query(query, elapsed, result.count, None)
+            self._wal.log_query(query, elapsed, result.count, None)
 
             return result
 
         except Exception as e:
             elapsed = (time.perf_counter_ns() - start) // 1000
-            self._log_query(query, elapsed, 0, str(e))
+            self._wal.log_query(query, elapsed, 0, str(e))
             raise
 
     def execute_batch(self, queries: list[str]) -> list[Result]:
@@ -309,9 +311,7 @@ class GraphStore:
         """Force persist to disk. No-op if path is None."""
         if self._conn is None:
             return
-        self._store.vectors = self._vector_store  # expose to serializer
-        _checkpoint_fn(self._store, self._schema, self._conn)
-        self._store.reset_dirty_flags()
+        self._wal.checkpoint(vector_store=self._vector_store)
 
     def set_script(self, script: str) -> None:
         """Store a DSL script in metadata so the playground can load it."""
@@ -385,111 +385,8 @@ class GraphStore:
         if self._vector_store is None:
             from graphstore.vector.store import VectorStore
             self._vector_store = VectorStore(dims=dims, capacity=self._store._capacity)
-            # Sync to executor
             self._executor._vector_store = self._vector_store
+            if hasattr(self, '_optimizer'):
+                self._optimizer.sync_vector_store(self._vector_store)
         return self._vector_store
 
-    # --- Internal ---
-
-    def _wal_append(self, statement: str):
-        """Append a mutation to the WAL table. Rejects if WAL exceeds hard limit."""
-        conn = self._conn
-        wal_limit = self._config.persistence.wal_hard_limit
-        if conn is not None:
-            row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
-            if row and row[0] >= wal_limit:
-                # Try checkpoint first to clear WAL
-                try:
-                    self.checkpoint()
-                except Exception as e:
-                    logger.debug("WAL checkpoint before hard-limit failed: %s", e, exc_info=True)
-                # Re-check after checkpoint
-                row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
-                if row and row[0] >= wal_limit:
-                    raise GraphStoreError(
-                        f"WAL exceeds hard limit ({wal_limit} entries). "
-                        "Checkpoint failed - check disk space."
-                    )
-            conn.execute(
-                "INSERT INTO wal (timestamp, statement) VALUES (?, ?)",
-                (time.time(), statement)
-            )
-            conn.commit()
-
-    def _replay_wal(self):
-        """Replay WAL entries from sqlite."""
-        conn = self._conn
-        if conn is None:
-            return
-        rows = conn.execute("SELECT statement FROM wal ORDER BY seq").fetchall()
-        if not rows:
-            return
-
-        for (statement,) in rows:
-            try:
-                ast = parse(statement)
-                # During replay, treat CREATE as UPSERT for idempotency
-                if isinstance(ast, ast_nodes.CreateNode):
-                    ast = ast_nodes.UpsertNode(id=ast.id, fields=ast.fields)
-                self._executor.execute(ast)
-            except Exception as e:
-                logger.debug("WAL replay statement skipped: %s", e, exc_info=True)
-
-        # Checkpoint to clean state
-        if rows:
-            _checkpoint_fn(self._store, self._schema, conn, force=True)
-
-    def _maybe_auto_checkpoint(self):
-        """Auto-checkpoint if WAL exceeds thresholds."""
-        conn = self._conn
-        if conn is None:
-            return
-        row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
-        if row and row[0] > self._config.persistence.auto_checkpoint_threshold:
-            self.checkpoint()
-        self._rotate_query_log()
-
-    def _rotate_query_log(self):
-        """Delete old query_log entries based on config."""
-        conn = self._conn
-        if conn is None:
-            return
-        try:
-            cutoff = time.time() - self._config.persistence.log_retention_days * 86400
-            conn.execute("DELETE FROM query_log WHERE timestamp < ?", (cutoff,))
-            conn.commit()
-        except Exception as e:
-            logger.debug("query log rotation failed: %s", e, exc_info=True)
-
-    def _check_health_for_auto(self):
-        """Lightweight health check - sets _needs_optimize if pressure detected."""
-        from graphstore.core.optimizer import health_check, needs_optimization
-        health = health_check(self._store, self._vector_store, self._document_store)
-        if needs_optimization(health):
-            self._needs_optimize = True
-
-    def _run_auto_optimize(self):
-        """Run optimization at safe point (top of execute). No lock needed - we're between calls."""
-        self._optimizing = True
-        try:
-            from graphstore.core.optimizer import optimize_all
-            optimize_all(self._store, self._vector_store, self._document_store)
-        except Exception as e:
-            logger.debug("auto-optimize failed: %s", e, exc_info=True)
-        finally:
-            self._optimizing = False
-            self._needs_optimize = False
-
-    def _log_query(self, query: str, elapsed_us: int, result_count: int, error: str | None):
-        """Log query to sqlite query_log table."""
-        conn = self._conn
-        if conn is None:
-            return
-        try:
-            conn.execute(
-                "INSERT INTO query_log (timestamp, query, elapsed_us, result_count, error) VALUES (?,?,?,?,?)",
-                (time.time(), query, elapsed_us, result_count, error)
-            )
-            conn.commit()
-        except Exception as e:
-            logger.debug("query log insert failed: %s", e, exc_info=True)

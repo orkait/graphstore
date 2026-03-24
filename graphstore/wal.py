@@ -64,14 +64,15 @@ class WALManager:
             except Exception as e:
                 logger.debug("WAL replay statement skipped: %s", e, exc_info=True)
         if rows:
-            _checkpoint_fn(self._store, self._schema, conn)
+            _checkpoint_fn(self._store, self._schema, conn, force=True)
 
-    def checkpoint(self) -> None:
+    def checkpoint(self, vector_store=None) -> None:
         conn = self._conn
         if conn is None:
             return
-        self._store.vectors = getattr(self, '_vector_store', None)
+        self._store.vectors = vector_store
         _checkpoint_fn(self._store, self._schema, conn)
+        self._store.reset_dirty_flags()
 
     def maybe_auto_checkpoint(self) -> None:
         conn = self._conn
