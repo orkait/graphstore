@@ -134,7 +134,7 @@ class VaultSync:
         # Embed summary
         if self._embedder and self._vector_store and slot is not None:
             body = sections.get("body", "")
-            embed_text = f"{slug}: {summary} {body}"[:2000] if summary else body[:2000]
+            embed_text = f"{slug}: {summary} {body}" if summary else body
             if embed_text.strip():
                 vec = self._embedder.encode_documents([embed_text])[0]
                 if self._vector_store is not None:
