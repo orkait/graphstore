@@ -36,6 +36,10 @@ class ExecutorBase(VisibilityMixin, FilteringMixin):
         self._ingest_root = ingest_root
         self.cost_threshold = 100_000
         self._embedder_dirty = False
+        self._fts_full_text = True
+        self._vision_model = "smolvlm2:2.2b"
+        self._vision_base_url = "http://localhost:11434/v1"
+        self._vision_max_tokens = 300
 
     def execute(self, ast) -> Result:
         """Execute a parsed AST node and return a Result."""

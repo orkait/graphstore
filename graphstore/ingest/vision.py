@@ -8,13 +8,15 @@ logger = logging.getLogger(__name__)
 class VisionHandler:
     """Connects to Ollama for image description. Tier 4 fallback."""
 
-    def __init__(self, model: str = "smolvlm2:2.2b", base_url: str = "http://localhost:11434/v1"):
+    def __init__(self, model: str = "smolvlm2:2.2b", base_url: str = "http://localhost:11434/v1",
+                 max_tokens: int = 300):
         try:
             from openai import OpenAI
         except ImportError:
             raise ImportError("VisionHandler requires openai package. pip install openai")
         self._client = OpenAI(base_url=base_url, api_key="ollama")
         self._model = model
+        self._max_tokens = max_tokens
 
     @property
     def client(self):
@@ -35,7 +37,7 @@ class VisionHandler:
                     {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
                 ],
             }],
-            max_tokens=300,
+            max_tokens=self._max_tokens,
         )
         return response.choices[0].message.content
 

@@ -688,11 +688,18 @@ class DSLTransformer(Transformer):
         where = self._find(args[1:], WhereClause)
         return LexicalSearchQuery(query=query, limit=limit, where=where)
 
+    def tokens_clause(self, args):
+        return ("tokens", self._num(args[0]))
+
     def remember_q(self, args):
         query = self._str(args[0])
         limit = self._find(args[1:], LimitClause)
         where = self._find(args[1:], WhereClause)
-        return RememberQuery(query=query, limit=limit, where=where)
+        tokens = None
+        for a in args[1:]:
+            if isinstance(a, tuple) and a[0] == "tokens":
+                tokens = int(a[1])
+        return RememberQuery(query=query, limit=limit, where=where, tokens=tokens)
 
     def vector_literal(self, args):
         return [self._num(a) for a in args]

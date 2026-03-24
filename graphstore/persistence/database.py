@@ -10,13 +10,13 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 
 
-def open_database(path: str | Path) -> sqlite3.Connection:
+def open_database(path: str | Path, busy_timeout_ms: int = 5000) -> sqlite3.Connection:
     """Open or create the graphstore database."""
     conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=OFF")
-    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
     _create_tables(conn)
     return conn
 

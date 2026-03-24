@@ -144,6 +144,9 @@ class MutationHandlers:
         self._handle_vector(slot, kind, data, q.vector)
         if q.document and self._document_store:
             self._document_store.put_document(slot, q.document.encode("utf-8"), "text/plain")
+            # Also embed the document text if no explicit vector and embedder available
+            if q.vector is None and self._embedder:
+                self._embed_and_store(slot, q.document)
         node = self.store.get_node(node_id)
         return Result(kind="node", data=node, count=1)
 
@@ -151,6 +154,24 @@ class MutationHandlers:
     def _update_node(self, q: UpdateNode) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
         self.store.update_node(q.id, data)
+
+        # Auto re-embed if an embed field was updated
+        if self._embedder and self._vector_store is not None:
+            str_id = self.store.string_table.intern(q.id)
+            slot = self.store.id_to_slot.get(str_id)
+            if slot is not None:
+                node_data = self.store.get_node(q.id)
+                if node_data:
+                    kind = node_data.get("kind", "default")
+                    kind_def = self.schema.describe_node_kind(kind)
+                    if kind_def and kind_def.get("embed_field"):
+                        embed_field = kind_def["embed_field"]
+                        if embed_field in data:
+                            text = data[embed_field]
+                            if text and isinstance(text, str):
+                                vec = self._embedder.encode_documents([text])[0]
+                                self._vector_store.add(slot, vec)
+
         node = self.store.get_node(q.id)
         return Result(kind="node", data=node, count=1)
 
@@ -189,6 +210,11 @@ class MutationHandlers:
 
         if self._vector_store and slot is not None:
             self._vector_store.remove(slot)
+        if self._document_store and slot is not None:
+            try:
+                self._document_store.delete_document(slot)
+            except Exception:
+                pass
         self.store.delete_node(q.id)
         return Result(kind="ok", data={"id": q.id}, count=1)
 
@@ -219,6 +245,11 @@ class MutationHandlers:
         deleted_ids = []
         for nid in ids_to_delete:
             try:
+                # Clean vector before tombstoning
+                if self._vector_store:
+                    slot = self._resolve_slot(nid)
+                    if slot is not None:
+                        self._vector_store.remove(slot)
                 self.store.delete_node(nid)
                 deleted_ids.append(nid)
             except NodeNotFound:
@@ -300,6 +331,24 @@ class MutationHandlers:
         for fp in q.fields:
             if fp.name in self.store._indexed_fields:
                 self.store.add_index(fp.name)
+
+        # Auto re-embed nodes whose embed field changed
+        if self._embedder and self._vector_store is not None:
+            updated_fields = {fp.name for fp in q.fields}
+            for slot_idx in matching_slots:
+                slot = int(slot_idx)
+                node = self.store._materialize_slot(slot)
+                if node is None:
+                    continue
+                kind = node.get("kind", "default")
+                kind_def = self.schema.describe_node_kind(kind)
+                if kind_def and kind_def.get("embed_field"):
+                    embed_field = kind_def["embed_field"]
+                    if embed_field in updated_fields:
+                        text = node.get(embed_field)
+                        if text and isinstance(text, str):
+                            vec = self._embedder.encode_documents([text])[0]
+                            self._vector_store.add(slot, vec)
 
         updated = len(matching_slots)
         return Result(kind="ok", data={"updated": updated}, count=updated)
@@ -415,6 +464,11 @@ class MutationHandlers:
             self._vector_store.remove(slot)
         if self._document_store:
             self._document_store.delete_document(slot)
+            try:
+                self._document_store._conn.execute("DELETE FROM doc_fts WHERE rowid = ?", (slot,))
+                self._document_store._conn.commit()
+            except Exception:
+                pass
         self.store.delete_node(q.id)
         return Result(kind="ok", data={"forgotten": q.id}, count=1)
 

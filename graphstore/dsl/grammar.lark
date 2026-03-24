@@ -46,7 +46,8 @@ counterfactual: "WHAT" "IF" "RETRACT" STRING
 
 similar_q: "SIMILAR" "TO" similar_target limit_clause? where_clause?
 lexical_q: "LEXICAL" "SEARCH" STRING limit_clause? where_clause?
-remember_q: "REMEMBER" STRING limit_clause? where_clause?
+remember_q: "REMEMBER" STRING tokens_clause? limit_clause? where_clause?
+tokens_clause: "TOKENS" NUMBER
 similar_target: vector_literal      -> similar_vector
               | STRING              -> similar_text
               | "NODE" STRING       -> similar_node

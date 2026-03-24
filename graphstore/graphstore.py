@@ -109,11 +109,16 @@ class GraphStore:
         elif emb_cfg in ("default", "model2vec"):
             try:
                 from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
-                self._embedder = Model2VecEmbedder()
+                self._embedder = Model2VecEmbedder(model_name=cfg.vector.model2vec_model)
             except Exception:
                 self._embedder = None
         else:
             self._embedder = None
+
+        # Wire model cache directory from config
+        if cfg.vector.model_cache_dir:
+            from graphstore.registry.installer import set_cache_dir
+            set_cache_dir(cfg.vector.model_cache_dir)
 
         # Vector store (lazy init on first vector operation)
         self._vector_store = None
@@ -123,7 +128,7 @@ class GraphStore:
         if p is not None:
             p.mkdir(parents=True, exist_ok=True)
             db_file = p / "graphstore.db"
-            self._conn = open_database(db_file)
+            self._conn = open_database(db_file, busy_timeout_ms=cfg.persistence.busy_timeout_ms)
 
             # Try to load existing data
             self._store, self._schema = _load_fn(self._conn)
@@ -142,7 +147,7 @@ class GraphStore:
             doc_db = os.path.join(str(p), "documents.db")
         else:
             doc_db = None  # DocumentStore uses temp file
-        self._document_store = DocumentStore(doc_db)
+        self._document_store = DocumentStore(doc_db, fts_tokenizer=cfg.document.fts_tokenizer)
 
         # Embedder dirty flag (set when SYS SET EMBEDDER changes the embedder)
         self._embedder_dirty = False
@@ -154,7 +159,19 @@ class GraphStore:
                                   document_store=self._document_store,
                                   ingest_root=self._ingest_root)
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
+        from graphstore.dsl.parser import set_cache_size
+        set_cache_size(cfg.dsl.plan_cache_size)
         self._executor.cost_threshold = cfg.dsl.cost_threshold
+        self._executor._fts_full_text = cfg.document.fts_full_text
+        self._executor._recall_decay = cfg.dsl.recall_decay
+        self._executor._remember_weights = cfg.dsl.remember_weights
+        self._executor._chunk_max_size = cfg.document.chunk_max_size
+        self._executor._summary_max_length = cfg.document.summary_max_length
+        self._executor._chunk_overlap = cfg.document.chunk_overlap
+        self._executor._search_oversample = cfg.vector.search_oversample
+        self._executor._vision_model = cfg.document.vision_model
+        self._executor._vision_base_url = cfg.document.vision_base_url
+        self._executor._vision_max_tokens = cfg.document.vision_max_tokens
         retention_dict = {
             "blob_warm_days": cfg.retention.blob_warm_days,
             "blob_archive_days": cfg.retention.blob_archive_days,
@@ -186,6 +203,9 @@ class GraphStore:
             self._store, self._vector_store, self._document_store,
             auto_optimize=cfg.dsl.auto_optimize,
             optimize_interval=cfg.dsl.optimize_interval,
+            compact_threshold=cfg.core.compact_threshold,
+            string_gc_threshold=cfg.core.string_gc_threshold,
+            cache_gc_threshold=cfg.dsl.cache_gc_threshold,
         )
 
         # Vault: markdown note system
@@ -197,7 +217,8 @@ class GraphStore:
             self._vault_manager = VaultManager(vault_path)
             self._vault_sync = VaultSync(
                 self._vault_manager, self._store, self._schema,
-                self._embedder, self._vector_store, self._document_store
+                self._embedder, self._vector_store, self._document_store,
+                summary_max_length=cfg.document.summary_max_length,
             )
             # Initial sync
             self._vault_sync.sync_all()

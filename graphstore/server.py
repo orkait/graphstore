@@ -43,7 +43,7 @@ def _check_rate_limit(client_ip: str) -> bool:
     """Returns True if request is allowed."""
     global _rate_cleanup_counter
     now = _time.time()
-    window = 60.0
+    window = float(_RATE_LIMIT_WINDOW)
     bucket = _rate_buckets[client_ip]
     _rate_buckets[client_ip] = [t for t in bucket if now - t < window]
     if len(_rate_buckets[client_ip]) >= _RATE_LIMIT_RPM:
@@ -52,7 +52,7 @@ def _check_rate_limit(client_ip: str) -> bool:
 
     _rate_cleanup_counter += 1
     if _rate_cleanup_counter % 100 == 0:
-        stale = [ip for ip, ts in _rate_buckets.items() if not ts or now - max(ts) > window]
+        stale = [ip for ip, ts in _rate_buckets.items() if not ts or now - max(ts) > float(_RATE_LIMIT_WINDOW)]
         for ip in stale:
             del _rate_buckets[ip]
 
@@ -74,7 +74,7 @@ async def auth_and_rate_limit(request: Request, call_next):
         return JSONResponse(
             status_code=429,
             content={"error": "Rate limit exceeded"},
-            headers={"Retry-After": "60"},
+            headers={"Retry-After": str(_RATE_LIMIT_WINDOW)},
         )
 
     return await call_next(request)
@@ -154,7 +154,9 @@ class ConfigRequest(BaseModel):
 # Input validation
 # ---------------------------------------------------------------------------
 
-_MAX_QUERY_LENGTH = 10_000
+_MAX_QUERY_LENGTH = int(os.environ.get("GRAPHSTORE_MAX_QUERY_LENGTH", "10000"))
+_MAX_BATCH_SIZE = int(os.environ.get("GRAPHSTORE_MAX_BATCH_SIZE", "1000"))
+_RATE_LIMIT_WINDOW = int(os.environ.get("GRAPHSTORE_RATE_LIMIT_WINDOW", "60"))
 
 
 def _validate_query(query: str) -> str | None:
@@ -190,8 +192,8 @@ def execute(req: ExecuteRequest):
 
 @app.post("/api/execute-batch")
 def execute_batch(req: BatchRequest):
-    if len(req.queries) > 1000:
-        return [{"kind": "error", "data": "Batch exceeds 1000 queries", "count": 0, "elapsed_us": 0}]
+    if len(req.queries) > _MAX_BATCH_SIZE:
+        return [{"kind": "error", "data": f"Batch exceeds {_MAX_BATCH_SIZE} queries", "count": 0, "elapsed_us": 0}]
     store = _get_store()
     results = []
     for q in req.queries:

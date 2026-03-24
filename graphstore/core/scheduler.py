@@ -9,12 +9,17 @@ class OptimizerScheduler:
     """Tracks write pressure and triggers optimization at safe points."""
 
     def __init__(self, store, vector_store, document_store,
-                 auto_optimize: bool = False, optimize_interval: int = 500):
+                 auto_optimize: bool = False, optimize_interval: int = 500,
+                 compact_threshold: float = 0.2, string_gc_threshold: float = 3.0,
+                 cache_gc_threshold: int = 200):
         self._store = store
         self._vector_store = vector_store
         self._document_store = document_store
         self._auto_optimize = auto_optimize
         self._optimize_interval = optimize_interval
+        self._compact_threshold = compact_threshold
+        self._string_gc_threshold = string_gc_threshold
+        self._cache_gc_threshold = cache_gc_threshold
         self._optimizing = False
         self._needs_optimize = False
         self._write_counter = 0
@@ -52,7 +57,10 @@ class OptimizerScheduler:
         try:
             from graphstore.core.optimizer import health_check, needs_optimization
             health = health_check(self._store, self._vector_store, self._document_store)
-            if needs_optimization(health):
+            if needs_optimization(health,
+                                  compact_threshold=self._compact_threshold,
+                                  string_gc_threshold=self._string_gc_threshold,
+                                  cache_gc_threshold=self._cache_gc_threshold):
                 self._needs_optimize = True
             # Emergency eviction if memory > 90% ceiling
             from graphstore.core.memory import check_ceiling_accurate

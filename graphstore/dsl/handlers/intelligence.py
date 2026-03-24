@@ -6,6 +6,8 @@ from collections import deque
 import numpy as np
 from scipy.sparse import csr_matrix
 
+from graphstore.core.edges import resize_csr
+
 from graphstore.dsl.handlers._registry import handles
 from graphstore.dsl.ast_nodes import (
     RecallQuery, SimilarQuery, LexicalSearchQuery, CounterfactualQuery, RememberQuery,
@@ -58,14 +60,16 @@ class IntelligenceHandlers:
         if combined.shape[0] < n:
             # Rare path: matrix predates latest node additions, resize then transpose.
             # Intentionally NOT cached — resized matrix differs from _combined_all.
-            mat_t = csr_matrix((combined.data, combined.indices, combined.indptr), shape=(n, n)).T.tocsr()
+            mat_t = resize_csr(combined, n).T.tocsr()
         else:
             mat_t = self.store.edge_matrices.get_combined_transpose()
+        decay = getattr(self, '_recall_decay', 0.7)
         for _ in range(q.depth):
-            activation = mat_t.dot(activation)
-            activation *= importance[:len(activation)]
-            activation *= recency[:len(activation)]
+            spread = mat_t.dot(activation) * decay
+            activation = activation + spread
             activation[:n] *= live_mask.astype(np.float64)
+        activation *= importance[:len(activation)]
+        activation *= recency[:len(activation)]
 
         activation[cue_slot] = 0.0
 
@@ -149,6 +153,7 @@ class IntelligenceHandlers:
         search_k = k * 3 if q.where else k
         slots, dists = self._vector_store.search(query_vec, k=search_k, mask=combined_mask)
 
+        conf_col = self.store.columns.get_column("__confidence__", n)
         results = []
         target_k = q.limit.value if q.limit else 10
         for slot_idx, dist in zip(slots, dists):
@@ -159,6 +164,10 @@ class IntelligenceHandlers:
             if q.where and not self._eval_where(q.where.expr, node):
                 continue
             node["_similarity_score"] = round(1.0 - float(dist), 4)
+            if conf_col is not None:
+                col_data, col_pres, _ = conf_col
+                if col_pres[slot]:
+                    node["_confidence"] = round(float(col_data[slot]), 4)
             results.append(node)
             if len(results) >= target_k:
                 break
@@ -218,7 +227,7 @@ class IntelligenceHandlers:
             if combined is not None:
                 mat = combined
                 if mat.shape[0] < n:
-                    mat = csr_matrix((mat.data, mat.indices, mat.indptr), shape=(n, n))
+                    mat = resize_csr(mat, n)
 
                 frontier = deque([src_slot])
                 visited = {src_slot}
@@ -263,13 +272,14 @@ class IntelligenceHandlers:
 
     @handles(RememberQuery)
     def _remember(self, q: RememberQuery) -> Result:
-        """REMEMBER: hybrid retrieval fusing vector + BM25 + recency."""
+        """REMEMBER: hybrid retrieval fusing vector + BM25 + recency + confidence."""
         import math
 
         target_k = q.limit.value if q.limit else 10
-        oversample = target_k * 5
+        oversample_factor = getattr(self, '_search_oversample', 5)
+        oversample = target_k * oversample_factor
 
-        candidates: dict[int, dict] = {}  # slot -> {vector_sim, bm25, recency}
+        candidates: dict[int, dict] = {}
 
         n = self.store._next_slot
         if n == 0:
@@ -287,11 +297,12 @@ class IntelligenceHandlers:
             vs_mask[:cap] = self._vector_store._has_vector[:cap]
             combined = live_mask & vs_mask
 
-            slots, dists = self._vector_store.search(query_vec, k=oversample, mask=combined)
+            slots, dists = self._vector_store.search(query_vec, k=oversample, mask=combined, oversample_factor=oversample_factor)
             for slot_idx, dist in zip(slots, dists):
                 slot = int(slot_idx)
                 sim = max(0.0, 1.0 - float(dist))
-                candidates[slot] = {"vector_sim": sim, "bm25": 0.0, "recency": 0.0}
+                candidates[slot] = {"vector_sim": sim, "bm25": 0.0, "recency": 0.0,
+                                    "confidence": 1.0, "recall_boost": 0.0}
 
         # --- BM25 candidates ---
         if self._document_store:
@@ -299,7 +310,8 @@ class IntelligenceHandlers:
             for slot, score in hits:
                 if slot < n and live_mask[slot]:
                     if slot not in candidates:
-                        candidates[slot] = {"vector_sim": 0.0, "bm25": 0.0, "recency": 0.0}
+                        candidates[slot] = {"vector_sim": 0.0, "bm25": 0.0, "recency": 0.0,
+                                            "confidence": 1.0, "recall_boost": 0.0}
                     candidates[slot]["bm25"] = abs(float(score))
 
         if not candidates:
@@ -322,22 +334,48 @@ class IntelligenceHandlers:
                     age_days = max(0.0, age_ms / 86400000.0)
             scores["recency"] = math.exp(-age_days / 30.0)
 
+        # --- Confidence scoring ---
+        conf_col = self.store.columns.get_column("__confidence__", n)
+        if conf_col is not None:
+            col_data, col_pres, _ = conf_col
+            for slot, scores in candidates.items():
+                if col_pres[slot]:
+                    scores["confidence"] = max(0.0, min(1.0, float(col_data[slot])))
+
+        # --- Recall frequency boost ---
+        recall_col = self.store.columns.get_column("__recall_count__", n)
+        if recall_col is not None:
+            col_data, col_pres, _ = recall_col
+            max_recalls = 1.0
+            for slot in candidates:
+                if col_pres[slot]:
+                    max_recalls = max(max_recalls, float(col_data[slot]))
+            for slot, scores in candidates.items():
+                if col_pres[slot] and max_recalls > 0:
+                    scores["recall_boost"] = float(col_data[slot]) / max_recalls
+
         # --- Weighted fusion ---
-        W_VECTOR = 0.4
-        W_BM25 = 0.3
-        W_RECENCY = 0.3
+        weights = getattr(self, '_remember_weights', [0.30, 0.20, 0.15, 0.20, 0.15])
+        W_VECTOR = weights[0] if len(weights) > 0 else 0.30
+        W_BM25 = weights[1] if len(weights) > 1 else 0.20
+        W_RECENCY = weights[2] if len(weights) > 2 else 0.15
+        W_CONFIDENCE = weights[3] if len(weights) > 3 else 0.20
+        W_RECALL = weights[4] if len(weights) > 4 else 0.15
 
         scored = []
         for slot, scores in candidates.items():
             final = (W_VECTOR * scores["vector_sim"]
                      + W_BM25 * scores["bm25"]
-                     + W_RECENCY * scores["recency"])
+                     + W_RECENCY * scores["recency"]
+                     + W_CONFIDENCE * scores["confidence"]
+                     + W_RECALL * scores["recall_boost"])
             scored.append((slot, final, scores))
 
         scored.sort(key=lambda x: -x[1])
 
-        # --- Materialize and filter ---
+        # --- Materialize, filter, and record retrieval feedback ---
         results = []
+        retrieved_slots = []
         for slot, final_score, scores in scored:
             node = self.store._materialize_slot(slot)
             if node is None:
@@ -348,8 +386,33 @@ class IntelligenceHandlers:
             node["_vector_sim"] = round(scores["vector_sim"], 4)
             node["_bm25_score"] = round(scores["bm25"], 4)
             node["_recency_score"] = round(scores["recency"], 4)
+            node["_confidence"] = round(scores["confidence"], 4)
             results.append(node)
-            if len(results) >= target_k:
+            retrieved_slots.append(slot)
+            if q.tokens is not None:
+                # Token budget mode: estimate tokens from text length
+                total_tokens = sum(
+                    len(r.get("summary", "") + r.get("claim", "") + r.get("text", "")) // 4
+                    for r in results
+                )
+                if total_tokens >= q.tokens:
+                    break
+            elif len(results) >= target_k:
                 break
+
+        # --- Retrieval feedback: increment recall count for returned nodes ---
+        for slot in retrieved_slots:
+            try:
+                if self.store.columns.has_column("__recall_count__"):
+                    if self.store.columns._presence["__recall_count__"][slot]:
+                        current = int(self.store.columns._columns["__recall_count__"][slot])
+                        self.store.columns.set_reserved(slot, "__recall_count__", current + 1)
+                    else:
+                        self.store.columns.set_reserved(slot, "__recall_count__", 1)
+                else:
+                    self.store.columns.set_reserved(slot, "__recall_count__", 1)
+                self.store.columns.set_reserved(slot, "__last_recalled_at__", int(time.time() * 1000))
+            except Exception:
+                pass  # Don't fail retrieval on feedback errors
 
         return Result(kind="nodes", data=results, count=len(results))
