@@ -12,9 +12,18 @@ from graphstore.registry.models import get_model_info, SUPPORTED_MODELS
 
 DEFAULT_CACHE_DIR = Path.home() / ".graphstore" / "models"
 
+_cache_dir_override: Path | None = None
+
+
+def set_cache_dir(path: str | Path | None) -> None:
+    """Override the model cache directory (from config)."""
+    global _cache_dir_override
+    _cache_dir_override = Path(path) if path else None
+
 
 def get_model_dir(name: str) -> Path:
-    return DEFAULT_CACHE_DIR / name
+    base = _cache_dir_override if _cache_dir_override is not None else DEFAULT_CACHE_DIR
+    return base / name
 
 
 def is_installed(name: str) -> bool:

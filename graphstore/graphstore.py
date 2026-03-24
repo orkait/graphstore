@@ -109,11 +109,16 @@ class GraphStore:
         elif emb_cfg in ("default", "model2vec"):
             try:
                 from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
-                self._embedder = Model2VecEmbedder()
+                self._embedder = Model2VecEmbedder(model_name=cfg.vector.model2vec_model)
             except Exception:
                 self._embedder = None
         else:
             self._embedder = None
+
+        # Wire model cache directory from config
+        if cfg.vector.model_cache_dir:
+            from graphstore.registry.installer import set_cache_dir
+            set_cache_dir(cfg.vector.model_cache_dir)
 
         # Vector store (lazy init on first vector operation)
         self._vector_store = None
@@ -164,6 +169,9 @@ class GraphStore:
         self._executor._summary_max_length = cfg.document.summary_max_length
         self._executor._chunk_overlap = cfg.document.chunk_overlap
         self._executor._search_oversample = cfg.vector.search_oversample
+        self._executor._vision_model = cfg.document.vision_model
+        self._executor._vision_base_url = cfg.document.vision_base_url
+        self._executor._vision_max_tokens = cfg.document.vision_max_tokens
         retention_dict = {
             "blob_warm_days": cfg.retention.blob_warm_days,
             "blob_archive_days": cfg.retention.blob_archive_days,
