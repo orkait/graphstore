@@ -1,6 +1,9 @@
 """Piper TTS wrapper for text-to-speech. CPU only, < 100ms latency."""
 
 import io
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class PiperTTS:
@@ -31,8 +34,8 @@ class PiperTTS:
             buf = io.BytesIO()
             voice.synthesize(text, buf)
             return buf.getvalue()
-        except Exception:
-            # Fallback: return empty audio
+        except Exception as e:
+            logger.debug("TTS synthesis failed: %s", e, exc_info=True)
             return b""
 
     def speak_to_file(self, text: str, output_path: str) -> None:
@@ -51,5 +54,5 @@ class PiperTTS:
             pygame.mixer.init()
             sound = pygame.mixer.Sound(io.BytesIO(audio_bytes))
             sound.play()
-        except ImportError:
-            pass  # No audio playback available
+        except ImportError as e:
+            logger.debug("audio playback unavailable: %s", e)

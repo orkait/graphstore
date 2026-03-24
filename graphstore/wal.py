@@ -2,6 +2,10 @@
 
 import time
 import sqlite3
+import logging
+
+logger = logging.getLogger(__name__)
+_event_logger = logging.getLogger("graphstore.events")
 
 from graphstore.core.errors import GraphStoreError
 from graphstore.dsl.parser import parse
@@ -36,8 +40,8 @@ class WALManager:
         if row and row[0] >= self._wal_hard_limit:
             try:
                 self.checkpoint()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("WAL checkpoint before hard-limit failed: %s", e, exc_info=True)
             row = conn.execute("SELECT COUNT(*) FROM wal").fetchone()
             if row and row[0] >= self._wal_hard_limit:
                 raise GraphStoreError(
@@ -63,18 +67,19 @@ class WALManager:
                 if isinstance(ast, ast_nodes.CreateNode):
                     ast = ast_nodes.UpsertNode(id=ast.id, fields=ast.fields)
                 self._executor.execute(ast)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("WAL replay statement skipped: %s", e, exc_info=True)
         if rows:
-            _checkpoint_fn(self._store, self._schema, conn)
+            _checkpoint_fn(self._store, self._schema, conn, force=True)
 
-    def checkpoint(self) -> None:
+    def checkpoint(self, vector_store=None) -> None:
         conn = self._conn
         if conn is None:
             return
         if self._vector_store is not None:
             self._store.vectors = self._vector_store
         _checkpoint_fn(self._store, self._schema, conn)
+        self._store.reset_dirty_flags()
 
     def maybe_auto_checkpoint(self) -> None:
         conn = self._conn
@@ -85,18 +90,40 @@ class WALManager:
             self.checkpoint()
         self._rotate_query_log()
 
-    def log_query(self, query: str, elapsed_us: int, result_count: int, error: str | None) -> None:
+    def log_query(self, query: str, elapsed_us: int, result_count: int, error: str | None,
+                  tag: str | None = None, trace_id: str | None = None,
+                  source: str = "user", phase: str | None = None) -> None:
         conn = self._conn
         if conn is None:
             return
         try:
             conn.execute(
-                "INSERT INTO query_log (timestamp, query, elapsed_us, result_count, error) VALUES (?,?,?,?,?)",
-                (time.time(), query, elapsed_us, result_count, error)
+                "INSERT INTO query_log (timestamp, query, elapsed_us, result_count, error, tag, trace_id, source, phase) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (time.time(), query, elapsed_us, result_count, error, tag, trace_id, source, phase)
             )
             conn.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("query log insert failed: %s", e, exc_info=True)
+
+    def emit_event(self, query: str, elapsed_us: int, result_count: int, error: str | None,
+                   tag: str | None = None, trace_id: str | None = None,
+                   source: str = "user", phase: str | None = None) -> None:
+        """Emit structured log event via graphstore.events logger."""
+        _event_logger.info(
+            "%s [%s] %dus %d results",
+            tag or "unknown", source, elapsed_us, result_count,
+            extra={
+                "gs_query": query,
+                "gs_tag": tag,
+                "gs_source": source,
+                "gs_trace_id": trace_id,
+                "gs_phase": phase,
+                "gs_elapsed_us": elapsed_us,
+                "gs_result_count": result_count,
+                "gs_error": error,
+            },
+        )
 
     def _rotate_query_log(self) -> None:
         conn = self._conn
@@ -106,5 +133,5 @@ class WALManager:
             cutoff = time.time() - self._log_retention_days * 86400
             conn.execute("DELETE FROM query_log WHERE timestamp < ?", (cutoff,))
             conn.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("query log rotation failed: %s", e, exc_info=True)

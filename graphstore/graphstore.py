@@ -3,23 +3,29 @@
 import os
 import time
 import sqlite3
+import logging
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
+from concurrent.futures import Future
 from graphstore.core.store import CoreStore
 from graphstore.core.schema import SchemaRegistry
 from graphstore.core.types import Result
 from graphstore.dsl.parser import parse
+from graphstore.dsl.tagger import infer_tag, infer_phase
 from graphstore.dsl.executor import Executor
 from graphstore.dsl.executor_system import SystemExecutor
 from graphstore.dsl import ast_nodes
 from graphstore.persistence.database import open_database
-from graphstore.persistence.serializer import checkpoint as _checkpoint_fn
 from graphstore.persistence.deserializer import load as _load_fn
-from graphstore.core.errors import GraphStoreError, OptimizationInProgress
+from graphstore.wal import WALManager
+from graphstore.core.scheduler import OptimizerScheduler
+from graphstore.cron import CronScheduler
+from graphstore.core.errors import OptimizationInProgress
 from graphstore.dsl.handlers import is_write_op
 from graphstore.core.memory import estimate as _estimate_memory
 from graphstore.config import GraphStoreConfig, load_config, merge_kwargs
-from graphstore.wal import WALManager
 
 # All system AST types
 _SYS_TYPES = tuple(
@@ -47,7 +53,8 @@ class GraphStore:
                  voice: bool = False, ingest_root=_UNSET,
                  vault=_UNSET, retention=_UNSET,
                  config: GraphStoreConfig | None = None,
-                 config_path: str | None = None):
+                 config_path: str | None = None,
+                 threaded: bool = False):
         # Load config: explicit object > explicit path > env var > db dir > defaults
         if config is not None:
             self._config = config
@@ -111,11 +118,6 @@ class GraphStore:
         # Vector store (lazy init on first vector operation)
         self._vector_store = None
 
-        # Self-balancing state
-        self._optimizing = False
-        self._write_counter = 0
-        self._needs_optimize = False
-
         # Initialize store
         p = self._path
         if p is not None:
@@ -164,12 +166,12 @@ class GraphStore:
                                                document_store=self._document_store,
                                                retention=retention_dict)
 
-        # Wire WALManager (replaces inline _wal_append/_replay_wal etc.)
+        # Cron scheduler (requires threaded mode for background execution)
+        self._cron: CronScheduler | None = None
+
+        # WAL manager
         self._wal = WALManager(
-            conn=self._conn,
-            store=self._store,
-            schema=self._schema,
-            executor=self._executor,
+            self._conn, self._store, self._schema, self._executor,
             wal_hard_limit=cfg.persistence.wal_hard_limit,
             auto_checkpoint_threshold=cfg.persistence.auto_checkpoint_threshold,
             log_retention_days=cfg.persistence.log_retention_days,
@@ -178,6 +180,13 @@ class GraphStore:
         # Replay WAL (must happen after executor is created)
         if self._path and self._conn:
             self._wal.replay()
+
+        # Optimizer scheduler
+        self._optimizer = OptimizerScheduler(
+            self._store, self._vector_store, self._document_store,
+            auto_optimize=cfg.dsl.auto_optimize,
+            optimize_interval=cfg.dsl.optimize_interval,
+        )
 
         # Vault: markdown note system
         vault_path = cfg.vault.path if cfg.vault.enabled else None
@@ -203,15 +212,36 @@ class GraphStore:
             self._vault_sync = None
             self._vault_executor = None
 
+        # Trace binding for log layer
+        self._active_trace: str | None = None
+
+        # Command queue for thread-safe access
+        self._threaded = threaded
+        self._queue = None
+        if threaded:
+            from graphstore.core.queue import CommandQueue
+            self._queue = CommandQueue(self._execute_internal)
+
+        # Start cron scheduler if threaded and persistent
+        if threaded and self._conn is not None:
+            self._cron = CronScheduler(self._conn, self.submit_background)
+            self._cron.start()
+            self._sys_executor._cron = self._cron
+
     def execute(self, query: str) -> Result:
-        """Execute a single DSL query (user or system). Returns Result."""
-        # Reject during optimization (lock gate)
-        if self._optimizing:
+        """Execute a DSL query. Thread-safe if threaded=True."""
+        if self._queue is not None:
+            return self._queue.submit(query)
+        return self._execute_internal(query)
+
+    def _execute_internal(self, query: str) -> Result:
+        """Execute a DSL query directly (no queue). Internal use only."""
+        if self._optimizer.optimizing:
             raise OptimizationInProgress()
 
-        # Auto-optimize at safe point (between execute calls)
-        if self._needs_optimize:
-            self._run_auto_optimize()
+        self._optimizer.maybe_optimize()
+
+        tag, phase, source, trace_id = "system", "system", getattr(self, '_current_source', 'user'), self._active_trace
 
         start = time.perf_counter_ns()
 
@@ -227,6 +257,8 @@ class GraphStore:
 
         try:
             ast = parse(query)
+            tag = infer_tag(ast)
+            phase = infer_phase(tag)
 
             # Route to correct executor
             if isinstance(ast, _SYS_TYPES):
@@ -241,12 +273,12 @@ class GraphStore:
                     self._wal.replay()
                     result = Result(kind="ok", data=None, count=0)
                 elif isinstance(ast, ast_nodes.SysOptimize):
-                    self._optimizing = True
+                    self._optimizer._optimizing = True
                     try:
                         result = self._sys_executor.execute(ast)
                     finally:
-                        self._optimizing = False
-                        self._needs_optimize = False
+                        self._optimizer._optimizing = False
+                        self._optimizer._needs_optimize = False
                 else:
                     result = self._sys_executor.execute(ast)
                     # Sync vector store back from sys executor (rollback may change it)
@@ -265,39 +297,53 @@ class GraphStore:
 
                 result = self._executor.execute(ast)
 
-                # Auto-checkpoint check + write counter for auto-optimize
                 if is_write:
-                    self._write_counter += 1
                     if self._conn:
                         self._wal.maybe_auto_checkpoint()
-                    if self._config.dsl.auto_optimize:
-                        interval = self._config.dsl.optimize_interval
-                        if self._write_counter % interval == 0:
-                            self._check_health_for_auto()
+                    self._optimizer.on_write()
 
             elapsed = (time.perf_counter_ns() - start) // 1000
             result.elapsed_us = elapsed
 
-            # Log query
-            self._wal.log_query(query, elapsed, result.count, None)
+            self._wal.log_query(query, elapsed, result.count, None,
+                                tag=tag, trace_id=trace_id, source=source, phase=phase)
+            self._wal.emit_event(query, elapsed, result.count, None,
+                                 tag=tag, trace_id=trace_id, source=source, phase=phase)
 
             return result
 
         except Exception as e:
             elapsed = (time.perf_counter_ns() - start) // 1000
-            self._wal.log_query(query, elapsed, 0, str(e))
+            self._wal.log_query(query, elapsed, 0, str(e),
+                                tag=tag, trace_id=trace_id, source=source, phase=phase)
+            self._wal.emit_event(query, elapsed, 0, str(e),
+                                 tag=tag, trace_id=trace_id, source=source, phase=phase)
             raise
 
     def execute_batch(self, queries: list[str]) -> list[Result]:
         """Execute multiple queries. Each is independent (not transactional)."""
         return [self.execute(q) for q in queries]
 
+    def submit_background(self, query: str) -> "Future":
+        """Submit a background query (low priority). Only available in threaded mode.
+        Returns a Future that resolves to a Result."""
+        if self._queue is None:
+            raise RuntimeError("submit_background requires GraphStore(threaded=True)")
+        return self._queue.submit_background(query)
+
     def checkpoint(self) -> None:
         """Force persist to disk. No-op if path is None."""
         if self._conn is None:
             return
-        self._store.vectors = self._vector_store  # expose to serializer
-        _checkpoint_fn(self._store, self._schema, self._conn)
+        self._wal.checkpoint(vector_store=self._vector_store)
+
+    def bind_trace(self, trace_id: str) -> None:
+        """Set active trace ID for log correlation."""
+        self._active_trace = trace_id
+
+    def discard_trace(self) -> None:
+        """Clear active trace ID."""
+        self._active_trace = None
 
     def set_script(self, script: str) -> None:
         """Store a DSL script in metadata so the playground can load it."""
@@ -336,6 +382,12 @@ class GraphStore:
 
     def close(self) -> None:
         """Checkpoint + close sqlite connection."""
+        if self._cron is not None:
+            self._cron.stop()
+            self._cron = None
+        if self._queue is not None:
+            self._queue.shutdown()
+            self._queue = None
         conn = self._conn
         if conn is not None:
             self.checkpoint()
@@ -394,29 +446,10 @@ class GraphStore:
         if self._vector_store is None:
             from graphstore.vector.store import VectorStore
             self._vector_store = VectorStore(dims=dims, capacity=self._store._capacity)
-            # Sync to executor and WAL
             self._executor._vector_store = self._vector_store
             self._wal.update_vector_store(self._vector_store)
+            if hasattr(self, '_optimizer'):
+                self._optimizer.sync_vector_store(self._vector_store)
         return self._vector_store
 
-    # --- Internal ---
-
-    def _check_health_for_auto(self):
-        """Lightweight health check - sets _needs_optimize if pressure detected."""
-        from graphstore.core.optimizer import health_check, needs_optimization
-        health = health_check(self._store, self._vector_store, self._document_store)
-        if needs_optimization(health):
-            self._needs_optimize = True
-
-    def _run_auto_optimize(self):
-        """Run optimization at safe point (top of execute). No lock needed - we're between calls."""
-        self._optimizing = True
-        try:
-            from graphstore.core.optimizer import optimize_all
-            optimize_all(self._store, self._vector_store, self._document_store)
-        except Exception:
-            pass
-        finally:
-            self._optimizing = False
-            self._needs_optimize = False
 

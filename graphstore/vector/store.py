@@ -94,39 +94,20 @@ class VectorStore:
 
     def save(self) -> bytes:
         """Serialize index to bytes."""
-        import tempfile
-        import os
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".usearch") as f:
-            path = f.name
-        try:
-            self._index.save(path)
-            with open(path, "rb") as f:
-                return f.read()
-        finally:
-            os.unlink(path)
+        return bytes(self._index.save(None))
 
     def load(self, data: bytes) -> None:
         """Deserialize index from bytes."""
-        import tempfile
-        import os
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".usearch") as f:
-            f.write(data)
-            path = f.name
-        try:
-            # Use instance .load() rather than Index.restore() to avoid kwarg conflicts
-            new_index = Index(ndim=self._dims, metric="cos", dtype="f32")
-            new_index.load(path)
-            self._index = new_index
-            # Rebuild _has_vector from the loaded index's keys
-            keys = list(new_index.keys)
-            if keys:
-                max_key = int(max(keys))
-                new_capacity = max(self._capacity, max_key + 1)
-                self._has_vector = np.zeros(new_capacity, dtype=bool)
-                self._capacity = new_capacity
-                for k in keys:
-                    self._has_vector[int(k)] = True
-            else:
-                self._has_vector = np.zeros(self._capacity, dtype=bool)
-        finally:
-            os.unlink(path)
+        new_index = Index(ndim=self._dims, metric="cos", dtype="f32")
+        new_index.load(data)
+        self._index = new_index
+        keys = list(new_index.keys)
+        if keys:
+            max_key = int(max(keys))
+            new_capacity = max(self._capacity, max_key + 1)
+            self._has_vector = np.zeros(new_capacity, dtype=bool)
+            self._capacity = new_capacity
+            for k in keys:
+                self._has_vector[int(k)] = True
+        else:
+            self._has_vector = np.zeros(self._capacity, dtype=bool)

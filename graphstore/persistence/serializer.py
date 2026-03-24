@@ -1,7 +1,8 @@
 """Serialize a CoreStore + SchemaRegistry to sqlite.
 
-checkpoint() writes the full graph state into the blobs and metadata
-tables within a single transaction.
+checkpoint() writes the graph state into the blobs and metadata
+tables within a single transaction. Skips clean subsystems unless
+force=True.
 """
 
 import time
@@ -14,81 +15,75 @@ from graphstore.core.store import CoreStore
 from graphstore.core.schema import SchemaRegistry
 
 
-def checkpoint(store: CoreStore, schema: SchemaRegistry, conn):
-    """Write full graph state to sqlite. All within a single transaction."""
+def checkpoint(store: CoreStore, schema: SchemaRegistry, conn, force: bool = False):
+    """Write graph state to sqlite. Skips clean subsystems unless force=True."""
     with conn:
-        # String table
-        conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                     ("strings", mjson.encode(store.string_table.to_list()), "json"))
-
-        # Node kinds array
-        kinds_data = store.node_kinds[:store._next_slot]
-        conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                     ("node_kinds", kinds_data.tobytes(), str(kinds_data.dtype)))
-
-        # Node IDs array
-        ids_data = store.node_ids[:store._next_slot]
-        conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                     ("node_ids", ids_data.tobytes(), str(ids_data.dtype)))
-
-        # Column store data (sole source of truth for node fields)
-        conn.execute("DELETE FROM blobs WHERE key LIKE 'columns:%'")
-        for field in store.columns._columns:
-            col_data = store.columns._columns[field][:store._next_slot]
-            pres_data = store.columns._presence[field][:store._next_slot]
-            dtype_str = store.columns._dtypes[field]
-            safe_field = quote(field, safe="")
+        if force or store._dirty_strings:
             conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                         (f"columns:{safe_field}:data", col_data.tobytes(), str(col_data.dtype)))
-            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                         (f"columns:{safe_field}:presence", pres_data.tobytes(), str(pres_data.dtype)))
-            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                         (f"columns:{safe_field}:dtype", dtype_str.encode(), "text"))
+                         ("strings", mjson.encode(store.string_table.to_list()), "json"))
 
-        # Edge matrices: one set of blobs per type
-        # First, clear old edge blobs
-        conn.execute("DELETE FROM blobs WHERE key LIKE 'edges:%'")
-        conn.execute("DELETE FROM blobs WHERE key LIKE 'edge_data:%'")
+        if force or store._dirty_nodes:
+            kinds_data = store.node_kinds[:store._next_slot]
+            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                         ("node_kinds", kinds_data.tobytes(), str(kinds_data.dtype)))
 
-        for etype, matrix in store.edge_matrices._typed.items():
+            ids_data = store.node_ids[:store._next_slot]
             conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                        (f"edges:{etype}:indptr", matrix.indptr.tobytes(), str(matrix.indptr.dtype)))
-            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                        (f"edges:{etype}:indices", matrix.indices.tobytes(), str(matrix.indices.dtype)))
-            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                        (f"edges:{etype}:data", matrix.data.tobytes(), str(matrix.data.dtype)))
-            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                        (f"edges:{etype}:shape", mjson.encode(list(matrix.shape)), "json"))
+                         ("node_ids", ids_data.tobytes(), str(ids_data.dtype)))
 
-        # Raw edge lists for store reconstruction
-        conn.execute("DELETE FROM blobs WHERE key LIKE 'raw_edges:%'")
-        for etype, edge_list in store._edges_by_type.items():
-            # edge_list is [(src_slot, tgt_slot, data_dict), ...]
-            serializable = [(int(s), int(t), d) for s, t, d in edge_list]
             conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                        (f"raw_edges:{etype}", mjson.encode(serializable), "json"))
+                         ("tombstones", mjson.encode(list(store.node_tombstones)), "json"))
 
-        # Tombstones
-        conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                     ("tombstones", mjson.encode(list(store.node_tombstones)), "json"))
+            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                         ("store_meta", mjson.encode({
+                             "next_slot": store._next_slot,
+                             "count": store._count,
+                             "capacity": store._capacity,
+                         }), "json"))
 
-        # Secondary index field names (not data)
+        if force or store._dirty_columns:
+            conn.execute("DELETE FROM blobs WHERE key LIKE 'columns:%'")
+            for field in store.columns._columns:
+                col_data = store.columns._columns[field][:store._next_slot]
+                pres_data = store.columns._presence[field][:store._next_slot]
+                dtype_str = store.columns._dtypes[field]
+                safe_field = quote(field, safe="")
+                conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                             (f"columns:{safe_field}:data", col_data.tobytes(), str(col_data.dtype)))
+                conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                             (f"columns:{safe_field}:presence", pres_data.tobytes(), str(pres_data.dtype)))
+                conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                             (f"columns:{safe_field}:dtype", dtype_str.encode(), "text"))
+
+        if force or store._dirty_edges:
+            conn.execute("DELETE FROM blobs WHERE key LIKE 'edges:%'")
+            conn.execute("DELETE FROM blobs WHERE key LIKE 'edge_data:%'")
+
+            for etype, matrix in store.edge_matrices._typed.items():
+                conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                            (f"edges:{etype}:indptr", matrix.indptr.tobytes(), str(matrix.indptr.dtype)))
+                conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                            (f"edges:{etype}:indices", matrix.indices.tobytes(), str(matrix.indices.dtype)))
+                conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                            (f"edges:{etype}:data", matrix.data.tobytes(), str(matrix.data.dtype)))
+                conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                            (f"edges:{etype}:shape", mjson.encode(list(matrix.shape)), "json"))
+
+            conn.execute("DELETE FROM blobs WHERE key LIKE 'raw_edges:%'")
+            for etype, edge_list in store._edges_by_type.items():
+                serializable = [(int(s), int(t), d) for s, t, d in edge_list]
+                conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                            (f"raw_edges:{etype}", mjson.encode(serializable), "json"))
+
+        # Always write secondary index field names (tiny)
         conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
                      ("indexed_fields", mjson.encode(list(store._indexed_fields)), "json"))
 
-        # Store metadata
-        conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                     ("store_meta", mjson.encode({
-                         "next_slot": store._next_slot,
-                         "count": store._count,
-                         "capacity": store._capacity,
-                     }), "json"))
-
-        # Schema
+        # Schema (always write - tiny)
         conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
                      ("schema", mjson.encode(schema.to_dict()), "json"))
 
-        # Vector index
+        # Vector index (check if vector store is present)
         vectors = getattr(store, 'vectors', None)
         if vectors is not None and vectors.count() > 0:
             conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
@@ -99,7 +94,6 @@ def checkpoint(store: CoreStore, schema: SchemaRegistry, conn):
             conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
                          ("vector_dims", str(vectors.dims).encode(), "text"))
         else:
-            # Clear any stale vector blobs
             conn.execute("DELETE FROM blobs WHERE key IN ('vector_index', 'vector_presence', 'vector_dims')")
 
         # Version + timestamp
