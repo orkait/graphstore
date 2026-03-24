@@ -65,7 +65,7 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
 
     kinds_row = conn.execute("SELECT data, dtype FROM blobs WHERE key='node_kinds'").fetchone()
     loaded_kinds = np.frombuffer(kinds_row[0], dtype=np.dtype(kinds_row[1])).copy()
-    store.node_kinds = np.zeros(capacity, dtype=np.uint8)
+    store.node_kinds = np.zeros(capacity, dtype=np.int32)
     store.node_kinds[:len(loaded_kinds)] = loaded_kinds
 
     # Load tombstones
