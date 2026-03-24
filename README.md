@@ -16,12 +16,13 @@
 
 ---
 
-Six engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vector search, document ingestion, markdown vault, and a human-readable query language - everything an AI agent needs to remember, recall, reason, and speak.
+Six engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vector search, document ingestion, markdown vault, and a human-readable query language - everything an AI agent needs to remember, recall, reason, and speak. Thread-safe command queue, persistent cron scheduler, intelligent logging, and memory-safe eviction for 24/7 operation.
 
 ## 🧩 What agents get
 
 | Need | graphstore solves it | Speed (100k nodes) |
 |---|---|---|
+| **Hybrid recall** | `REMEMBER "Paris travel" LIMIT 10` (vector + BM25 + recency fused) | ~200 μs |
 | **Recall by meaning** | `SIMILAR TO "Paris travel" LIMIT 10` | 127 μs |
 | **Recall by association** | `RECALL FROM "concept:paris" DEPTH 3` | 983 μs |
 | **Memory summarization** | `AGGREGATE NODES GROUP BY topic SELECT COUNT(), AVG(importance)` | 788 μs |
@@ -37,6 +38,10 @@ Six engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vect
 | **Working memory** | `CREATE NODE ... EXPIRES IN 30m` + `SYS EXPIRE` | 9 μs |
 | **Temporal queries** | `NODES WHERE __created_at__ > NOW() - 7d` | 102 μs |
 | **Isolated reasoning** | `BIND CONTEXT "session"` ... `DISCARD CONTEXT "session"` | 72 μs |
+| **Scheduled maintenance** | `SYS CRON ADD "expire" SCHEDULE "0 * * * *" QUERY "SYS EXPIRE"` | persistent |
+| **Activity log** | `SYS LOG LIMIT 20` / `SYS LOG TRACE "session-42"` | queryable |
+| **Memory safety** | `SYS EVICT` (emergency eviction when approaching ceiling) | auto |
+| **Thread-safe access** | `GraphStore(threaded=True)` + `submit_background()` | zero-lock |
 | **Point lookup** | `NODE "memory:42"` | 4 μs |
 
 ## 🏗️ Six Engines
@@ -51,7 +56,7 @@ Six engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vect
 pip install graphstore
 ```
 
-Core includes: numpy, scipy, lark, usearch, model2vec (~85 MB)
+Core includes: numpy, scipy, lark, usearch, model2vec, croniter, msgspec (~90 MB)
 
 <details>
 <summary><strong>Opt-in upgrades</strong></summary>
@@ -243,6 +248,105 @@ AGGREGATE NODES WHERE kind = "memory"
 </details>
 
 <details>
+<summary><strong>Hybrid Retrieval</strong> - REMEMBER fuses vector + BM25 + recency in one call</summary>
+
+```sql
+-- Single command for agent context retrieval
+REMEMBER "quantum entanglement" LIMIT 10
+REMEMBER "deployment architecture" LIMIT 5 WHERE kind = "fact"
+
+-- Results include score breakdown for transparency
+-- _remember_score, _vector_sim, _bm25_score, _recency_score
+```
+
+Scoring: `0.4 * vector_similarity + 0.3 * bm25_normalized + 0.3 * recency_decay`
+
+</details>
+
+<details>
+<summary><strong>CRON Scheduler</strong> - persistent scheduled jobs with full cron syntax</summary>
+
+```sql
+SYS CRON ADD "expire-ttl" SCHEDULE "0 * * * *" QUERY "SYS EXPIRE"
+SYS CRON ADD "nightly-optimize" SCHEDULE "0 3 * * *" QUERY "SYS OPTIMIZE"
+SYS CRON ADD "reembed-weekly" SCHEDULE "0 2 * * 0" QUERY "SYS REEMBED"
+SYS CRON ADD "vault-sync" SCHEDULE "*/5 * * * *" QUERY "VAULT SYNC"
+SYS CRON ADD "health-check" SCHEDULE "@hourly" QUERY "SYS HEALTH"
+
+SYS CRON LIST            -- show all jobs with next_run, run_count, errors
+SYS CRON DISABLE "job"   -- pause without deleting
+SYS CRON RUN "job"       -- manual trigger for testing
+SYS CRON DELETE "job"
+```
+
+Full cron expressions: `*/15 9-17 * * MON-FRI`, `@hourly`, `@daily`, `@weekly`. Jobs persist in SQLite and survive restarts. Requires `threaded=True`.
+
+</details>
+
+<details>
+<summary><strong>Intelligent Logging</strong> - auto-tagged, traceable, queryable</summary>
+
+```sql
+-- Every query is auto-tagged: read, write, intelligence, belief, ingest, vault, system
+SYS LOG LIMIT 20
+SYS LOG TRACE "research-session-42"    -- find all queries in a trace
+SYS LOG SINCE "2026-03-24" LIMIT 50
+SYS LOG WHERE tag = "intelligence"     -- filter by semantic tag
+```
+
+```python
+# Trace binding for causality tracking
+gs.bind_trace("research-42")
+gs.execute('RECALL FROM "quantum" DEPTH 3')
+gs.execute('CREATE NODE "insight" kind = "fact" ...')
+gs.discard_trace()
+# Both queries tagged with trace_id = "research-42"
+
+# Structured events via Python logging (pipe anywhere)
+import logging
+logging.getLogger("graphstore.events").addHandler(your_handler)
+```
+
+REST API: `GET /api/logs?tag=intelligence&limit=20`
+
+</details>
+
+<details>
+<summary><strong>Thread Safety</strong> - multi-agent access via command queue</summary>
+
+```python
+gs = GraphStore(path="./brain", threaded=True)
+
+# Multiple agents can call execute() from different threads
+# All serialized through a priority queue (interactive > background)
+result = gs.execute('RECALL FROM "cue" DEPTH 3')  # blocks, returns Result
+
+# Background maintenance doesn't block interactive queries
+future = gs.submit_background('SYS OPTIMIZE')
+future = gs.submit_background('SYS CONNECT')
+```
+
+</details>
+
+<details>
+<summary><strong>Memory Safety</strong> - accurate accounting + emergency eviction for Docker</summary>
+
+```sql
+SYS STATUS     -- includes memory_measured breakdown (real component sizes)
+SYS HEALTH     -- memory_utilization ratio (actual/ceiling)
+SYS EVICT      -- emergency eviction of oldest non-protected nodes
+```
+
+```python
+# For Docker containers with fixed RAM
+gs = GraphStore(path="./brain", ceiling_mb=256, threaded=True)
+# Auto-eviction triggers at 90% ceiling via health checks
+# Protected kinds (schema, config, system) are never evicted
+```
+
+</details>
+
+<details>
 <summary><strong>Context Isolation</strong></summary>
 
 ```sql
@@ -298,6 +402,7 @@ RECALL FROM "concept:x" DEPTH 3 LIMIT 10
 SIMILAR TO "search text" LIMIT 10
 SIMILAR TO [0.1, 0.2, ...] LIMIT 10 WHERE kind = "memory"
 LEXICAL SEARCH "exact phrase" LIMIT 10
+REMEMBER "hybrid query" LIMIT 10 WHERE kind = "fact"
 WHAT IF RETRACT "belief:x"
 ```
 
@@ -349,6 +454,11 @@ SYS RETAIN
 SYS CHECKPOINT / SYS REBUILD INDICES / SYS CLEAR CACHE
 SYS EXPLAIN TRAVERSE FROM "a" DEPTH 5
 SYS SLOW QUERIES LIMIT 10 / SYS FAILED QUERIES LIMIT 10
+SYS LOG LIMIT 20 / SYS LOG TRACE "id" / SYS LOG SINCE "ISO-8601"
+SYS CRON ADD "name" SCHEDULE "0 * * * *" QUERY "SYS EXPIRE"
+SYS CRON DELETE / ENABLE / DISABLE / LIST / RUN "name"
+SYS EVICT
+SYS HEALTH / SYS OPTIMIZE
 ```
 
 </details>
@@ -394,6 +504,7 @@ g = GraphStore(
     path="./brain",          # persistence directory (None = in-memory)
     ceiling_mb=256,          # graph memory ceiling
     embedder="default",      # "default" (model2vec) or custom Embedder
+    threaded=True,           # thread-safe command queue + cron scheduler
     voice=False,             # True to enable STT/TTS (opt-in)
     vault="./notes",         # markdown vault directory (None = disabled)
     retention={              # blob lifecycle policy
@@ -412,7 +523,10 @@ g = GraphStore(
 ```
 graphstore/
 ├── __init__.py               # Thin re-exports
-├── graphstore.py             # GraphStore facade + WAL + routing
+├── graphstore.py             # GraphStore facade + routing
+├── wal.py                    # WALManager: append, replay, checkpoint, query log
+├── cron.py                   # CronScheduler: persistent jobs, daemon timer
+├── config.py                 # Typed config via msgspec Structs
 ├── core/                     # Graph engine
 │   ├── store.py              # CoreStore: columnar node CRUD
 │   ├── columns.py            # ColumnStore: typed numpy arrays
@@ -420,19 +534,32 @@ graphstore/
 │   ├── strings.py            # StringTable: string interning
 │   ├── schema.py             # SchemaRegistry + EMBED field
 │   ├── path.py               # BFS, Dijkstra, common neighbors
-│   ├── memory.py             # Ceiling enforcement
+│   ├── memory.py             # Accurate memory measurement + ceiling
+│   ├── optimizer.py           # Self-balancing: compact, GC, evict
+│   ├── scheduler.py          # OptimizerScheduler: health + auto-optimize
+│   ├── queue.py              # CommandQueue: thread-safe priority queue
 │   ├── types.py              # Result, Edge dataclasses
 │   └── errors.py             # Error hierarchy
 ├── dsl/                      # Query language
 │   ├── grammar.lark          # Lark LALR(1) grammar
 │   ├── parser.py             # Parser + LRU cache
 │   ├── transformer.py        # Parse tree → AST
-│   ├── ast_nodes.py          # 60+ AST dataclasses
+│   ├── ast_nodes.py          # 70+ AST dataclasses
+│   ├── tagger.py             # Auto-tag inference for log layer
 │   ├── executor_base.py      # Shared: live_mask, eval_where, column filters
-│   ├── executor_reads.py     # NODES, RECALL, SIMILAR TO, AGGREGATE, MATCH
-│   ├── executor_writes.py    # CREATE, ASSERT, RETRACT, INGEST, MERGE, BATCH
-│   ├── executor_system.py    # SYS commands
-│   ├── executor.py           # Unified dispatcher
+│   ├── handlers/             # Auto-dispatch handler mixins
+│   │   ├── nodes.py          # NODE, NODES, COUNT
+│   │   ├── edges.py          # EDGES, CREATE/DELETE EDGE
+│   │   ├── traversal.py      # TRAVERSE, PATH, ANCESTORS, DESCENDANTS
+│   │   ├── pattern.py        # MATCH pattern queries
+│   │   ├── aggregation.py    # AGGREGATE GROUP BY
+│   │   ├── intelligence.py   # RECALL, SIMILAR, LEXICAL, REMEMBER
+│   │   ├── beliefs.py        # ASSERT, RETRACT, PROPAGATE
+│   │   ├── mutations.py      # CREATE/UPDATE/DELETE/MERGE/BATCH
+│   │   ├── context.py        # BIND/DISCARD CONTEXT
+│   │   └── ingest.py         # INGEST, CONNECT NODE
+│   ├── executor.py           # Unified dispatcher (MRO from handlers)
+│   ├── executor_system.py    # SYS + CRON + LOG commands
 │   └── cost_estimator.py     # Frontier-based cost rejection
 ├── embedding/                # Text → vectors
 │   ├── base.py               # Embedder protocol
