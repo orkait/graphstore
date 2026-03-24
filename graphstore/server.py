@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import time as _time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -16,13 +20,65 @@ from graphstore.core.errors import GraphStoreError
 
 app = FastAPI(title="graphstore playground")
 
+_CORS_ORIGINS = os.environ.get("GRAPHSTORE_CORS_ORIGINS", "*").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Auth + Rate Limiting Middleware ---
+
+_AUTH_TOKEN = os.environ.get("GRAPHSTORE_AUTH_TOKEN")
+_RATE_LIMIT_RPM = int(os.environ.get("GRAPHSTORE_RATE_LIMIT_RPM", "120"))
+
+_rate_buckets: dict[str, list[float]] = defaultdict(list)
+_rate_cleanup_counter = 0
+
+
+def _check_rate_limit(client_ip: str) -> bool:
+    """Returns True if request is allowed."""
+    global _rate_cleanup_counter
+    now = _time.time()
+    window = 60.0
+    bucket = _rate_buckets[client_ip]
+    _rate_buckets[client_ip] = [t for t in bucket if now - t < window]
+    if len(_rate_buckets[client_ip]) >= _RATE_LIMIT_RPM:
+        return False
+    _rate_buckets[client_ip].append(now)
+
+    _rate_cleanup_counter += 1
+    if _rate_cleanup_counter % 100 == 0:
+        stale = [ip for ip, ts in _rate_buckets.items() if not ts or now - max(ts) > window]
+        for ip in stale:
+            del _rate_buckets[ip]
+
+    return True
+
+
+@app.middleware("http")
+async def auth_and_rate_limit(request: Request, call_next):
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
+
+    if _AUTH_TOKEN is not None:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer ") or auth_header[7:] != _AUTH_TOKEN:
+            return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        return JSONResponse(
+            status_code=429,
+            content={"error": "Rate limit exceeded"},
+            headers={"Retry-After": "60"},
+        )
+
+    return await call_next(request)
+
 
 # ---------------------------------------------------------------------------
 # Module-level store (created lazily)
@@ -30,8 +86,6 @@ app.add_middleware(
 
 _store: GraphStore | None = None
 
-
-import os
 
 def _get_store() -> GraphStore:
     global _store

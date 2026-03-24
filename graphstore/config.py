@@ -55,6 +55,8 @@ class RetentionConfig(msgspec.Struct, frozen=True):
 class ServerConfig(msgspec.Struct, frozen=True):
     cors_origins: list[str] = msgspec.field(default_factory=lambda: ["*"])
     ingest_root: str | None = None
+    auth_token: str | None = None
+    rate_limit_rpm: int = 120
 
 
 class GraphStoreConfig(msgspec.Struct, frozen=True):
