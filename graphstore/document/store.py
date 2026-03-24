@@ -9,8 +9,9 @@ from pathlib import Path
 class DocumentStore:
     """SQLite-backed storage for raw documents. Always on disk, never in RAM."""
 
-    def __init__(self, db_path: str | None = None):
+    def __init__(self, db_path: str | None = None, fts_tokenizer: str = "porter unicode61"):
         """Initialize with a file path. If None, uses a temp file (cleaned on close)."""
+        self._fts_tokenizer = fts_tokenizer
         if db_path:
             self._path = db_path
             self._conn = sqlite3.connect(db_path)
@@ -57,9 +58,9 @@ class DocumentStore:
                 description TEXT
             );
         """)
-        self._conn.execute("""
+        self._conn.execute(f"""
             CREATE VIRTUAL TABLE IF NOT EXISTS doc_fts
-            USING fts5(summary, tokenize='porter unicode61')
+            USING fts5(summary, tokenize='{self._fts_tokenizer}')
         """)
 
     # --- Documents ---
