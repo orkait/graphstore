@@ -173,3 +173,27 @@ def test_graphstore_default_not_threaded():
     result = gs.execute('CREATE NODE "nothread" kind = "item"')
     assert result.kind == "node"
     gs.close()
+
+
+def test_background_failure_logs_warning(caplog):
+    """Failed background jobs should log a warning."""
+    import logging
+    import time
+
+    def failing_execute(query):
+        if query == "fail_me":
+            raise ValueError("intentional failure")
+        return query
+
+    q = CommandQueue(failing_execute)
+    with caplog.at_level(logging.WARNING, logger="graphstore.core.queue"):
+        future = q.submit_background("fail_me")
+        try:
+            future.result(timeout=5)
+        except ValueError:
+            pass
+        # Give the done_callback a moment to fire after set_exception returns.
+        time.sleep(0.05)
+    assert any("background job failed" in r.message for r in caplog.records), \
+        f"Expected warning log, got: {[r.message for r in caplog.records]}"
+    q.shutdown()

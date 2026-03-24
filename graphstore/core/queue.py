@@ -7,10 +7,13 @@ queries complete before background refinement jobs.
 
 from __future__ import annotations
 
+import logging
 import threading
 import queue
 from concurrent.futures import Future
 from typing import Callable, Any
+
+logger = logging.getLogger(__name__)
 
 INTERACTIVE = 0
 BACKGROUND = 1
@@ -45,12 +48,24 @@ class CommandQueue:
         return future.result()
 
     def submit_background(self, query: str) -> Future:
-        """Submit background query, return Future immediately."""
+        """Submit background query, return Future immediately.
+
+        Failed background jobs are logged at WARNING level even if
+        the caller never calls .result() on the returned Future.
+        """
         if not self._running:
             raise RuntimeError("CommandQueue is shut down")
         future: Future = Future()
+        future.add_done_callback(lambda f: self._on_background_done(f, query))
         self._queue.put((BACKGROUND, self._next_seq(), query, future))
         return future
+
+    @staticmethod
+    def _on_background_done(future: Future, query: str) -> None:
+        """Log failed background jobs."""
+        exc = future.exception()
+        if exc is not None:
+            logger.warning("background job failed: %s — %s: %s", query, type(exc).__name__, exc)
 
     def shutdown(self) -> None:
         """Stop the worker thread. Idempotent."""
