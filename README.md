@@ -22,7 +22,7 @@ Six engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vect
 
 | Need | graphstore solves it | Speed (100k nodes) |
 |---|---|---|
-| **Hybrid recall** | `REMEMBER "Paris travel" LIMIT 10` (vector + BM25 + recency fused) | ~200 μs |
+| **Hybrid recall** | `REMEMBER "Paris travel" TOKENS 4000` (5-signal fusion with token budget) | ~200 μs |
 | **Recall by meaning** | `SIMILAR TO "Paris travel" LIMIT 10` | 127 μs |
 | **Recall by association** | `RECALL FROM "concept:paris" DEPTH 3` | 983 μs |
 | **Memory summarization** | `AGGREGATE NODES GROUP BY topic SELECT COUNT(), AVG(importance)` | 788 μs |
@@ -80,26 +80,31 @@ graphstore install-voice
 ```python
 from graphstore import GraphStore
 
-g = GraphStore(path="./brain")
+g = GraphStore(path="./brain", threaded=True)
 
 # Store memories
 g.execute('CREATE NODE "memory:paris" kind = "memory" topic = "travel" importance = 0.9')
 g.execute('CREATE NODE "memory:eiffel" kind = "memory" topic = "travel" importance = 0.8')
 g.execute('CREATE EDGE "memory:paris" -> "memory:eiffel" kind = "associated"')
 
-# Recall by meaning (vector similarity)
-result = g.execute('SIMILAR TO "European architecture" LIMIT 5')
+# Hybrid recall - best 4000 tokens of context (vector + BM25 + recency + confidence)
+result = g.execute('REMEMBER "European architecture" TOKENS 4000')
 
-# Recall by association (graph activation)
+# Recall by association (spreading activation with decay)
 result = g.execute('RECALL FROM "memory:paris" DEPTH 2 LIMIT 10')
 
-# Ingest a document (auto-parse, chunk, embed, wire)
+# Ingest a document (auto-parse, chunk, embed full text, wire)
 g.execute('INGEST "report.pdf" AS "doc:q3" KIND "report"')
 g.execute('SYS CONNECT')  # auto-wire similar chunks across documents
 
-# Search document contents by meaning
+# Search by meaning or keywords
 result = g.execute('SIMILAR TO "Q3 revenue growth" LIMIT 5')
+result = g.execute('LEXICAL SEARCH "quarterly revenue" LIMIT 5')
 doc = g.execute('NODE "doc:q3:chunk:3" WITH DOCUMENT')  # fetch full text
+
+# Schedule maintenance (runs in background, doesn't block queries)
+g.execute('SYS CRON ADD "cleanup" SCHEDULE "@hourly" QUERY "SYS EXPIRE"')
+g.execute('SYS CRON ADD "optimize" SCHEDULE "0 3 * * *" QUERY "SYS OPTIMIZE"')
 ```
 
 ## 🧠 Agent Memory Features
@@ -248,18 +253,30 @@ AGGREGATE NODES WHERE kind = "memory"
 </details>
 
 <details>
-<summary><strong>Hybrid Retrieval</strong> - REMEMBER fuses vector + BM25 + recency in one call</summary>
+<summary><strong>Hybrid Retrieval</strong> - REMEMBER fuses 5 signals with token budget</summary>
 
 ```sql
 -- Single command for agent context retrieval
-REMEMBER "quantum entanglement" LIMIT 10
+REMEMBER "quantum entanglement" TOKENS 4000
 REMEMBER "deployment architecture" LIMIT 5 WHERE kind = "fact"
+REMEMBER "project status" TOKENS 8000 WHERE kind = "memory"
 
--- Results include score breakdown for transparency
--- _remember_score, _vector_sim, _bm25_score, _recency_score
+-- Results include full score breakdown
+-- _remember_score, _vector_sim, _bm25_score, _recency_score, _confidence
 ```
 
-Scoring: `0.4 * vector_similarity + 0.3 * bm25_normalized + 0.3 * recency_decay`
+5-signal scoring (configurable via `graphstore.json`):
+```
+0.30 * vector_similarity    -- cosine distance from embedder
+0.20 * bm25_normalized      -- full-text BM25 on chunk content
+0.15 * recency              -- exp(-age_days / 30)
+0.20 * confidence           -- from __confidence__ column (beliefs)
+0.15 * recall_frequency     -- how often this memory was retrieved before
+```
+
+`TOKENS N` fills up to N tokens (estimated as `len(text) // 4`) instead of returning a fixed count. Agent gets exactly the right context budget.
+
+Retrieval feedback: REMEMBER auto-increments `__recall_count__` and `__last_recalled_at__` on returned nodes. Frequently useful memories become easier to find.
 
 </details>
 
@@ -402,7 +419,8 @@ RECALL FROM "concept:x" DEPTH 3 LIMIT 10
 SIMILAR TO "search text" LIMIT 10
 SIMILAR TO [0.1, 0.2, ...] LIMIT 10 WHERE kind = "memory"
 LEXICAL SEARCH "exact phrase" LIMIT 10
-REMEMBER "hybrid query" LIMIT 10 WHERE kind = "fact"
+REMEMBER "hybrid query" TOKENS 4000 WHERE kind = "fact"
+REMEMBER "query" LIMIT 10
 WHAT IF RETRACT "belief:x"
 ```
 
@@ -513,6 +531,61 @@ g = GraphStore(
         "blob_delete_days": 365,
     },
 )
+```
+
+<details>
+<summary><strong>Full graphstore.json</strong> - 54 fields, all with defaults</summary>
+
+```json
+{
+  "core": {
+    "ceiling_mb": 256,
+    "initial_capacity": 1024,
+    "compact_threshold": 0.2,
+    "string_gc_threshold": 3.0,
+    "protected_kinds": ["schema", "config", "system"]
+  },
+  "vector": {
+    "embedder": "default",
+    "similarity_threshold": 0.85,
+    "search_oversample": 5,
+    "model2vec_model": "minishlab/M2V_base_output"
+  },
+  "document": {
+    "chunk_max_size": 2000,
+    "chunk_overlap": 50,
+    "summary_max_length": 200,
+    "fts_full_text": true,
+    "vision_model": "smolvlm2:2.2b"
+  },
+  "dsl": {
+    "cost_threshold": 100000,
+    "plan_cache_size": 256,
+    "recall_decay": 0.7,
+    "remember_weights": [0.30, 0.20, 0.15, 0.20, 0.15],
+    "auto_optimize": false,
+    "optimize_interval": 500
+  },
+  "persistence": {
+    "wal_hard_limit": 100000,
+    "auto_checkpoint_threshold": 50000,
+    "log_retention_days": 7
+  },
+  "retention": {
+    "blob_warm_days": 30,
+    "blob_archive_days": 90,
+    "blob_delete_days": 365
+  },
+  "server": {
+    "auth_token": null,
+    "rate_limit_rpm": 120,
+    "max_query_length": 10000,
+    "max_batch_size": 1000
+  }
+}
+```
+
+</details>
 ```
 
 ## 🏗️ Architecture
