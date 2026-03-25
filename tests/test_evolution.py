@@ -532,25 +532,97 @@ def test_remember_weights_normalization():
     assert abs(sum(weights) - 1.0) < 0.001, f"Weights don't sum to 1: {weights}"
 
 
-def test_run_action_queued():
-    """Test 20: THEN RUN actions are not executed during eval loop (queued after)."""
+def test_run_action_does_not_raise():
+    """Test 20: THEN RUN never raises — bad DSL fails gracefully."""
     db = GraphStore(ceiling_mb=100, embedder=None)
 
     db.execute(
-        'SYS EVOLVE RULE "runner" WHEN memory_pct >= 0 THEN RUN OPTIMIZE COOLDOWN 10'
+        'SYS EVOLVE RULE "runner" WHEN memory_pct >= 0 THEN RUN SYS OPTIMIZE COOLDOWN 10'
     )
 
     if not hasattr(db, "_evolution_engine"):
         pytest.skip("EvolutionEngine not wired yet")
 
     engine = db._evolution_engine
-
-    # The engine should not raise even with RUN actions
     signals = engine.compute_signals()
     try:
         engine.evaluate(signals)
     except Exception as e:
         pytest.fail(f"evaluate() raised with RUN action: {e}")
+
+
+def test_run_action_executes_dsl():
+    """THEN RUN dispatches valid DSL and reports status 'applied'."""
+    db = GraphStore(ceiling_mb=100, embedder=None)
+
+    db.execute(
+        'SYS EVOLVE RULE "run-stats" WHEN memory_pct >= 0 THEN RUN SYS STATS COOLDOWN 10'
+    )
+
+    if not hasattr(db, "_evolution_engine"):
+        pytest.skip("EvolutionEngine not wired yet")
+
+    engine = db._evolution_engine
+    signals = engine.compute_signals()
+    events = engine.evaluate(signals)
+
+    run_actions = [a for e in events for a in e["actions"] if a["kind"] == "run"]
+    assert len(run_actions) == 1
+    assert run_actions[0]["status"] == "applied"
+
+
+def test_run_action_bad_dsl_graceful():
+    """THEN RUN with unparseable DSL fails gracefully — status 'failed:...' not a crash."""
+    db = GraphStore(ceiling_mb=100, embedder=None)
+
+    db.execute(
+        'SYS EVOLVE RULE "bad-run" WHEN memory_pct >= 0 THEN RUN INVALID_CMD_XYZ COOLDOWN 10'
+    )
+
+    if not hasattr(db, "_evolution_engine"):
+        pytest.skip("EvolutionEngine not wired yet")
+
+    engine = db._evolution_engine
+    signals = engine.compute_signals()
+
+    events = engine.evaluate(signals)
+
+    run_actions = [a for e in events for a in e["actions"] if a["kind"] == "run"]
+    assert len(run_actions) == 1
+    assert run_actions[0]["status"].startswith("failed:")
+
+
+def test_run_action_status_in_history(tmp_path):
+    """History entry records final RUN status ('applied') not 'pending'."""
+    db_dir = tmp_path / "run_hist"
+    db_dir.mkdir()
+    db = GraphStore(path=str(db_dir), embedder=None)
+    db.execute(
+        'SYS EVOLVE RULE "run-hist" WHEN memory_pct >= 0 THEN RUN SYS STATS COOLDOWN 10'
+    )
+
+    engine = db._evolution_engine
+    signals = engine.compute_signals()
+    engine.evaluate(signals)
+
+    hist = db.execute("SYS EVOLVE HISTORY LIMIT 1")
+    assert hist.data
+    run_actions = [a for a in hist.data[0]["actions"] if a["kind"] == "run"]
+    assert run_actions[0]["status"] == "applied"
+    db.close()
+
+
+def test_recall_misses_signal_exists():
+    """recall_misses is a known signal and returned by compute_signals()."""
+    from graphstore.evolve import KNOWN_SIGNALS
+
+    assert "recall_misses" in KNOWN_SIGNALS
+
+    db = GraphStore(ceiling_mb=100, embedder=None)
+    engine = db._evolution_engine
+    signals = engine.compute_signals()
+    assert "recall_misses" in signals
+    assert isinstance(signals["recall_misses"], (int, float))
 
 
 def test_reentrancy_guard():
