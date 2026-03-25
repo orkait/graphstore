@@ -80,6 +80,13 @@ class ServerConfig(msgspec.Struct, frozen=True):
     max_batch_size: int = 1000
 
 
+class EvolutionConfig(msgspec.Struct, frozen=True):
+    similarity_buffer_size: int = 100
+    max_rules: int = 50
+    min_cooldown: int = 10
+    history_retention: int = 1000
+
+
 class GraphStoreConfig(msgspec.Struct, frozen=True):
     core: CoreConfig = msgspec.field(default_factory=CoreConfig)
     vector: VectorConfig = msgspec.field(default_factory=VectorConfig)
@@ -89,6 +96,7 @@ class GraphStoreConfig(msgspec.Struct, frozen=True):
     persistence: PersistenceConfig = msgspec.field(default_factory=PersistenceConfig)
     retention: RetentionConfig = msgspec.field(default_factory=RetentionConfig)
     server: ServerConfig = msgspec.field(default_factory=ServerConfig)
+    evolution: EvolutionConfig = msgspec.field(default_factory=EvolutionConfig)
 
 
 _decoder = msgspec.json.Decoder(GraphStoreConfig)

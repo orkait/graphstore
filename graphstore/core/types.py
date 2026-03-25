@@ -23,15 +23,19 @@ class Result:
     data: Any              # varies by kind
     count: int             # number of items in data
     elapsed_us: int = 0    # execution time in microseconds
+    meta: dict = field(default_factory=dict)  # evolution events, future extensions
 
     def to_dict(self) -> dict:
         """JSON-serializable representation."""
-        return {
+        d = {
             "kind": self.kind,
             "data": self.data,
             "count": self.count,
             "elapsed_us": self.elapsed_us,
         }
+        if self.meta:
+            d["meta"] = self.meta
+        return d
 
     def to_json(self) -> str:
         """Compact JSON string."""
