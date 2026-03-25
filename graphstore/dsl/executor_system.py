@@ -82,6 +82,7 @@ class SystemExecutor:
         self._document_store = document_store
         self._retention = retention or {}
         self._cron = cron
+        self._eviction_target_ratio = 0.8
         self._start_time = time.time()
 
     def execute(self, ast) -> Result:
@@ -886,17 +887,16 @@ class SystemExecutor:
 
     def _evict(self, q: SysEvict) -> Result:
         """SYS EVICT: emergency eviction of oldest nodes to free memory."""
-        from graphstore.core.optimizer import evict_oldest
-        from graphstore.core.memory import measure
+        from graphstore.core.optimizer import evict_by_bytes, evict_by_count
 
-        current = measure(self.store, self._vector_store, self._document_store)
-        # Evict to 80% of ceiling
-        target = int(self.store._ceiling_bytes * 0.8)
         if q.limit:
             # LIMIT overrides - evict exactly N nodes
-            target = 0  # will evict up to limit
-
-        data = evict_oldest(self.store, self._vector_store, self._document_store, target_bytes=target)
+            data = evict_by_count(self.store, q.limit.value, self._vector_store, self._document_store)
+        else:
+            # Evict to config-specified ratio of ceiling
+            target = int(self.store._ceiling_bytes * self._eviction_target_ratio)
+            data = evict_by_bytes(self.store, target, self._vector_store, self._document_store)
+            
         return Result(kind="ok", data=data, count=data["evicted"])
 
     def _log(self, q: SysLog) -> Result:

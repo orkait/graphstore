@@ -148,6 +148,7 @@ class BatchRequest(BaseModel):
 class ConfigRequest(BaseModel):
     ceiling_mb: int | None = None
     cost_threshold: int | None = None
+    eviction_target_ratio: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -221,32 +222,8 @@ def get_graph():
 def reset():
     """Reset the in-memory graph. For persistent DBs, wipes memory and WAL
     but preserves the script metadata so Run All can repopulate cleanly."""
-    global _store
-    db_path = os.environ.get("GRAPHSTORE_DB_PATH")
-    if db_path:
-        # Preserve the script before wiping
-        old_script = _store.get_script() if _store else None
-        # Close old store
-        if _store and _store._conn:
-            _store._conn.close()
-            _store._conn = None
-        # Wipe the DB file contents but keep the file
-        from graphstore.persistence.database import open_database, set_metadata
-        db_file = Path(db_path) / "graphstore.db"
-        conn = open_database(db_file)
-        conn.execute("DELETE FROM blobs")
-        conn.execute("DELETE FROM wal")
-        conn.execute("DELETE FROM query_log")
-        conn.execute("DELETE FROM metadata")
-        conn.commit()
-        # Restore script
-        if old_script:
-            set_metadata(conn, "playground_script", old_script)
-        conn.close()
-        # Create a fresh store from the now-empty DB
-        _store = GraphStore(path=db_path)
-    else:
-        _store = GraphStore()
+    store = _get_store()
+    store.reset_store(preserve_config=True)
     return {"ok": True}
 
 
@@ -267,10 +244,17 @@ def put_script(req: ExecuteRequest):
 @app.post("/api/config")
 def config(req: ConfigRequest):
     store = _get_store()
+    changes = {}
     if req.ceiling_mb is not None:
-        store.ceiling_mb = req.ceiling_mb
+        changes["ceiling_mb"] = req.ceiling_mb
     if req.cost_threshold is not None:
-        store.cost_threshold = req.cost_threshold
+        changes["cost_threshold"] = req.cost_threshold
+    if req.eviction_target_ratio is not None:
+        changes["eviction_target_ratio"] = req.eviction_target_ratio
+    
+    if changes:
+        store.update_runtime_config(changes)
+        
     return {"ok": True}
 
 
