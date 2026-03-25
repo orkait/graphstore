@@ -10,6 +10,6 @@ docs/superpowers/
 logs/
 zen-graph-db/
 .worktrees/
-tests/fixtures/
+# tests/fixtures/ is now tracked (text/images directly, PDF/voice via Git LFS)
 .agents/*
 .claude/*
