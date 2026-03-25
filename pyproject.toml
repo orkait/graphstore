@@ -58,6 +58,9 @@ playground = [
     "fastapi>=0.100",
     "uvicorn>=0.20",
 ]
+voice = [
+    "sounddevice>=0.4",
+]
 ingest-pro = [
     "docling>=2.0",
     "openai>=1.0",
