@@ -173,3 +173,137 @@ class TestVoiceProtocols:
             # Missing start_listening, stop_listening, is_listening
 
         assert not isinstance(IncompleteSTT(), STTProtocol)
+
+
+class TestGraphStoreInjection:
+    def test_custom_ingestor_used_for_extension(self, tmp_path):
+        from graphstore import GraphStore
+        from graphstore.ingest.base import Ingestor, IngestResult
+
+        called = []
+
+        class TrackingIngestor(Ingestor):
+            name = "tracker"
+            supported_extensions = ["txt"]
+
+            def convert(self, file_path: str, **kwargs) -> IngestResult:
+                called.append(file_path)
+                return IngestResult(markdown="# tracked\ncontent", parser_used="tracker")
+
+        f = tmp_path / "notes.txt"
+        f.write_text("# Hello\nworld")
+
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None,
+                       ingestors={"txt": TrackingIngestor()})
+        g.execute(f'INGEST "{f}" AS "doc:t1"')
+        g.close()
+
+        assert len(called) == 1
+
+    def test_custom_chunker_used(self, tmp_path):
+        from graphstore import GraphStore
+        from graphstore.ingest.base import Chunk
+
+        chunk_calls = []
+
+        class CountingChunker:
+            def chunk(self, text: str, **kwargs):
+                chunk_calls.append(text)
+                return [Chunk(text=text, summary=text[:50], index=0)]
+
+        f = tmp_path / "doc.txt"
+        f.write_text("# Title\nSome content here.")
+
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None,
+                       chunker=CountingChunker())
+        g.execute(f'INGEST "{f}" AS "doc:c1"')
+        g.close()
+
+        assert len(chunk_calls) >= 1
+
+    def test_custom_tts_used_by_speak(self, tmp_path):
+        from graphstore import GraphStore
+
+        spoken = []
+
+        class StubTTS:
+            def speak(self, text: str) -> None:
+                spoken.append(text)
+            def synthesize(self, text: str) -> bytes:
+                return b""
+
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None,
+                       tts=StubTTS(), voice=True)
+        g.speak("hello world")
+        g.close()
+
+        assert spoken == ["hello world"]
+
+    def test_custom_stt_used_by_listen(self, tmp_path):
+        from graphstore import GraphStore
+
+        class StubSTT:
+            def transcribe_file(self, path: str) -> str:
+                return "hello"
+            def start_listening(self, on_text) -> None:
+                on_text("hello from stub")  # synchronous stub
+            def stop_listening(self) -> None:
+                pass
+            @property
+            def is_listening(self) -> bool:
+                return False
+
+        received = []
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None,
+                       stt=StubSTT(), voice=True)
+        g.listen(on_text=lambda t: received.append(t))
+        g.stop_listening()
+        g.close()
+
+        assert received == ["hello from stub"]
+
+    def test_default_path_preserved_without_ingestors(self, tmp_path):
+        """No ingestors= passed → existing router path still active (no regression)."""
+        from graphstore import GraphStore
+
+        f = tmp_path / "notes.txt"
+        f.write_text("# Hello\nworld")
+
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None)
+        result = g.execute(f'INGEST "{f}" AS "doc:default"')
+        # router.py fast-paths .txt/.md as "direct"
+        assert result.data["parser"] in ("markitdown", "direct")
+        g.close()
+
+    def test_custom_tts_wins_over_voice_true(self, tmp_path, monkeypatch):
+        """When tts= and voice=True are both given, custom tts wins and PiperTTS is never instantiated."""
+        from graphstore import GraphStore
+        from graphstore.voice import tts as tts_module
+
+        piper_init_called = []
+
+        class FakePiperTTS:
+            def __init__(self, *a, **kw):
+                piper_init_called.append(True)
+            def speak(self, text: str) -> None:
+                pass
+            def synthesize(self, text: str) -> bytes:
+                return b""
+
+        monkeypatch.setattr(tts_module, "PiperTTS", FakePiperTTS, raising=False)
+
+        spoken = []
+
+        class StubTTS:
+            def speak(self, text: str) -> None:
+                spoken.append(text)
+            def synthesize(self, text: str) -> bytes:
+                return b""
+
+        g = GraphStore(path=str(tmp_path / "db"), embedder=None,
+                       tts=StubTTS(), voice=True)
+        g.speak("priority test")
+        g.close()
+
+        assert spoken == ["priority test"]
+        assert piper_init_called == [], "PiperTTS should NOT be instantiated when tts= is provided"
