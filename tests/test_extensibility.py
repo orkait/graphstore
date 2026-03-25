@@ -74,3 +74,102 @@ class TestIngestorRegistry:
         reg.register(_DummyIngestor())
         resolved = reg.resolve("report.pdf", using="dummy")
         assert resolved.name == "dummy"
+
+
+class TestChunkerProtocol:
+    def test_heading_chunker_implements_protocol(self):
+        from graphstore.voice.protocol import ChunkerProtocol
+        from graphstore.ingest.chunker import HeadingChunker
+        chunker = HeadingChunker()
+        assert isinstance(chunker, ChunkerProtocol)
+
+    def test_heading_chunker_chunks_text(self):
+        from graphstore.ingest.chunker import HeadingChunker
+        chunker = HeadingChunker()
+        chunks = chunker.chunk("# Heading\nsome text")
+        assert len(chunks) >= 1
+        assert chunks[0].heading == "Heading"
+
+    def test_heading_chunker_passes_kwargs(self):
+        from graphstore.ingest.chunker import HeadingChunker
+        chunker = HeadingChunker()
+        chunks = chunker.chunk("# H\n" + "word " * 1000, max_chunk_size=200)
+        assert len(chunks) > 1  # kwargs were honored
+
+    def test_custom_chunker_satisfies_protocol(self):
+        from graphstore.voice.protocol import ChunkerProtocol
+        from graphstore.ingest.base import Chunk
+
+        class SingleChunker:
+            def chunk(self, text: str, **kwargs):
+                return [Chunk(text=text, summary=text[:50], index=0)]
+
+        assert isinstance(SingleChunker(), ChunkerProtocol)
+
+    def test_object_without_chunk_method_fails_protocol(self):
+        from graphstore.voice.protocol import ChunkerProtocol
+
+        class NotAChunker:
+            pass
+
+        assert not isinstance(NotAChunker(), ChunkerProtocol)
+
+
+class TestVoiceProtocols:
+    def test_moonshine_stt_satisfies_protocol_when_installed(self):
+        pytest.importorskip("moonshine")
+        from graphstore.voice.protocol import STTProtocol
+        from graphstore.voice.stt import MoonshineSTT
+        stt = MoonshineSTT()
+        assert isinstance(stt, STTProtocol)
+
+    def test_piper_tts_satisfies_protocol_when_installed(self):
+        pytest.importorskip("piper")
+        from graphstore.voice.protocol import TTSProtocol
+        from graphstore.voice.tts import PiperTTS
+        tts = PiperTTS.__new__(PiperTTS)
+        assert isinstance(tts, TTSProtocol)
+
+    def test_custom_stt_satisfies_protocol(self):
+        from graphstore.voice.protocol import STTProtocol
+
+        class StubSTT:
+            def transcribe_file(self, audio_path: str) -> str:
+                return "hello"
+            def start_listening(self, on_text) -> None:
+                pass
+            def stop_listening(self) -> None:
+                pass
+            @property
+            def is_listening(self) -> bool:
+                return False
+
+        stt = StubSTT()
+        # runtime_checkable checks method names only (not signatures)
+        assert isinstance(stt, STTProtocol)
+        # Also verify callable contract
+        assert stt.transcribe_file("x") == "hello"
+        assert stt.is_listening is False
+
+    def test_custom_tts_satisfies_protocol(self):
+        from graphstore.voice.protocol import TTSProtocol
+
+        class StubTTS:
+            def speak(self, text: str) -> None:
+                pass
+            def synthesize(self, text: str) -> bytes:
+                return b""
+
+        tts = StubTTS()
+        assert isinstance(tts, TTSProtocol)
+        assert tts.synthesize("hi") == b""
+
+    def test_object_missing_methods_fails_stt_protocol(self):
+        from graphstore.voice.protocol import STTProtocol
+
+        class IncompleteSTT:
+            def transcribe_file(self, path: str) -> str:
+                return ""
+            # Missing start_listening, stop_listening, is_listening
+
+        assert not isinstance(IncompleteSTT(), STTProtocol)
