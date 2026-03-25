@@ -28,6 +28,14 @@ class WALManager:
         self._log_retention_days = log_retention_days
         self._vector_store = None  # set lazily via update_vector_store()
 
+    @property
+    def pending_count(self) -> int:
+        """Number of WAL entries not yet checkpointed."""
+        if self._conn is None:
+            return 0
+        row = self._conn.execute("SELECT COUNT(*) FROM wal").fetchone()
+        return row[0] if row else 0
+
     def update_vector_store(self, vs) -> None:
         """Keep vector store reference in sync (lazily created in GraphStore)."""
         self._vector_store = vs

@@ -183,6 +183,7 @@ class GraphStore:
                                                document_store=self._document_store,
                                                retention=retention_dict)
         self._sys_executor._eviction_target_ratio = cfg.core.eviction_target_ratio
+        # Evolution engine wired after engine is created (below)
 
         # Cron scheduler (requires threaded mode for background execution)
         self._cron: CronScheduler | None = None
@@ -199,7 +200,7 @@ class GraphStore:
         if self._path and self._conn:
             self._wal.replay()
 
-        # Optimizer scheduler
+        # Optimizer scheduler (evolution_engine wired after engine init below)
         self._optimizer = OptimizerScheduler(
             self._store, self._vector_store, self._document_store,
             auto_optimize=cfg.dsl.auto_optimize,
@@ -236,6 +237,26 @@ class GraphStore:
 
         # Trace binding for log layer
         self._active_trace: str | None = None
+
+        # Evolution layer counters and signal infrastructure
+        import collections
+        self._counters: dict = {
+            "execute_ok": 0,
+            "execute_err": 0,
+            "recall_hits": 0,
+            "recall_misses": 0,
+            "eviction_total": 0,
+        }
+        self._start_time: float = time.time()
+        self._similarity_buffer = collections.deque(maxlen=cfg.evolution.similarity_buffer_size)
+        self._last_evolution_events: list = []
+
+        # Evolution engine (Layer 5: metacognitive memory)
+        from graphstore.evolve import EvolutionEngine
+        self._evolution_engine = EvolutionEngine(self, self._conn, cfg.evolution)
+        # Wire into scheduler and sys_executor
+        self._optimizer._evolution_engine = self._evolution_engine
+        self._sys_executor._evolution_engine = self._evolution_engine
 
         # Command queue for thread-safe access
         self._threaded = threaded
@@ -307,6 +328,9 @@ class GraphStore:
                     if self._sys_executor._vector_store is not self._vector_store:
                         self._vector_store = self._sys_executor._vector_store
                         self._executor._vector_store = self._vector_store
+                        self._wal.update_vector_store(self._vector_store)
+                        if hasattr(self, '_optimizer'):
+                            self._optimizer.sync_vector_store(self._vector_store)
                     # Clear dirty flag after successful SYS REEMBED
                     if isinstance(ast, ast_nodes.SysReembed):
                         self._embedder_dirty = False
@@ -332,6 +356,12 @@ class GraphStore:
             self._wal.emit_event(query, elapsed, result.count, None,
                                  tag=tag, trace_id=trace_id, source=source, phase=phase)
 
+            self._counters["execute_ok"] += 1
+            # Attach pending evolution events to result.meta and clear
+            if self._last_evolution_events:
+                result.meta["evolution"] = list(self._last_evolution_events)
+                self._last_evolution_events.clear()
+
             return result
 
         except Exception as e:
@@ -340,6 +370,7 @@ class GraphStore:
                                 tag=tag, trace_id=trace_id, source=source, phase=phase)
             self._wal.emit_event(query, elapsed, 0, str(e),
                                  tag=tag, trace_id=trace_id, source=source, phase=phase)
+            self._counters["execute_err"] += 1
             raise
 
     def execute_batch(self, queries: list[str]) -> list[Result]:
@@ -442,9 +473,13 @@ class GraphStore:
         
         self._wal._store = self._store
         self._wal._schema = self._schema
-        self._wal._vector_store = self._vector_store
+        self._wal.update_vector_store(self._vector_store)
+        
+        self._optimizer._store = self._store
+        self._optimizer.sync_vector_store(self._vector_store)
         
         self.discard_trace()
+        self._embedder_dirty = False
         return Result(kind="ok", data={"reset": "memory"}, count=0)
 
     def reset_store(self, preserve_config: bool = True) -> Result:
@@ -479,8 +514,12 @@ class GraphStore:
         if self._store:
             self._store._active_context = None
         self.discard_trace()
+        self._embedder_dirty = False
+        self._current_source = 'user'
         if self._stt:
             self._stt.stop_listening()
+        if self._conn:
+            self._wal.maybe_auto_checkpoint()
         return Result(kind="ok", data={"reset": "session"}, count=0)
 
     def get_runtime_config(self) -> Result:

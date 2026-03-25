@@ -110,6 +110,14 @@ from graphstore.dsl.ast_nodes import (
     SysCronDisable,
     SysCronList,
     SysCronRun,
+    SysEvolveRule,
+    SysEvolveList,
+    SysEvolveShow,
+    SysEvolveEnable,
+    SysEvolveDisable,
+    SysEvolveDelete,
+    SysEvolveHistory,
+    SysEvolveReset,
 )
 
 
@@ -1036,6 +1044,109 @@ class DSLTransformer(Transformer):
 
     def cron_run(self, args):
         return SysCronRun(name=self._str(args[0]))
+
+    # --- Evolution commands ---
+    def sys_evolve(self, args):
+        return args[0]
+
+    def evolve_rule(self, args):
+        name = self._str(args[0])
+        conditions = []
+        actions = []
+        cooldown = 60
+        priority = 5
+        for a in args[1:]:
+            if isinstance(a, list) and a and isinstance(a[0], dict) and "signal" in a[0]:
+                conditions = a
+            elif isinstance(a, list) and a and isinstance(a[0], dict) and "kind" in a[0]:
+                actions.extend(a)
+            elif isinstance(a, tuple) and a[0] == "cooldown":
+                cooldown = a[1]
+            elif isinstance(a, tuple) and a[0] == "priority":
+                priority = a[1]
+        return SysEvolveRule(name=name, conditions=conditions, actions=actions,
+                             cooldown=cooldown, priority=priority)
+
+    def evolve_when_clause(self, args):
+        return [a for a in args if isinstance(a, dict)]
+
+    def evolve_condition(self, args):
+        signal = str(args[0])
+        op = str(args[1])
+        value = self._num(args[2])
+        return {"signal": signal, "operator": op, "value": value}
+
+    def evolve_then_clause(self, args):
+        return [a for a in args if isinstance(a, dict)]
+
+    def evolve_action_set(self, args):
+        param = str(args[0])
+        value = args[1]
+        return {"kind": "set", "param": param, "value": value, "delta": 0.0, "until": None}
+
+    def evolve_action_adjust_until(self, args):
+        param = str(args[0])
+        delta = float(self._num(args[1]))
+        until = float(self._num(args[2]))
+        return {"kind": "adjust", "param": param, "value": None, "delta": delta, "until": until}
+
+    def evolve_action_adjust(self, args):
+        param = str(args[0])
+        delta = float(self._num(args[1]))
+        return {"kind": "adjust", "param": param, "value": None, "delta": delta, "until": None}
+
+    def evolve_action_add(self, args):
+        param = str(args[0])
+        element = self._str(args[1])
+        return {"kind": "add", "param": param, "value": element, "delta": 0.0, "until": None}
+
+    def evolve_action_remove(self, args):
+        param = str(args[0])
+        element = self._str(args[1])
+        return {"kind": "remove", "param": param, "value": element, "delta": 0.0, "until": None}
+
+    def evolve_action_run(self, args):
+        cmd = " ".join(str(a) for a in args)
+        return {"kind": "run", "param": cmd, "value": None, "delta": 0.0, "until": None}
+
+    def evolve_value_scalar(self, args):
+        return self._num(args[0])
+
+    def evolve_value_list(self, args):
+        return [self._num(a) for a in args]
+
+    def evolve_cooldown(self, args):
+        return ("cooldown", int(self._num(args[0])))
+
+    def evolve_priority(self, args):
+        return ("priority", int(self._num(args[0])))
+
+    def evolve_list(self, args):
+        return SysEvolveList()
+
+    def evolve_show(self, args):
+        return SysEvolveShow(name=self._str(args[0]))
+
+    def evolve_enable(self, args):
+        return SysEvolveEnable(name=self._str(args[0]))
+
+    def evolve_disable(self, args):
+        return SysEvolveDisable(name=self._str(args[0]))
+
+    def evolve_delete(self, args):
+        return SysEvolveDelete(name=self._str(args[0]))
+
+    def evolve_history(self, args):
+        limit = 10
+        for a in args:
+            try:
+                limit = int(self._num(a))
+            except Exception:
+                pass
+        return SysEvolveHistory(limit=limit)
+
+    def evolve_reset(self, args):
+        return SysEvolveReset()
 
     # --- Helpers ---
     def _str(self, token) -> str:

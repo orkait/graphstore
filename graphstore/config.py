@@ -80,6 +80,13 @@ class ServerConfig(msgspec.Struct, frozen=True):
     max_batch_size: int = 1000
 
 
+class EvolutionConfig(msgspec.Struct, frozen=True):
+    similarity_buffer_size: int = 100
+    max_rules: int = 50
+    min_cooldown: int = 10
+    history_retention: int = 1000
+
+
 class GraphStoreConfig(msgspec.Struct, frozen=True):
     core: CoreConfig = msgspec.field(default_factory=CoreConfig)
     vector: VectorConfig = msgspec.field(default_factory=VectorConfig)
@@ -89,6 +96,7 @@ class GraphStoreConfig(msgspec.Struct, frozen=True):
     persistence: PersistenceConfig = msgspec.field(default_factory=PersistenceConfig)
     retention: RetentionConfig = msgspec.field(default_factory=RetentionConfig)
     server: ServerConfig = msgspec.field(default_factory=ServerConfig)
+    evolution: EvolutionConfig = msgspec.field(default_factory=EvolutionConfig)
 
 
 _decoder = msgspec.json.Decoder(GraphStoreConfig)
@@ -121,14 +129,17 @@ def merge_kwargs(config: GraphStoreConfig, **kwargs) -> GraphStoreConfig:
     updates: dict = {}
 
     if "ceiling_mb" in kwargs or "eviction_target_ratio" in kwargs:
-        updates["core"] = CoreConfig(
-            ceiling_mb=kwargs.get("ceiling_mb", config.core.ceiling_mb),
-            initial_capacity=config.core.initial_capacity,
-            compact_threshold=config.core.compact_threshold,
-            string_gc_threshold=config.core.string_gc_threshold,
-            eviction_target_ratio=kwargs.get("eviction_target_ratio", config.core.eviction_target_ratio),
-            protected_kinds=config.core.protected_kinds,
-        )
+        c_mb = kwargs.get("ceiling_mb", config.core.ceiling_mb)
+        e_ratio = kwargs.get("eviction_target_ratio", config.core.eviction_target_ratio)
+        if c_mb != config.core.ceiling_mb or e_ratio != config.core.eviction_target_ratio:
+            updates["core"] = CoreConfig(
+                ceiling_mb=c_mb,
+                initial_capacity=config.core.initial_capacity,
+                compact_threshold=config.core.compact_threshold,
+                string_gc_threshold=config.core.string_gc_threshold,
+                eviction_target_ratio=e_ratio,
+                protected_kinds=config.core.protected_kinds,
+            )
 
     if "embedder" in kwargs:
         emb = kwargs["embedder"]
