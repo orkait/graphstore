@@ -23,11 +23,19 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Cache HuggingFace model weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-model2vec-${{ runner.os }}-${{ matrix.python-version }}
+          restore-keys: |
+            hf-model2vec-${{ runner.os }}-
+
       - name: Install dependencies
         run: pip install -e ".[dev,playground]"
 
       - name: Run tests
-        run: pytest --tb=short -q --ignore=tests/test_server.py --ignore=tests/test_e2e_real_embedder.py
+        run: pytest --tb=short -q --ignore=tests/test_server.py
 
   publish:
     needs: test
