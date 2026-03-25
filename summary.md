@@ -1,467 +1,926 @@
-# graphstore - Complete Project Summary
+# graphstore Comprehensive Summary
 
-Everything a new session needs to understand this codebase.
+Updated: 2026-03-25
 
-## What is graphstore
+This file captures both:
 
-An agent-first memory substrate. Not a user-facing app. It provides all the memory tools an AI agent needs: graph recall, semantic recall, lexical recall, belief tracking, document ingestion, and structured note management.
+- a broader repository summary for future sessions
+- the current session state: scoped codebase understanding, corrected findings, behaviour analysis, and the design direction agreed so far for improving graphstore
 
-Opt-in threaded mode (`GraphStore(threaded=True)`) for multi-agent access via single-writer command queue. Default single-threaded with zero overhead.
+It is still not a line-by-line full-codebase monograph, but it is substantially broader than a single-session note.
 
-## Core architecture
+## Package metadata
 
-Six engines, one DSL:
+- package name: `graphstore`
+- package version: `0.3.0`
+- Python: `>=3.10`
+- license: `MIT`
+- maturity classifier: `Development Status :: 3 - Alpha`
+- console entry point: `graphstore = graphstore.cli:main`
 
-| Engine | Backing | Purpose |
-|--------|---------|---------|
-| Graph | numpy arrays + scipy CSR matrices | Columnar node storage, sparse edge traversal |
-| Vector | usearch HNSW index | Semantic similarity search |
-| Document | SQLite (separate `documents.db`) | Blob storage, summaries, FTS5 full-text search |
-| DSL | Lark LALR(1) parser + LRU cache | Human-readable query language |
-| Vault | Markdown files on disk | Structured notes synced to graph |
-| Persistence | SQLite WAL + blob serialization | Checkpoint/restore, query logging |
+Core dependencies from `pyproject.toml`:
 
-### Key internals
+- `numpy`
+- `scipy`
+- `lark`
+- `usearch`
+- `model2vec`
+- `pyyaml`
+- `markitdown`
+- `pymupdf4llm`
+- `pymupdf`
+- `msgspec`
+- `croniter`
 
-**Node storage**: Typed numpy arrays (`ColumnStore`) indexed by slot. Fields stored as `int64`, `float64`, or `int32_interned` (string table IDs). Presence tracked via boolean masks. Reserved columns prefixed with `__` (e.g., `__created_at__`, `__expires_at__`, `__retracted__`, `__confidence__`, `__blob_state__`).
+Optional extras:
 
-**Edge storage**: Per-type scipy `csr_matrix`. Combined-all transpose cached in `EdgeMatrices._combined_transpose` (invalidated on rebuild). Enables O(1) neighbor lookup and matrix-vector multiply for spreading activation (RECALL). Deferred CSR rebuild via `_edges_dirty` flag.
+- `dev`
+  - pytest, benchmark, coverage, httpx
+- `playground`
+  - fastapi, uvicorn
+- `ingest-pro`
+  - docling, openai
 
-**String interning**: All strings (node IDs, kinds, field values) mapped to int32 via `StringTable`. Shrinks memory, accelerates numpy comparisons.
+## What graphstore is
 
-**Visibility system**: `VisibilityMixin` provides a single boolean mask per query combining tombstones + TTL expiry + retracted beliefs + context isolation. All query types respect this mask.
+The repo aims to be an agent memory substrate, not only a graph library and not only a visual app.
 
-**Slot lifecycle**: Nodes occupy slots in pre-allocated arrays. Deleted nodes become tombstones (slot reused on next insert). Tombstone compaction via `SYS OPTIMIZE COMPACT` renumbers all slots. DocumentStore slot remapping uses temp-table batch SQL (O(1) statements, not O(N) per-slot loops).
+The intended value proposition is a combined memory system:
 
-**WAL**: `WALManager` (in `wal.py`) handles append, replay, checkpoint, auto-checkpoint, and query log rotation. Wired into `GraphStore` — no inline WAL logic in `graphstore.py`.
+- graph relations for association and traversal
+- vector similarity for meaning-based recall
+- lexical search for exact phrase retrieval
+- columnar structured storage for fast filtering and aggregation
+- document storage and ingestion for large cold content
+- vault integration for human-readable markdown memory
+- optional voice for speech I/O
 
-### Data flow
+The codebase is therefore best understood as a small platform with a graph engine at the center and several opt-in capability layers around it.
 
+## Repository layout
+
+Top-level repository structure:
+
+- `graphstore/`
+  - main Python package
+- `tests/`
+  - 49 pytest files covering engine, DSL, persistence, server, vector, ingest, vault, and voice
+- `playground/`
+  - Vite/React frontend for the optional browser playground
+- `docs/superpowers/specs/`
+  - historical design specs for major features
+- `docs/superpowers/plans/`
+  - historical implementation plans tied to those specs
+- `mcp_refs/`
+  - reference notes on retrieval, concurrency, self-balancing, datasets, and prior art
+- `assets/`
+  - diagrams and static project assets
+- top-level working docs
+  - `README.md`
+  - `summary.md`
+  - `VAULT_PLAN.md`
+  - `VAULT_REVISION.md`
+- helper/benchmark scripts
+  - `populate_zen.py`
+  - `bench_brain.py`
+  - `bench_flip.py`
+  - `bench_vectors.py`
+  - `scripts/download_fixtures.py`
+
+## Scope of analysis
+
+- The deep ingest was run in a scoped codemode over `pyproject.toml` and `graphstore/**/*.py`.
+- The main design/spec work focused on three areas:
+  - runtime/admin hardening
+  - `SYS EVICT` semantics
+  - production-grade voice support
+- The playground was explicitly de-scoped as an authoritative target. It may drift. Core runtime and server contracts are the priority.
+
+## Codemode snapshot
+
+- Scoped files:
+  - `graphstore/**/*.py`: 78 files, 9,921 lines
+  - `pyproject.toml` + `graphstore/**/*.py`: 12,298 total scoped lines
+- Main runtime spine:
+  - `graphstore/graphstore.py`
+  - `graphstore/core/store.py`
+  - `graphstore/dsl/executor.py`
+  - `graphstore/dsl/executor_system.py`
+  - `graphstore/document/store.py`
+  - `graphstore/vector/store.py`
+  - `graphstore/server.py`
+  - `graphstore/vault/sync.py`
+
+## Public package surface
+
+The package exports a reasonably broad top-level Python API through `graphstore/__init__.py`.
+
+Main exports:
+
+- runtime objects
+  - `GraphStore`
+  - `CoreStore`
+  - `SchemaRegistry`
+- types
+  - `Result`
+  - `Edge`
+- parsing/execution helpers
+  - `parse`
+  - `clear_cache`
+  - `Executor`
+  - `SystemExecutor`
+- config types and helpers
+  - `GraphStoreConfig`
+  - `load_config`
+  - `save_config`
+  - section structs like `CoreConfig`, `VectorConfig`, `DocumentConfig`, `DslConfig`, `VaultConfig`, `PersistenceConfig`, `RetentionConfig`, `ServerConfig`
+- error surface
+  - `GraphStoreError`
+  - `QueryError`
+  - `NodeNotFound`
+  - `NodeExists`
+  - `CeilingExceeded`
+  - `VersionMismatch`
+  - `SchemaError`
+  - `CostThresholdExceeded`
+  - `BatchRollback`
+  - `AggregationError`
+  - `VectorError`
+  - `EmbedderRequired`
+  - `VectorNotFound`
+  - `OptimizationInProgress`
+
+This means the project exposes both the high-level application service (`GraphStore`) and a fair amount of lower-level implementation surface. That is useful for power users, but it also means public API boundaries are less strict than they could be.
+
+## Architecture snapshot
+
+The codebase is a strong systems-oriented prototype with a coherent core:
+
+- `core/`
+  - columnar node storage in numpy
+  - sparse edge traversal via CSR matrices
+  - string interning
+  - tombstones first, compaction later
+- `dsl/`
+  - parser -> AST -> executor pipeline is clear
+  - separation between normal DSL and `SYS` execution is good
+- `persistence/`
+  - sqlite is used as persistence substrate, not the live query engine
+- optional subsystems
+  - vector, document, vault, voice, registry
+
+The main architectural pattern is:
+
+- in-memory authoritative runtime
+- sqlite-backed durability and metadata
+- DSL as the primary interaction surface
+- python methods as secondary integration surface
+
+This is not a “database server first” architecture. It is an embedded runtime with optional adapter layers.
+
+## Core subsystem map
+
+### `graphstore/graphstore.py`
+
+Main facade and runtime bootstrap:
+
+- loads config
+- initializes store/schema/executors
+- wires persistence, WAL, optimizer, document store, vector store, vault, and optional voice
+- exposes `execute()` and the main public service methods
+
+### `graphstore/core/`
+
+Main engine internals:
+
+- `store.py`
+  - authoritative graph state, node/edge CRUD, materialization
+- `columns.py`
+  - typed columnar arrays for fields and reserved fields
+- `edges.py`
+  - sparse matrix edge storage and caches
+- `strings.py`
+  - string interning and lookup
+- `schema.py`
+  - registered node/edge kinds and EMBED field declarations
+- `path.py`
+  - path/traversal algorithms
+- `memory.py`
+  - measurement and ceiling enforcement
+- `optimizer.py`
+  - compaction, GC, cleanup, eviction
+- `scheduler.py`
+  - self-balancing hooks and auto-optimize scheduling
+- `queue.py`
+  - single-writer command queue for threaded mode
+- `types.py`
+  - result and edge datatypes
+- `errors.py`
+  - domain-specific error hierarchy
+
+### `graphstore/dsl/`
+
+Query system:
+
+- `grammar.lark`
+  - DSL grammar
+- `parser.py`
+  - parser + cache
+- `transformer.py`
+  - parse tree -> AST
+- `ast_nodes.py`
+  - AST dataclasses
+- `executor.py`
+  - user query dispatch
+- `executor_system.py`
+  - `SYS` command dispatch
+- `visibility.py`
+  - unified visibility semantics
+- `filtering.py`
+  - WHERE evaluation and filtering acceleration
+- `handlers/`
+  - domain mixins by command category
+
+### `graphstore/vector/` and `graphstore/embedding/`
+
+Semantic retrieval layer:
+
+- vector index and slot mapping
+- embedder abstraction
+- default model2vec path
+- optional ONNX/HF path
+
+### `graphstore/document/` and `graphstore/ingest/`
+
+Cold document and file-ingestion layer:
+
+- sqlite document storage
+- summaries and FTS
+- parser routing
+- chunking
+- vision support
+- similarity-based connector logic
+
+### `graphstore/vault/`
+
+Markdown note system:
+
+- parse frontmatter/sections/wikilinks
+- manage note files
+- sync vault contents into graphstore
+- expose `VAULT *` operations
+
+### `graphstore/server.py`
+
+Optional FastAPI adapter:
+
+- `/api/execute`
+- `/api/execute-batch`
+- `/api/graph`
+- `/api/reset`
+- `/api/script`
+- `/api/config`
+- `/api/logs`
+
+### `graphstore/cli.py`
+
+CLI adapter:
+
+- `graphstore playground`
+- `graphstore install-embedder`
+- `graphstore list-embedders`
+- `graphstore uninstall-embedder`
+- `graphstore install-voice`
+- `graphstore list-voice`
+
+High-level rating from this session:
+
+- overall: `7/10`
+- core engine/library: `8.5/10`
+- product/integration polish: `5.5-6/10`
+
+## Important correction
+
+One earlier concern was wrong and should not be carried forward:
+
+- `GraphStore` does already expose:
+  - `get_all_nodes()`
+  - `get_all_edges()`
+  - `cost_threshold`
+  - `ceiling_mb`
+- So the earlier “server drift because these passthroughs are missing” finding is retracted.
+
+Relevant locations:
+
+- `graphstore/graphstore.py:433-457`
+- `graphstore/server.py:212-274`
+
+## CLI surface
+
+The CLI is small but strategically important because it is the operational entry point for optional features.
+
+Current commands:
+
+- `graphstore playground`
+  - launches the FastAPI server and serves static frontend files if available
+- `graphstore install-embedder <name> [--variant ...]`
+  - fetches and installs optional embedding models
+- `graphstore list-embedders`
+  - shows supported and installed models
+- `graphstore uninstall-embedder <name>`
+  - removes installed embedder artifacts
+- `graphstore install-voice`
+  - installs `moonshine` + `piper-tts`
+- `graphstore list-voice`
+  - reports availability of STT/TTS dependencies
+
+Operational note:
+
+- The CLI is capability-oriented rather than admin-oriented. It does not currently expose a richer runtime control plane for status, reset modes, or voice session management.
+
+## Behaviour analysis summary
+
+The strongest behavioural issues are about state truthfulness and incomplete contracts, not basic CRUD.
+
+### State inventory
+
+- backend store lifecycle
+  - module-level singleton `_store`
+  - lazily created
+  - replaced on reset
+- runtime config
+  - live `ceiling_mb` and `cost_threshold` mutate the in-memory store/executor
+  - no durable read/write contract at the server layer
+- persistent metadata
+  - script and logs rely on sqlite-backed mode
+- voice state
+  - `_stt`, `_tts`, `is_listening`, callback state exist
+  - realtime streaming contract is not fully implemented
+
+### Key behavioural findings
+
+1. `SYS EVICT LIMIT N` is effectively broken.
+- In `graphstore/dsl/executor_system.py`, `_evict()` sets `target = 0` when `q.limit` exists.
+- In `graphstore/core/optimizer.py`, `evict_oldest()` returns immediately when `target_bytes <= 0`.
+- Result: the count-based path does not perform count-based eviction.
+
+2. Voice realtime STT is a contract stub, not a production feature.
+- `graphstore/voice/stt.py` stores callback state and flips `_listening = True`
+- It does not actually start a streaming transcription loop or invoke the callback path.
+
+3. Voice TTS can fail silently.
+- `graphstore/voice/tts.py` swallows synthesis exceptions and returns `b""`
+- playback does not provide strong success/failure signaling
+
+4. Logs input validation is weak.
+- `since` parsing uses `datetime.fromisoformat()` directly in both:
+  - `graphstore/server.py`
+  - `graphstore/dsl/executor_system.py`
+- Invalid timestamps are likely to surface as uncaught runtime errors instead of typed validation failures.
+
+5. Reset logic performs partial teardown.
+- `graphstore/server.py` manually manipulates sqlite state and replaces `_store`
+- it does not route teardown through `GraphStore.close()`
+- that leaves cleanup semantics weaker than the public runtime contract should be
+
+### Behaviour verdict
+
+- Core graph CRUD and graph read surfaces are mostly fine.
+- The current weaknesses are:
+  - admin semantics are underspecified
+  - some “success” paths do not mean “durable/complete/safe”
+  - voice exposes interfaces without full lifecycle/runtime backing
+
+## DSL capability summary
+
+The DSL is broad enough that graphstore functions more like a small language runtime than a simple query parser.
+
+Main command families visible from source and docs:
+
+- point and set reads
+  - `NODE`, `NODES`, `EDGES`, `COUNT`
+- traversal and graph algorithms
+  - `TRAVERSE`, `PATH`, `SHORTEST PATH`, `ANCESTORS`, `DESCENDANTS`, `COMMON NEIGHBORS`
+- pattern matching
+  - `MATCH`
+- aggregations
+  - `AGGREGATE ... GROUP BY ...`
+- mutations
+  - `CREATE`, `UPDATE`, `DELETE`, `UPSERT`, `MERGE`, `INCREMENT`
+- belief and contradiction management
+  - `ASSERT`, `RETRACT`, `PROPAGATE`, `SYS CONTRADICTIONS`
+- context and isolation
+  - `BIND CONTEXT`, `DISCARD CONTEXT`
+- semantic and lexical retrieval
+  - `SIMILAR TO`, `LEXICAL SEARCH`, `RECALL`, `REMEMBER`
+- ingest and document intelligence
+  - `INGEST`, `CONNECT NODE`, `SYS CONNECT`, `SYS DUPLICATES`
+- system/runtime control
+  - `SYS STATUS`, `SYS HEALTH`, `SYS OPTIMIZE`, `SYS CHECKPOINT`, `SYS SNAPSHOT`, `SYS ROLLBACK`, `SYS LOG`, `SYS CRON`, `SYS REEMBED`, `SYS RETAIN`, `SYS EXPIRE`
+- vault commands
+  - `VAULT *`
+
+This breadth is one of the project’s strengths. It also increases the burden on:
+
+- parser stability
+- AST coverage
+- executor separation
+- test completeness
+
+## Test landscape
+
+The repository has 49 pytest files.
+
+Coverage clusters:
+
+- core engine and data structures
+  - `test_store.py`
+  - `test_columns.py`
+  - `test_columnar_store.py`
+  - `test_column_integration.py`
+  - `test_edges.py`
+  - `test_strings.py`
+  - `test_path.py`
+  - `test_types.py`
+- memory and optimization
+  - `test_memory.py`
+  - `test_memory_accounting.py`
+  - `test_optimizer.py`
+  - `test_auto_reembed.py`
+- DSL parsing and behavior
+  - `test_dsl_parser.py`
+  - `test_dsl_user_reads.py`
+  - `test_dsl_user_writes.py`
+  - `test_dsl_system.py`
+  - `test_untested_commands.py`
+  - `test_order_by_string.py`
+  - `test_aggregate.py`
+  - `test_beliefs.py`
+  - `test_recall.py`
+  - `test_remember.py`
+  - `test_remember_signals.py`
+  - `test_similar.py`
+- persistence and WAL/restore
+  - `test_persistence.py`
+  - `test_incremental_checkpoint.py`
+  - `test_deserializer_kinds.py`
+- config/schema
+  - `test_config.py`
+  - `test_schema.py`
+- vector and embedding
+  - `test_vector_store.py`
+  - `test_vector_persist.py`
+  - `test_embedding.py`
+  - `test_onnx_embedder.py`
+  - `test_e2e_real_embedder.py`
+- ingest/document/vault
+  - `test_document_store.py`
+  - `test_ingest.py`
+  - `test_vault.py`
+- server and security
+  - `test_server.py`
+  - `test_server_endpoints.py`
+  - `test_server_security.py`
+  - `test_log_layer.py`
+- concurrency and scheduling
+  - `test_command_queue.py`
+  - `test_cron.py`
+- broader integration and gaps
+  - `test_integration.py`
+  - `test_gaps.py`
+  - `test_edges_to_perf.py`
+  - `test_cost_estimator.py`
+  - `test_sys_status.py`
+
+Test observations from this session:
+
+- the suite is broad
+- several historically risky surfaces do have tests
+- but some current spec-critical gaps still exist, especially:
+  - no strong test for `SYS EVICT LIMIT N` semantics
+  - no real verification of streaming voice behavior
+  - limited evidence of robust validation/error-contract testing for admin endpoints
+
+## Design and implementation history in-repo
+
+The repository keeps a useful internal history of how major subsystems were introduced.
+
+### Historical specs under `docs/superpowers/specs/`
+
+- `2026-03-18-playground-design.md`
+  - initial playground product shape
+- `2026-03-18-light-mode-design-tokens.md`
+  - playground visual system work
+- `2026-03-19-high-fanout-visualization-design.md`
+  - advanced graph visualization modes
+- `2026-03-20-agentic-brain-db-design.md`
+  - shift from typed graph DB toward agent memory substrate
+- `2026-03-20-columnar-storage-design.md`
+  - columnar acceleration/source-of-truth evolution
+- `2026-03-20-vector-store-design.md`
+  - semantic retrieval layer
+- `2026-03-21-document-layer-design.md`
+  - document ingestion and storage
+- `2026-03-21-opt-in-layers-design.md`
+  - document, vision, voice, embedder opt-ins
+- `2026-03-24-command-queue-design.md`
+  - threaded single-writer queue
+- `2026-03-24-log-cron-design.md`
+  - intelligent log layer and cron scheduler
+
+### Historical plans under `docs/superpowers/plans/`
+
+- implementation plans exist for nearly every major feature above
+- later plans also include:
+  - `2026-03-24-implementation-improvements.md`
+  - `2026-03-24-quality-improvements.md`
+- together they show that the repo has been developed through a design-first workflow rather than only ad hoc coding
+
+## Top-level reference documents
+
+### `VAULT_PLAN.md`
+
+The original vault plan frames the vault as a first-class human/agent markdown knowledge system with graph indexing and sync.
+
+### `VAULT_REVISION.md`
+
+This file narrows and corrects the vault goal:
+
+- the vault is a human-agent interface layer
+- markdown files are the source of truth
+- vault is not intended to become a second query engine
+- graphstore DSL remains the main query/retrieval mechanism over indexed vault data
+
+This revision is important because it clarifies architectural intent and prevents the vault from sprawling into a duplicate runtime.
+
+### `mcp_refs/`
+
+These files provide design rationale and future-session context:
+
+- `concurrency-model.md`
+  - explains the single-writer threaded model
+- `retrieval-model.md`
+  - explains why `REMEMBER` is the primary fused retrieval command
+- `self-balancing.md`
+  - explains optimization as agent-visible behavior, not silent background magic
+- `prior-art-recall-pageindex.md`
+  - notes external influences on lexical and retrieval design
+- `mock-testing-datasets.md`
+  - sketches dataset choices for ingest/vision/voice testing
+
+## Playground status
+
+The repository contains a substantial optional frontend:
+
+- React + TypeScript + Vite
+- Zustand for state
+- React Flow for graph rendering
+- CodeMirror for DSL editing
+- Tailwind/shadcn UI shell
+
+It has its own docs in `playground/README.md`, UI components, examples, and graph layout logic.
+
+For this session’s design work, the playground was explicitly treated as non-authoritative. That means:
+
+- its current behavior still matters as evidence
+- but the runtime/server redesign should not be constrained to preserve playground assumptions
+- adapter drift is acceptable if the core runtime becomes cleaner
+
+## Design direction chosen in-session
+
+User choices made during brainstorming:
+
+- scope: combined improvement spec across runtime/admin hardening and voice completion
+- voice target: `production-grade voice`
+- breaking changes: `clean break if it materially improves the architecture`
+- optimization priority: `feature completeness`
+- design approach selected: boundary-first hardening, with a strong voice subsystem
+
+## Agreed design direction so far
+
+## 1. Architecture
+
+The target architecture is three layers:
+
+- `Layer 1: Engine`
+  - graph state
+  - parser/executors
+  - persistence
+  - vector/document subsystems
+- `Layer 2: Runtime Surface`
+  - `GraphStore` as the canonical public application service
+  - the only supported surface for adapters and integrations
+- `Layer 3: Adapters`
+  - server
+  - CLI
+  - voice I/O adapters
+  - future integrations
+
+Intent:
+
+- `GraphStore` becomes the explicit public boundary
+- internal stores/executors remain internal
+- adapters must not depend on private fields casually
+
+## 2. Runtime surface
+
+`GraphStore` should be a complete application service, not just a DSL wrapper.
+
+Public surface groups proposed:
+
+- query and mutation
+  - `execute(query)`
+  - `execute_batch(queries)`
+  - `submit_background(query)` where threaded mode applies
+- structured graph reads
+  - explicit node/edge/graph access methods
+- admin/runtime operations
+  - checkpoint
+  - replay
+  - status/health
+  - optimize
+  - byte-based eviction
+  - count-based eviction
+- document/ingest operations
+  - explicit access instead of private reach-through
+- voice operations
+  - session-oriented APIs rather than thin `speak/listen` wrappers
+
+Important rule:
+
+- if an adapter needs something and it is not on `GraphStore`, that is a public-surface design gap
+
+## 3. Admin and state contracts
+
+The current problem is that admin actions mix:
+
+- session mutation
+- runtime mutation
+- persistent mutation
+- destructive reset
+
+under APIs that often only report `{ok: true}`.
+
+Proposed direction:
+
+- reset becomes explicit and scoped
+  - `reset_memory()`
+  - `reset_store(...)`
+  - `reset_session()`
+- config gets real read/write semantics
+  - `get_runtime_config()`
+  - `get_persisted_config()`
+  - `update_runtime_config(...)`
+  - `update_persisted_config(...)`
+- eviction gets split
+  - `evict_by_bytes(...)`
+  - `evict_by_count(...)`
+- admin/log/reset/config operations return structured result objects, not only boolean success
+
+Note:
+
+- Earlier discussion included some playground-facing reasoning, but the final direction should be interpreted as a core runtime/server contract change, not a playground-driven redesign.
+
+## 4. Voice subsystem
+
+The voice redesign should be session-based and production-grade.
+
+### Core position
+
+`graphstore` is a good home for:
+
+- voice orchestration
+- session registry/state
+- persistence of transcripts and session metadata
+- correlation with graph memory, logs, and traces
+
+`graphstore` is not the right place to be the actual low-level audio engine.
+
+### Voice ownership split
+
+`GraphStore` / runtime owns:
+
+- voice session registry
+- provider selection
+- capability checks
+- transcript persistence
+- synthesis/transcription job state
+- session metadata and logs
+
+Voice backends/providers own:
+
+- realtime STT stream handling
+- realtime TTS playback/synthesis streaming
+- device I/O
+- buffering/backpressure
+- provider-specific recovery
+
+### Public voice API direction
+
+Replace thin wrappers with session APIs such as:
+
+- `create_voice_session(config)`
+- `get_voice_session(session_id)`
+- `close_voice_session(session_id)`
+- `transcribe_file(path, options)`
+- `start_transcription(session_id)`
+- `stop_transcription(session_id)`
+- `synthesize(text, options)`
+- `speak(text, options)`
+- `interrupt_playback(...)`
+
+### Voice state model
+
+Proposed observable states:
+
+- `created`
+- `ready`
+- `listening`
+- `processing`
+- `speaking`
+- `paused`
+- `stopped`
+- `error`
+
+### Internal module split proposed
+
+- `voice/service.py`
+  - public orchestration layer
+- `voice/session.py`
+  - session state machine and typed events
+- `voice/providers/stt/*.py`
+  - STT provider adapters
+- `voice/providers/tts/*.py`
+  - TTS provider adapters
+- `voice/runtime.py`
+  - workers, queues, buffering, cancellation, health
+
+### Why graphstore still makes sense as the home for voice
+
+The conclusion from this session was:
+
+- `graphstore` is a good place for voice orchestration, session state, persistence, transcript integration, and operational contracts
+- it is not the right place to make the core graph execution loop responsible for realtime audio transport
+
+So the right shape is:
+
+- `GraphStore` owns the control plane
+- provider runtimes own media streaming
+- only durable or explicitly persisted artifacts flow back into the graph engine
+
+## Critical voice rule agreed in-session
+
+This rule is important and should be preserved:
+
+- transcript/audio events should not go through the normal DSL write queue one chunk at a time
+- they should update voice session state through a dedicated voice runtime
+- only finalized or explicitly persisted artifacts should cross into the graph engine
+
+Reason:
+
+- voice events are high-frequency, ephemeral, and latency-sensitive
+- graph writes are lower-frequency, durable, and consistency-sensitive
+- combining them in the same queue creates head-of-line blocking and failure coupling
+
+What should cross into the graph engine:
+
+- final transcript segments
+- explicit memory writes
+- durable checkpoints or summaries
+- session metrics/audit records
+
+What should not cross chunk-by-chunk:
+
+- raw audio frames
+- every partial transcript token
+- playback chunk events
+- device heartbeat or VAD noise
+
+## Voice Data Model and Event Contracts
+
+The voice subsystem operates entirely via a Session lifecycle.
+
+### State Model (Observable States)
+A session (`VoiceSession`) transitions through the following exact states:
+- `created`: Session initialized but media devices not yet claimed. Let adapters configure routing.
+- `ready`: STT/TTS providers warmed up, locks acquired, ready for I/O.
+- `listening`: VAD/STT active. Capturing audio chunks from the microphone.
+- `processing`: VAD detected silence; STT is processing the final transcript buffer. 
+- `speaking`: TTS is actively streaming response audio to the output device.
+- `paused`: Media routing temporarily suspended (e.g., user muted microphone without killing session).
+- `stopped`: Session finalized, artifacts written to persistent memory, locks released.
+- `error`: Unrecoverable exception (e.g., microphone disconnected). Artifacts partially saved.
+
+### Event Contracts
+The `VoiceSession` object emits typed `dataclass` events to consumers (e.g. adapters, clients, or GraphStore memory loggers):
+- `SessionStateTransition(old_state, new_state, timestamp)`
+- `PartialTranscript(text, is_final=False)`: Emitted by the STT worker during `listening`. *CRITICAL RULE:* These do NOT cross into the graph memory engine. They only flow to connected frontend adapters for realtime UX.
+- `FinalTranscript(text, id, duration_ms, is_final=True)`: Emitted when `processing` completes. Crosses into graph memory.
+- `SynthesisStarted(text, duration_ms)`
+- `PlaybackInterrupted(reason)`
+
+## Persistence Model for Voice Sessions and Transcripts
+
+`GraphStore` (specifically the overarching `CoreStore` or a dedicated Sqlite table) persists definitive markers of the session, not the transient frames.
+
+### Persistent Schema
+If enabled via `config.voice.persistence`, sessions are backed by SQLite:
+- `voice_sessions`: `id`, `created_at`, `ended_at`, `total_duration_ms`, `end_reason`.
+- `voice_transcripts`: `id`, `session_id`, `role` ("user" | "agent"), `text`, `timestamp`, `audio_blob_id` (optional).
+
+### Integration with Graph Memory
+When a `FinalTranscript` is emitted by the STT worker containing user inputs, the session orchestrator performs an asynchronous query to GraphStore:
 ```
-agent calls gs.execute("CREATE NODE ...")
-  -> dsl/parser.py: parse(query) -> AST node (cached in LRU)
-  -> dsl/executor.py: _dispatch(ast) -> registry lookup -> handler method
-  -> handler modifies CoreStore (numpy arrays, edge lists)
-  -> WALManager.append() (if write + persistence enabled)
-  -> Result(kind, data, count, elapsed_us) returned
+CREATE NODE auto kind "transcript" text "<text>" role "user" session "<session_id>"
 ```
+This guarantees transcripts become nodes that `REMEMBER` or `SIMILAR TO` semantic searches can immediately hit for context reasoning.
 
-### File structure
+## Migration Phases and Deprecation Policy
 
-```
-graphstore/
-├── graphstore.py             # GraphStore facade: init, execute(), checkpoint, public API
-├── config.py                 # Typed config (msgspec Structs, graphstore.json)
-├── wal.py                    # WALManager: append, replay, checkpoint, log rotation
-├── core/
-│   ├── store.py              # CoreStore: slot CRUD, materialization, live mask
-│   ├── columns.py            # ColumnStore: typed numpy arrays, vectorized filtering
-│   ├── edges.py              # EdgeMatrices: scipy CSR per edge type + cached transpose
-│   ├── strings.py            # StringTable: bidirectional string <-> int32
-│   ├── schema.py             # SchemaRegistry: optional type validation + EMBED field
-│   ├── path.py               # BFS, Dijkstra, bidirectional BFS, common neighbors
-│   ├── memory.py             # Memory ceiling enforcement
-│   ├── optimizer.py          # Self-balancing: compact (batch SQL), string GC, defrag, cleanup
-│   ├── types.py              # Result, Edge dataclasses
-│   └── errors.py             # Exception hierarchy (13 error types)
-├── dsl/
-│   ├── grammar.lark          # LALR(1) grammar (~280 rules)
-│   ├── parser.py             # Lark parser + LRU plan cache (256 entries)
-│   ├── transformer.py        # Parse tree -> AST dataclasses
-│   ├── ast_nodes.py          # 65+ AST dataclasses (flat file)
-│   ├── executor.py           # Auto-dispatch via handler registry + mixin inheritance
-│   ├── executor_base.py      # ExecutorBase: __init__, execute(), mixin wiring (~30 lines)
-│   ├── visibility.py         # VisibilityMixin: live-mask, slot visibility, TTL
-│   ├── filtering.py          # FilteringMixin: WHERE eval, column accel, index helpers
-│   ├── executor_system.py    # SYS * command handlers
-│   ├── cost_estimator.py     # Frontier-based cost rejection for MATCH/TRAVERSE
-│   └── handlers/             # Domain-specific handler mixins
-│       ├── _registry.py      # @handles decorator, DISPATCH dict, WRITE_OPS set
-│       ├── nodes.py          # NODE, NODES, COUNT
-│       ├── edges.py          # EDGES, CREATE/UPDATE/DELETE EDGE
-│       ├── traversal.py      # TRAVERSE, PATH, SHORTEST, ANCESTORS, DESCENDANTS
-│       ├── pattern.py        # MATCH
-│       ├── aggregation.py    # AGGREGATE
-│       ├── intelligence.py   # RECALL, SIMILAR TO, LEXICAL SEARCH, COUNTERFACTUAL
-│       ├── beliefs.py        # ASSERT, RETRACT, PROPAGATE
-│       ├── mutations.py      # CREATE/UPDATE/DELETE NODE, MERGE, BATCH, FORGET
-│       ├── context.py        # BIND/DISCARD CONTEXT
-│       └── ingest.py         # INGEST, CONNECT NODE
-├── embedding/                # model2vec (default, 30MB), ONNX HF (opt-in)
-├── vector/                   # VectorStore: usearch HNSW wrapper
-├── document/                 # DocumentStore: SQLite multi-table + FTS5
-├── ingest/                   # File parsing, chunking, routing, vision, connector
-├── vault/                    # Markdown notes: parser, manager, sync, executor
-├── persistence/              # SQLite checkpoint/restore
-├── registry/                 # Model management (install-embedder, install-vision)
-├── voice/                    # Moonshine STT + Piper TTS (opt-in)
-├── server.py                 # FastAPI playground wrapper (uses public GraphStore API)
-└── cli.py                    # CLI entry point
-```
+Transitioning from the current stub implementation to the orchestrated session API:
 
-### Public API surface
+**Phase 1: Stub Deprecation & Orchestrator Intro (Next Minor)**
+- Introduce `graphstore/voice/session.py` and empty state machine.
+- Introduce `GraphStore.create_voice_session(...)` and log warnings on direct calls to `GraphStore.speak()` or `GraphStore.listen()`.
+- Expose the new `update_runtime_config` paths for `VoiceConfig`.
 
-`GraphStore` exposes these public methods/properties so `server.py` and external code don't need private access:
+**Phase 2: Rework STT & TTS Providers (Next Minor)**
+- Move `stt.py` and `tts.py` to `voice/providers/`.
+- Rewrite the `MoonshineSTT` class to spawn a background daemon thread for audio I/O that emits `PartialTranscript` and `FinalTranscript` using `queue.Queue`.
+- Prevent TTS silent swallows (raise explicit exceptions which transition the session to `error`).
 
-| Method / Property | Purpose |
-|-------------------|---------|
-| `execute(query)` | Execute a DSL query, returns `Result` |
-| `execute_batch(queries)` | Execute multiple queries |
-| `checkpoint()` | Force persist to disk |
-| `close()` | Checkpoint + close connection |
-| `get_all_nodes()` | All live nodes (used by server `/api/graph`) |
-| `get_all_edges()` | All live edges (used by server `/api/graph`) |
-| `node_count` | Number of live nodes |
-| `edge_count` | Number of edges |
-| `memory_usage` | Estimated memory in bytes |
-| `cost_threshold` | DSL query cost threshold (get/set) |
-| `ceiling_mb` | Memory ceiling in MB (get/set) |
-| `set_script(s)` / `get_script()` | Playground script storage |
-| `speak(text)` / `listen(cb)` | Voice TTS/STT |
+**Phase 3: Deep Persistence (Target 1.0)**
+- Tie `FinalTranscript` into the main graph engine automatically if `auto_persist` is enabled.
+- Remove old wrappers entirely.
+- Establish strong test verification gates: mock audio streams proving session lifecycle transitions correctly handle interruptions.
 
-## Dependencies
+## Rollout Plan & Test Verification Gates
 
-Core: `numpy`, `scipy`, `lark`, `usearch`, `model2vec`, `pyyaml`, `markitdown`, `pymupdf4llm`, `pymupdf`, `msgspec`, `croniter`
+Before shipping Phase 2, the following verification gates must pass:
+1. **Mock End-to-End Simulation**: A mocked `STTProvider` must push pseudo-frames triggering full lifecycle transitions `created -> ready -> listening -> processing -> speaking -> stopped`.
+2. **Interrupt Consistency Test**: Sending a `stop_listening()` while `speaking` or `processing` must gracefully cleanly terminate the worker threads without corrupting the socket.
+3. **Graph Engine Independence**: A 5,000 requests/sec graph load test must show zero latency impact when a background voice session is furiously emitting `PartialTranscript` events (proving the queue boundaries act correctly).
 
-Optional: `fastapi`/`uvicorn` (playground), `docling`/`openai` (ingest-pro)
+## Files most relevant for next session
 
-## Config system
+- `graphstore/graphstore.py`
+- `graphstore/server.py`
+- `graphstore/dsl/executor_system.py`
+- `graphstore/core/optimizer.py`
+- `graphstore/voice/stt.py`
+- `graphstore/voice/tts.py`
+- `graphstore/config.py`
+- `graphstore/document/store.py`
+- `tests/test_server.py`
+- `tests/test_server_endpoints.py`
+- `tests/test_server_security.py`
+- `tests/test_memory_accounting.py`
+- `tests/test_voice.py`
 
-One JSON file (`graphstore.json`), sectioned by engine. All sections have typed defaults via frozen msgspec Structs. Missing keys auto-fill.
+Additional useful files for broader orientation:
 
-54 config fields across 8 sections, all wired to code with zero hardcoded magic numbers:
+- `pyproject.toml`
+- `graphstore/__init__.py`
+- `graphstore/cli.py`
+- `README.md`
+- `playground/README.md`
+- `VAULT_PLAN.md`
+- `VAULT_REVISION.md`
+- `docs/superpowers/specs/*.md`
+- `docs/superpowers/plans/*.md`
+- `mcp_refs/*.md`
 
-```json
-{
-  "core": {"ceiling_mb": 256, "initial_capacity": 1024, "compact_threshold": 0.2, "string_gc_threshold": 3.0, "protected_kinds": ["schema", "config", "system"]},
-  "vector": {"embedder": "default", "similarity_threshold": 0.85, "duplicate_threshold": 0.95, "search_oversample": 5, "model2vec_model": "minishlab/M2V_base_output", "model_cache_dir": null},
-  "document": {"fts_tokenizer": "porter unicode61", "chunk_max_size": 2000, "chunk_overlap": 50, "summary_max_length": 200, "fts_full_text": true, "vision_model": "smolvlm2:2.2b", "vision_base_url": "http://localhost:11434/v1", "vision_max_tokens": 300},
-  "dsl": {"cost_threshold": 100000, "plan_cache_size": 256, "auto_optimize": false, "optimize_interval": 500, "recall_decay": 0.7, "remember_weights": [0.30, 0.20, 0.15, 0.20, 0.15], "cache_gc_threshold": 200},
-  "vault": {"enabled": false, "path": null, "auto_sync": true},
-  "persistence": {"wal_hard_limit": 100000, "auto_checkpoint_threshold": 50000, "log_retention_days": 7, "busy_timeout_ms": 5000},
-  "retention": {"blob_warm_days": 30, "blob_archive_days": 90, "blob_delete_days": 365},
-  "server": {"cors_origins": ["*"], "ingest_root": null, "auth_token": null, "rate_limit_rpm": 120, "rate_limit_window": 60, "max_query_length": 10000, "max_batch_size": 1000}
-}
-```
+## Verification limits in this session
 
-Load order: explicit config object > `config_path` kwarg > `GRAPHSTORE_CONFIG` env var > `{path}/graphstore.json` > defaults.
+No live runtime/browser validation was completed in this shell because required Python deps were missing here, including:
 
-## DSL command reference
+- `fastapi`
+- `numpy`
 
-### Reads
-```
-NODE "id" [WITH DOCUMENT]
-NODES [WHERE ...] [ORDER BY field ASC|DESC] [LIMIT N] [OFFSET N]
-EDGES FROM|TO "id" [WHERE ...] [LIMIT N]
-TRAVERSE FROM "id" DEPTH N [WHERE ...] [LIMIT N]
-SUBGRAPH FROM "id" DEPTH N
-PATH FROM "a" TO "b" MAX_DEPTH N
-SHORTEST PATH FROM "a" TO "b"
-WEIGHTED SHORTEST PATH FROM "a" TO "b"
-DISTANCE FROM "a" TO "b" MAX_DEPTH N
-ANCESTORS OF "id" DEPTH N
-DESCENDANTS OF "id" DEPTH N
-COMMON NEIGHBORS OF "a" AND "b"
-MATCH ("id") -[kind = "x"]-> (var WHERE ...)
-COUNT NODES|EDGES [WHERE ...]
-AGGREGATE NODES [WHERE ...] GROUP BY field SELECT COUNT(), AVG(f) [HAVING ...] [ORDER BY ...] [LIMIT N]
-RECALL FROM "id" DEPTH N [LIMIT N] [WHERE ...]
-SIMILAR TO "text"|[vector]|NODE "id" [LIMIT N] [WHERE ...]
-LEXICAL SEARCH "query" [LIMIT N] [WHERE ...]
-REMEMBER "query" [TOKENS N] [LIMIT N] [WHERE ...]
-WHAT IF RETRACT "id"
-```
+So the conclusions in this summary are based on:
 
-### Writes
-```
-CREATE NODE "id" kind = "x" field = value [VECTOR [...]] [EXPIRES IN 30m] [DOCUMENT "text"]
-CREATE NODE AUTO kind = "x" field = value
-UPDATE NODE "id" SET field = value
-UPSERT NODE "id" kind = "x" field = value
-DELETE NODE "id"
-DELETE NODES WHERE ...
-UPDATE NODES WHERE ... SET field = value
-CREATE EDGE "src" -> "tgt" kind = "x"
-UPDATE EDGE "src" -> "tgt" SET field = value
-DELETE EDGE "src" -> "tgt" [WHERE ...]
-DELETE EDGES FROM|TO "id" [WHERE ...]
-INCREMENT NODE "id" field BY N
-ASSERT "id" field = value [CONFIDENCE 0.9] [SOURCE "tool"]
-RETRACT "id" [REASON "why"]
-MERGE NODE "src" INTO "tgt"
-PROPAGATE "id" FIELD f DEPTH N
-INGEST "file" [AS "id"] [KIND "type"] [USING markitdown|docling|VISION "model"]
-CONNECT NODE "id" [THRESHOLD 0.8]
-FORGET NODE "id"
-BIND CONTEXT "name"
-DISCARD CONTEXT "name"
-BEGIN ... COMMIT (batch with rollback)
-```
+- direct source reading
+- test reading
+- behavioural reasoning from implementation paths
 
-### System
-```
-SYS STATS [NODES|EDGES|MEMORY|WAL]
-SYS STATUS
-SYS HEALTH
-SYS OPTIMIZE [COMPACT|STRINGS|EDGES|VECTORS|BLOBS|CACHE]
-SYS RETAIN
-SYS KINDS / SYS EDGE KINDS / SYS DESCRIBE NODE|EDGE "kind"
-SYS REGISTER NODE KIND "k" REQUIRED f1:type, f2:type [OPTIONAL ...] [EMBED field]
-SYS REGISTER EDGE KIND "k" FROM "kind1" TO "kind2"
-SYS UNREGISTER NODE|EDGE KIND "k"
-SYS CONTRADICTIONS WHERE ... FIELD f GROUP BY g
-SYS CONNECT [WHERE ...] [THRESHOLD 0.85]
-SYS DUPLICATES [WHERE ...] [THRESHOLD 0.95]
-SYS EXPIRE [WHERE ...]
-SYS SNAPSHOT "name" / SYS ROLLBACK TO "name" / SYS SNAPSHOTS
-SYS EMBEDDERS / SYS REEMBED
-SYS CHECKPOINT / SYS REBUILD INDICES / SYS CLEAR LOG|CACHE
-SYS EXPLAIN <read_query>
-SYS SLOW QUERIES [SINCE "iso"] [LIMIT N] / SYS FAILED QUERIES [LIMIT N]
-SYS WAL STATUS|REPLAY
-SYS LOG [WHERE ...] [SINCE "iso"] [TRACE "id"] [LIMIT N]
-SYS CRON ADD "name" SCHEDULE "cron-expr" QUERY "dsl-query"
-SYS CRON DELETE|ENABLE|DISABLE "name"
-SYS CRON LIST / SYS CRON RUN "name"
-SYS EVICT [LIMIT N]
-```
+not on executed end-to-end runtime behavior.
 
-### Vault
-```
-VAULT NEW "title" [KIND "type"] [TAGS "a,b"]
-VAULT READ "title"
-VAULT WRITE "title" SECTION "name" CONTENT "text"
-VAULT APPEND "title" SECTION "name" CONTENT "text"
-VAULT SEARCH "query" [LIMIT N] [WHERE ...]
-VAULT BACKLINKS "title"
-VAULT LIST [WHERE ...] [ORDER BY ...] [LIMIT N]
-VAULT SYNC / VAULT DAILY / VAULT ARCHIVE "title"
-```
+## Practical next steps for a future session
 
-## What shipped
+If a later session wants to continue from this summary, the highest-value order is:
 
-### Session 1: Core features + handler registry
-1. **Lexical recall** - FTS5 on DocumentStore, `LEXICAL SEARCH` command
-2. **Vision ingest** - VisionHandler wired into pipeline, standalone image ingest
-3. **Blob lifecycle** - `__blob_state__`, `FORGET NODE`, `SYS RETAIN`, retention config
-4. **Section hierarchy** - `doc -> section -> chunk` with `__confidence__=0.6`
-5. **Typed config** - msgspec Structs, `graphstore.json`, `GRAPHSTORE_CONFIG` env var
-6. **Self-balancing optimizer** - `SYS HEALTH`, `SYS OPTIMIZE` (6 ops), auto-trigger
-7. **Handler registry** - `@handles` decorator, auto-dispatch, 11 domain handler files
+1. confirm the admin/runtime redesign scope
+2. write the unfinished spec sections
+3. codify precise test cases for:
+   - `SYS EVICT LIMIT`
+   - config persistence/runtime split
+   - reset semantics
+   - voice session states and event contracts
+4. only then move to implementation work
 
-### Session 2: Quality improvements (PR #17)
-1. **WALManager wired** - `wal.py` connected to `graphstore.py`, 5 inline WAL methods deleted, vector-store checkpoint bug fixed
-2. **RECALL transpose cache** - `EdgeMatrices._combined_transpose` cached (O(1) after first call), invalidated on rebuild
-3. **Batch DocumentStore remap** - `compact_tombstones` uses temp-table batch SQL instead of per-slot UPDATE loop; also fixes pre-existing UNIQUE constraint bug on tombstoned slots
-4. **executor_base split** - 641-line monolith split into `visibility.py` (VisibilityMixin) + `filtering.py` (FilteringMixin); `executor_base.py` reduced to ~30 lines
-5. **Public API surface** - `get_all_nodes()`, `get_all_edges()`, `cost_threshold`, `ceiling_mb` on GraphStore; `server.py` uses public API only
+If the goal instead is a truly exhaustive repo summary, the next missing layer would be:
 
-### Performance
-| What | Speedup |
-|------|---------|
-| Model2Vec cache | 40x (test suite 102s -> 2.5s) |
-| Plaintext ingest fast-path | 273x |
-| msgspec.json serialization | 6x |
-| Batch SQLite commits | 48x |
-| Tombstone mask cache | 22x |
-| Vectorized optimizer | 17x |
-| Batch embedding | N -> 1 model calls |
-| RECALL transpose cache | O(nnz) -> O(1) per repeated query |
-| DocumentStore slot remap | O(N) round-trips -> O(1) batch SQL |
-
-### Codebase
-- Deleted `executor_reads.py` (1150 lines) + `executor_writes.py` (958 lines)
-- Created 11 handler files under `dsl/handlers/` (41-476 lines each)
-- Split `executor_base.py` into `visibility.py` + `filtering.py`
-- Wired `WALManager`, deleted 5 inline methods from `graphstore.py`
-- Removed tracked artifacts (`zen-graph-db/`, `logs/`, `indexes/`)
-- 843 tests, ~2.4s runtime
-
-## Prior art
-
-Concepts from two repos influenced graphstore's retrieval architecture (see `mcp_refs/prior-art-recall-pageindex.md`):
-
-| Repo | What graphstore took |
-|------|---------------------|
-| [arniesaha/recall](https://github.com/arniesaha/recall) | BM25/FTS5 pattern for LEXICAL SEARCH |
-| [VectifyAI/PageIndex](https://github.com/VectifyAI/PageIndex) | `doc -> section -> chunk` hierarchy; graph-traversal retrieval via RECALL as analogue to LLM-guided tree descent |
-
-## Test fixtures
-
-`scripts/download_fixtures.py` downloads ~47MB of test fixtures (gitignored). Run once per dev environment.
-
-| Category | Count | Size | Source |
-|----------|-------|------|--------|
-| Text | 20 books | 15MB | Project Gutenberg (fiction, non-fiction, short stories) |
-| PDF | 6 papers | 18MB | arXiv (attention, BERT, RAG, toolformer, node2vec, word2vec) |
-| HTML | 5 articles | 2MB | Wikipedia (transformer, LLM, knowledge graph, RAG, vector DB) |
-| Markdown | 5 READMEs | 140KB | GitHub vector DB repos (faiss, chroma, qdrant, milvus, pgvector) |
-| CSV | 5 datasets | 64KB | UCI/seaborn (iris, tips, countries, penguins, mpg) |
-| Images | 17 photos | 520KB | Wikimedia CC0 (dog, cat, elephant, pizza, guitar, tower, etc.) |
-| Voice | 25 clips | 12MB | OpenSLR: Hindi, English, Tamil, Telugu, Marathi (real human speakers) |
-
-## Known gaps
-
-| Issue | Severity | Status |
-|-------|----------|--------|
-| ~~WAL not wired~~ | ~~Medium~~ | Fixed (PR #17) |
-| ~~executor_base.py bloat~~ | ~~Medium~~ | Fixed (PR #17) |
-| ~~Optimizer SQL perf~~ | ~~Low~~ | Fixed (PR #17) |
-| executor_system.py untouched | Low | 841 lines, not moved to handler registry pattern |
-| No E2E optimize test | Medium | Missing: ingest -> delete -> optimize -> query -> checkpoint -> reload |
-| ast_nodes.py flat | Low | 534 lines, could split into subpackage by domain |
-| Mock test layer not wired | Medium | Fixtures downloaded, pytest integration pending |
-
-## Architecture decisions
-
-- **Single agent per DB** - no locking, optimizer safe under exclusive access
-- **Config: one file, sectioned by engine** - not per-engine config files
-- **Inferred structure: durable but not sacred** - section nodes carry `__confidence__=0.6`
-- **Blob lifecycle != memory lifecycle** - `SYS RETAIN` deletes bytes, `FORGET NODE` deletes everything
-- **Auto-optimize disabled by default** - agent controls when via `SYS HEALTH` + `SYS OPTIMIZE`
-- **Adding a DSL command = 2 files** - grammar rule + handler file with `@handles`
-- **Public API over private access** - `server.py` uses `get_all_nodes()` / `cost_threshold` / `ceiling_mb` instead of `_store._ceiling_bytes`
-- **Mixin-based executor** - `ExecutorBase` inherits `VisibilityMixin` + `FilteringMixin`, each <100 lines
-
-## Speed Demon evaluation
-
-| Tool | Verdict | Why |
-|------|---------|-----|
-| msgspec | **USING** | 6x over json, already a dependency |
-| orjson | Skip | 1.37x over msgspec encode, 0.89x decode. Marginal, extra dep. |
-| polars | Wrong fit | Slot-indexed numpy arrays != dataframes. +80MB bundle. |
-| uvloop | N/A | No event loop (single-threaded sync DB) |
-| robyn | N/A | Server is 200 LOC wrapper, not bottleneck |
-
-### Session 3: Implementation improvements + agentic memory hardening (PR #18, #20)
-
-#### Bug fixes (7)
-- **uint8 kind truncation** - deserializer loaded node_kinds as uint8, corrupting graphs with >255 kinds
-- **Version mismatch** - `__init__.py` said 0.2.0, `pyproject.toml` said 0.3.0
-- **tempfile TOCTOU race** - DocumentStore used `mktemp` (race condition), fixed to `mkstemp`
-- **Regex monkey-patching** - LIKE evaluation cached compiled regex on shared AST nodes, fixed with module-level LRU cache
-- **ORDER BY string TypeError** - `slots` array clobbered by None when column sort returned None for interned strings
-- **UPDATE EDGE invisible** - `_edge_data_idx` not updated alongside `_edges_by_type`, making edge mutations invisible
-- **CSR shape mismatch** - scipy indptr not padded when nodes added after last edge rebuild; added `resize_csr()` utility
-
-#### Performance (4)
-- **get_edges_to CSR pre-check** - uses transpose CSR to skip edge types with zero incoming edges
-- **O(1) edge data index** - `_edge_data_idx: dict[str, dict[tuple, dict]]` replaces O(E) list scan
-- **VectorStore native buffer API** - `save(None)` / `load(bytes)` instead of temp files
-- **Incremental checkpoint** - dirty flags per subsystem; skip clean blobs on checkpoint
-
-#### Security (2)
-- **Bearer auth + rate limiter** - `GRAPHSTORE_AUTH_TOKEN` env var, sliding-window rate limiter, configurable CORS
-- **DSL input validation** - max query length, null byte rejection, batch size limit
-
-#### Concurrency (1)
-- **Command queue** - `GraphStore(threaded=True)` serializes all access through `PriorityQueue` with dedicated daemon worker thread. Interactive queries (priority 0) complete before background jobs (priority 1). `submit_background()` for fire-and-forget maintenance.
-
-#### Observability (3)
-- **Silent except -> logger.debug** - 24 locations across 10 files now log instead of swallowing
-- **Background failure logging** - `submit_background` done callback logs at WARNING
-- **Intelligent log layer** - query_log enriched with auto-tags (read/write/intelligence/belief/ingest/vault/system), trace binding (`bind_trace`/`discard_trace`), source tracking (user/cron/background), structured event emission via `graphstore.events` logger, `SYS LOG` DSL command, `GET /api/logs` REST endpoint
-
-#### Scheduled jobs (1)
-- **CRON scheduler** - persistent jobs in SQLite, full cron expressions via croniter, daemon timer thread, `SYS CRON ADD/DELETE/ENABLE/DISABLE/LIST/RUN`, survives restarts, requires `threaded=True`
-
-#### Retrieval quality (5)
-- **REMEMBER hybrid retrieval** - `REMEMBER "query" LIMIT 10` fuses 5 signals: vector similarity (0.30) + BM25 (0.20) + recency (0.15) + confidence (0.20) + recall frequency (0.15). Score breakdown exposed in results.
-- **REMEMBER TOKENS** - `REMEMBER "query" TOKENS 4000` fills up to N tokens (estimated len//4) instead of N nodes. Agent gets exactly the right context budget.
-- **Full text embedding** - INGEST embeds full `chunk.text` with heading prefix, not truncated `summary[:200]`. Dramatically improves vector search quality.
-- **Full text FTS5** - LEXICAL SEARCH indexes full chunk text, not summary. BM25 finds content anywhere in the chunk.
-- **Accumulative RECALL** - spreading activation now accumulates (`activation += spread * decay`) instead of overwriting per hop. Closer nodes retain higher activation. Configurable via `dsl.recall_decay`.
-
-#### Engine synchronization (8)
-- **Auto re-embed on UPDATE** - single `UPDATE NODE` and bulk `UPDATE NODES` both re-embed when schema EMBED field changes
-- **Bulk DELETE cleans vectors** - `DELETE NODES WHERE` removes vectors before tombstoning
-- **RETRACT removes vector immediately** - no more ghost vectors until optimize
-- **DELETE NODE cleans DocumentStore** - blob removed on regular delete (was only on FORGET)
-- **FORGET cleans FTS5** - FTS5 orphan entries removed
-- **SYS EXPIRE cleans vectors** - expired node vectors removed immediately
-- **SIMILAR TO exposes confidence** - `_confidence` field in results for transparency
-- **CREATE NODE + DOCUMENT auto-embeds** - DOCUMENT clause text gets embedded if embedder available
-
-#### Architecture (2)
-- **WALManager + OptimizerScheduler extracted** - `graphstore.py` reduced from 496 to 392 lines
-- **Vault sync uses CoreStore API** - no more direct `_edges_by_type` mutation
-
-#### Memory safety (2)
-- **Accurate memory accounting** - `measure()` returns real component breakdown (arrays, columns, strings, edges, vectors, CSR)
-- **Emergency eviction** - `SYS EVICT` removes oldest non-protected nodes; auto-eviction at 90% ceiling via health check
-
-#### Config completeness (1)
-- **54 config fields, all wired** - zero hardcoded magic numbers. Every tunable value flows through `graphstore.json`. Includes: chunk size, overlap, summary length, FTS full text, vector oversample, recall decay, REMEMBER weights, optimizer thresholds, vision defaults, rate limiter, batch limits, busy timeout, protected kinds, model paths.
-
-#### Testing (5)
-- **980 tests** (up from 843), 0 failures
-- **48 new tests** for previously untested commands (WEIGHTED PATH/DISTANCE, UPDATE EDGE, FORGET NODE, ORDER BY string, /api/logs, /api/script)
-- **26 E2E tests with real Model2Vec embedder** - ingest real ML papers, semantic search finds attention mechanism content, full agent lifecycle (ingest -> knowledge graph -> beliefs -> RECALL -> REMEMBER -> trace -> checkpoint)
-- **37 integration tests with mock embedder** - all 6 engines exercised with 86 real fixture files
-- **Core test proven**: "What do transformers and BERT have in common?" returns ML paper chunks about attention mechanisms ✅
-
-### Engine sync status (verified via behaviour analysis)
-
-Every mutation propagates to all relevant engines:
-
-| Mutation | CoreStore | VectorStore | DocumentStore | FTS5 |
-|----------|-----------|-------------|---------------|------|
-| CREATE NODE + EMBED schema | ✅ | ✅ auto-embed | - | - |
-| CREATE NODE + DOCUMENT | ✅ | ✅ auto-embed | ✅ blob | - |
-| UPDATE NODE (embed field) | ✅ | ✅ auto re-embed | - | - |
-| UPDATE NODES bulk | ✅ | ✅ auto re-embed | - | - |
-| DELETE NODE | ✅ tombstone | ✅ removed | ✅ blob removed | - |
-| DELETE NODES bulk | ✅ tombstone | ✅ removed | - | - |
-| FORGET NODE | ✅ cascade | ✅ removed | ✅ removed | ✅ cleaned |
-| RETRACT | ✅ __retracted__ | ✅ removed immediately | - | - |
-| SYS EXPIRE | ✅ tombstone | ✅ removed | - | - |
-| INGEST | ✅ nodes+edges | ✅ full text | ✅ blobs+summaries | ✅ full text |
-
-### Retrieval model
-
-| Command | Signals | Token Budget | Use Case |
-|---------|---------|-------------|----------|
-| SIMILAR TO | Vector cosine similarity | LIMIT N nodes | Pure semantic search |
-| LEXICAL SEARCH | BM25 on full text | LIMIT N nodes | Keyword/phrase search |
-| RECALL FROM | Accumulative spreading activation (decay=0.7) × importance × confidence × recency | LIMIT N nodes | Associative memory recall |
-| REMEMBER | 5-signal fusion: vector (0.30) + BM25 (0.20) + recency (0.15) + confidence (0.20) + recall_count (0.15) | **TOKENS N** or LIMIT N | Agent context retrieval |
-
-## Known gaps
-
-| Issue | Severity | Status |
-|-------|----------|--------|
-| ~~WAL not wired~~ | ~~Medium~~ | Fixed (PR #17) |
-| ~~executor_base.py bloat~~ | ~~Medium~~ | Fixed (PR #17) |
-| ~~Optimizer SQL perf~~ | ~~Low~~ | Fixed (PR #17) |
-| ~~Embedding quality (summary[:200])~~ | ~~Critical~~ | Fixed (PR #20) - full text embedded |
-| ~~Engine sync on mutation~~ | ~~Critical~~ | Fixed (PR #20) - all mutations propagate |
-| ~~RECALL model (non-cumulative)~~ | ~~High~~ | Fixed (PR #20) - accumulative with decay |
-| ~~Config not wired (5 fields)~~ | ~~High~~ | Fixed (PR #20) - 54 fields, all wired |
-| ~~Token budget retrieval~~ | ~~High~~ | Fixed (PR #20) - REMEMBER TOKENS N |
-| Memory consolidation (LLM callback) | Medium | Needs design - requires external LLM to summarize old memories |
-| Query-type routing (factual/comparative/causal) | Low | Future - REMEMBER works for 80% of queries |
-| Cross-engine transaction on INGEST | Low | Snapshot/rollback primitives exist, not wired into INGEST |
-| executor_system.py untouched | Low | 841 lines, not moved to handler registry pattern |
-| Mislabeled fixture | Low | `art-of-war.txt` is actually Origin of Species |
-
-## Architecture decisions
-
-- **Single agent per DB** - no locking, optimizer safe under exclusive access
-- **Opt-in threading** - `threaded=True` enables command queue for multi-agent access, default has zero overhead
-- **Config: one file, sectioned by engine** - 54 fields, all with backward-compatible defaults
-- **Inferred structure: durable but not sacred** - section nodes carry `__confidence__=0.6`
-- **Blob lifecycle != memory lifecycle** - `SYS RETAIN` deletes bytes, `FORGET NODE` deletes everything
-- **Auto-optimize disabled by default** - agent controls when via `SYS HEALTH` + `SYS OPTIMIZE`
-- **Adding a DSL command = 2 files** - grammar rule + handler file with `@handles`
-- **Public API over private access** - `server.py` uses `get_all_nodes()` / `cost_threshold` / `ceiling_mb` instead of `_store._ceiling_bytes`
-- **Mixin-based executor** - `ExecutorBase` inherits `VisibilityMixin` + `FilteringMixin`, each <100 lines
-- **Document truth = raw bytes** - CoreStore columns, VectorStore embeddings, FTS5 index are derived search indices that auto-sync on mutation
-- **CRON requires threaded mode** - background work needs the command queue for safe serialization
-- **Retrieval feedback loop** - REMEMBER auto-increments `__recall_count__` and `__last_recalled_at__`; frequently useful memories become stickier
-
-## What to pick up next
-
-1. **Memory consolidation** - LLM callback interface for summarizing old episodic memories into semantic memories
-2. **MCP server implementation** (see `mcp_refs/` for design decisions)
-3. Move `executor_system.py` handlers into registry pattern
-4. Docker image + compose for production deployment
+- a per-file purpose matrix for every package and top-level file
+- a dependency graph by subsystem
+- a DSL feature matrix with parser/executor/test references
+- a detailed test coverage gap analysis

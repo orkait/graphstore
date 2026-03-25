@@ -403,31 +403,17 @@ def optimize_all(store: CoreStore, vector_store=None, document_store=None) -> di
     return results
 
 
-def evict_oldest(store: CoreStore, vector_store=None, document_store=None,
-                 target_bytes: int = 0, protected_kinds: set | None = None) -> dict:
-    """Emergency eviction: delete oldest non-essential nodes until under target.
-
-    Evicts nodes in order of __updated_at__ (oldest first).
-    Skips nodes with kind in protected_kinds.
-    Returns {"evicted": count, "bytes_before": N, "bytes_after": N}.
-    """
-    from graphstore.core.memory import measure
-
-    PROTECTED_KINDS = protected_kinds if protected_kinds is not None else {"schema", "config", "system"}
-
-    before = measure(store, vector_store)
-    if target_bytes <= 0 or before["total"] <= target_bytes:
-        return {"evicted": 0, "bytes_before": before["total"], "bytes_after": before["total"]}
-
+def _get_evictable_slots_sorted(store: CoreStore, protected_kinds: set) -> list[int]:
+    """Helper: get ascending sorted list of (slot) by __updated_at__ for oldest-first eviction."""
     n = store._next_slot
     if n == 0:
-        return {"evicted": 0, "bytes_before": before["total"], "bytes_after": before["total"]}
+        return []
 
     live = store.compute_live_mask(n)
     live_slots = np.nonzero(live)[0]
 
     if len(live_slots) == 0:
-        return {"evicted": 0, "bytes_before": before["total"], "bytes_after": before["total"]}
+        return []
 
     # Get updated_at for sorting
     updated_col = store.columns.get_column("__updated_at__", n)
@@ -438,42 +424,41 @@ def evict_oldest(store: CoreStore, vector_store=None, document_store=None,
     else:
         timestamps = np.zeros(n, dtype=np.float64)
 
-    # Sort live slots by timestamp ascending (oldest first)
-    slot_times = [(int(s), timestamps[s]) for s in live_slots]
-    slot_times.sort(key=lambda x: x[1])
-
-    evicted = 0
-    for slot, ts in slot_times:
-        # Check if we're under target
-        if evicted > 0 and evicted % 100 == 0:
-            current = measure(store, vector_store)
-            if current["total"] <= target_bytes:
-                break
-
-        # Skip protected kinds
-        kind_id = int(store.node_kinds[slot])
+    # Filter protected kinds before sorting
+    candidates = []
+    for s in live_slots:
+        kind_id = int(store.node_kinds[s])
         if kind_id >= 0:
             try:
                 kind_name = store.string_table.lookup(kind_id)
-                if kind_name in PROTECTED_KINDS:
+                if kind_name in protected_kinds:
                     continue
             except KeyError:
                 pass
+        candidates.append((int(s), timestamps[s]))
 
-        # Evict: tombstone the node
+    # Sort live slots by timestamp ascending (oldest first)
+    candidates.sort(key=lambda x: x[1])
+    return [s[0] for s in candidates]
+
+
+def _evict_nodes(store: CoreStore, slots_to_evict: list[int], vector_store=None, document_store=None) -> int:
+    """Helper: actually evict the given slots."""
+    if not slots_to_evict:
+        return 0
+
+    evicted = 0
+    for slot in slots_to_evict:
         str_id = int(store.node_ids[slot])
         if str_id < 0:
             continue
         try:
-            node_id = store.string_table.lookup(str_id)
+            _ = store.string_table.lookup(str_id)
         except KeyError:
             continue
 
-        # Remove from vector store
         if vector_store is not None:
             vector_store.remove(slot)
-
-        # Remove from document store
         if document_store is not None:
             try:
                 document_store.delete_document(slot)
@@ -506,5 +491,59 @@ def evict_oldest(store: CoreStore, vector_store=None, document_store=None,
         store._edges_dirty = True
         store._ensure_edges_built()
 
+    return evicted
+
+
+def evict_by_bytes(store: CoreStore, target_bytes: int, vector_store=None, document_store=None, protected_kinds: set | None = None) -> dict:
+    """Evict oldest non-protected nodes until memory usage is at or below target_bytes."""
+    from graphstore.core.memory import measure
+    
+    PROTECTED_KINDS = protected_kinds if protected_kinds is not None else {"schema", "config", "system"}
+    
+    before = measure(store, vector_store)
+    if before["total"] <= target_bytes:
+        return {"evicted": 0, "bytes_before": before["total"], "bytes_after": before["total"]}
+
+    candidates = _get_evictable_slots_sorted(store, PROTECTED_KINDS)
+    evicted = 0
+    
+    to_evict = []
+    for slot in candidates:
+        to_evict.append(slot)
+        # Check if we're under target periodically to avoid measuring every node
+        if len(to_evict) % 100 == 0:
+            _evict_nodes(store, to_evict, vector_store, document_store)
+            evicted += len(to_evict)
+            to_evict.clear()
+            
+            current = measure(store, vector_store)
+            if current["total"] <= target_bytes:
+                break
+                
+    if to_evict:
+        _evict_nodes(store, to_evict, vector_store, document_store)
+        evicted += len(to_evict)
+
+    after = measure(store, vector_store)
+    return {"evicted": evicted, "bytes_before": before["total"], "bytes_after": after["total"]}
+
+
+def evict_by_count(store: CoreStore, limit: int, vector_store=None, document_store=None, protected_kinds: set | None = None) -> dict:
+    """Evict exactly limit number of oldest non-protected nodes."""
+    from graphstore.core.memory import measure
+    
+    if limit <= 0:
+        before = measure(store, vector_store)
+        return {"evicted": 0, "bytes_before": before["total"], "bytes_after": before["total"]}
+        
+    PROTECTED_KINDS = protected_kinds if protected_kinds is not None else {"schema", "config", "system"}
+    
+    before = measure(store, vector_store)
+    
+    candidates = _get_evictable_slots_sorted(store, PROTECTED_KINDS)
+    to_evict = candidates[:limit]
+    
+    evicted = _evict_nodes(store, to_evict, vector_store, document_store)
+    
     after = measure(store, vector_store)
     return {"evicted": evicted, "bytes_before": before["total"], "bytes_after": after["total"]}

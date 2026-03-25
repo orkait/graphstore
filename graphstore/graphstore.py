@@ -418,6 +418,115 @@ class GraphStore:
             self._document_store.close()
             self._document_store = None
 
+    def reset_memory(self) -> Result:
+        """Reset the in-memory graph (nodes, edges) to empty. SQLite is left alone."""
+        if self._optimizer.optimizing:
+            raise OptimizationInProgress()
+        
+        self._store = CoreStore(ceiling_bytes=self._ceiling_bytes,
+                                capacity=self._config.core.initial_capacity)
+        self._schema = SchemaRegistry()
+        
+        if self._vector_store is not None:
+            from graphstore.vector.store import VectorStore
+            self._vector_store = VectorStore(dims=self._vector_store.dims, capacity=self._config.core.initial_capacity)
+        
+        self._executor.store = self._store
+        self._executor.schema = self._schema
+        self._executor._vector_store = self._vector_store
+        
+        self._sys_executor.store = self._store
+        self._sys_executor.schema = self._schema
+        self._sys_executor._vector_store = self._vector_store
+        
+        self._wal._store = self._store
+        self._wal._schema = self._schema
+        self._wal._vector_store = self._vector_store
+        
+        self.discard_trace()
+        return Result(kind="ok", data={"reset": "memory"}, count=0)
+
+    def reset_store(self, preserve_config: bool = True) -> Result:
+        """Gracefully drop and recreate SQLite internal tables, clear memory, restart store."""
+        if self._conn:
+            self.checkpoint()
+            old_script = self.get_script()
+            
+            self._conn.execute("DELETE FROM blobs")
+            self._conn.execute("DELETE FROM wal")
+            self._conn.execute("DELETE FROM query_log")
+            self._conn.execute("DELETE FROM metadata")
+            self._conn.commit()
+            
+            if old_script:
+                self.set_script(old_script)
+                
+            if self._document_store and self._document_store._conn:
+                doc_conn = self._document_store._conn
+                doc_conn.execute("DELETE FROM documents")
+                doc_conn.execute("DELETE FROM summaries")
+                doc_conn.execute("DELETE FROM doc_fts")
+                doc_conn.execute("DELETE FROM images")
+                doc_conn.execute("DELETE FROM doc_metadata")
+                doc_conn.commit()
+                
+        self.reset_memory()
+        return Result(kind="ok", data={"reset": "store"}, count=0)
+        
+    def reset_session(self) -> Result:
+        """Clears all bindings, active context, trace IDs, and terminates active Voice sessions."""
+        if self._store:
+            self._store._active_context = None
+        self.discard_trace()
+        if self._stt:
+            self._stt.stop_listening()
+        return Result(kind="ok", data={"reset": "session"}, count=0)
+
+    def get_runtime_config(self) -> Result:
+        """Return the running configuration as a dict."""
+        import msgspec
+        data = msgspec.json.decode(msgspec.json.encode(self._config))
+        return Result(kind="config", data=data, count=1)
+        
+    def get_persisted_config(self) -> Result:
+        """Read the graphstore.json from disk."""
+        if self._path is None:
+            return Result(kind="config", data=None, count=0)
+        from graphstore.config import load_config
+        cfg = load_config(self._path / "graphstore.json")
+        import msgspec
+        data = msgspec.json.decode(msgspec.json.encode(cfg))
+        return Result(kind="config", data=data, count=1)
+        
+    def update_runtime_config(self, changes: dict) -> Result:
+        """Update live features."""
+        from graphstore.config import merge_kwargs
+        self._config = merge_kwargs(self._config, **changes)
+        
+        if "ceiling_mb" in changes:
+            self.ceiling_mb = changes["ceiling_mb"]
+        if "cost_threshold" in changes:
+            self.cost_threshold = changes["cost_threshold"]
+            
+        return Result(kind="ok", data={"updated": "runtime"}, count=1)
+        
+    def update_persisted_config(self, changes: dict) -> Result:
+        """Update graphstore.json on disk."""
+        if self._path is None:
+            return Result(kind="error", data={"message": "No persistence path set"}, count=0)
+            
+        from graphstore.config import load_config, save_config, merge_kwargs
+        cfg_path = self._path / "graphstore.json"
+        
+        if cfg_path.exists():
+            cfg = load_config(cfg_path)
+        else:
+            cfg = self._config
+            
+        new_cfg = merge_kwargs(cfg, **changes)
+        save_config(new_cfg, cfg_path)
+        return Result(kind="ok", data={"updated": "persisted"}, count=1)
+
     @property
     def node_count(self) -> int:
         return self._store.node_count
