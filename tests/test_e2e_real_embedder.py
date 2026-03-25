@@ -24,7 +24,13 @@ try:
 except Exception:
     HAS_EMBEDDER = False
 
-pytestmark = pytest.mark.skipif(not HAS_EMBEDDER, reason="model2vec not available")
+# Skip entire module if PDF fixtures not present (gitignored, not in CI)
+HAS_FIXTURES = (FIXTURES / "pdf" / "attention-is-all-you-need.pdf").exists()
+
+pytestmark = [
+    pytest.mark.skipif(not HAS_EMBEDDER, reason="model2vec not available"),
+    pytest.mark.skipif(not HAS_FIXTURES, reason="PDF fixtures not available (gitignored)"),
+]
 
 
 @pytest.fixture(scope="module")
