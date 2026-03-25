@@ -54,7 +54,11 @@ class GraphStore:
                  vault=_UNSET, retention=_UNSET,
                  config: GraphStoreConfig | None = None,
                  config_path: str | None = None,
-                 threaded: bool = False):
+                 threaded: bool = False,
+                 ingestors: dict | None = None,
+                 chunker=None,
+                 stt=None,
+                 tts=None):
         # Load config: explicit object > explicit path > env var > db dir > defaults
         if config is not None:
             self._config = config
@@ -91,14 +95,23 @@ class GraphStore:
         self._stt = None
         self._tts = None
 
-        if voice:
+        # Custom STT/TTS override built-ins; voice=True enables built-ins when not overridden
+        if stt is not None:
+            self._stt = stt
+        elif voice:
             try:
                 from graphstore.voice.stt import MoonshineSTT
-                from graphstore.voice.tts import PiperTTS
                 self._stt = MoonshineSTT()
+            except ImportError:
+                pass
+        if tts is not None:
+            self._tts = tts
+        elif voice:
+            try:
+                from graphstore.voice.tts import PiperTTS
                 self._tts = PiperTTS()
             except ImportError:
-                pass  # Voice not installed; speak/listen will raise on use
+                pass
 
         # Initialize embedder
         emb_cfg = cfg.vector.embedder
@@ -119,6 +132,24 @@ class GraphStore:
         if cfg.vector.model_cache_dir:
             from graphstore.registry.installer import set_cache_dir
             set_cache_dir(cfg.vector.model_cache_dir)
+
+        # Ingestor registry — only constructed when custom ingestors passed.
+        # When None, the handler falls through to router.ingest_file() (preserves "direct" fast-path).
+        self._ingestor_registry = None
+        if ingestors:
+            from graphstore.ingest.registry import IngestorRegistry
+            self._ingestor_registry = IngestorRegistry()
+            for ext, inst in ingestors.items():
+                if not hasattr(inst, 'supported_extensions') or not inst.supported_extensions:
+                    inst.supported_extensions = [ext]
+                if not hasattr(inst, 'name') or not inst.name:
+                    inst.name = f"custom_{ext}"
+                # Directly map the dict key extension — preserves user intent
+                self._ingestor_registry._instances[inst.name] = inst
+                self._ingestor_registry._ext_map[ext] = inst.name
+
+        # Custom chunker (None → handler uses chunk_by_heading from chunker.py)
+        self._chunker = chunker
 
         # Vector store (lazy init on first vector operation)
         self._vector_store = None
@@ -157,7 +188,9 @@ class GraphStore:
                                   embedder=self._embedder,
                                   vector_store=self._vector_store,
                                   document_store=self._document_store,
-                                  ingest_root=self._ingest_root)
+                                  ingest_root=self._ingest_root,
+                                  ingestor_registry=self._ingestor_registry,
+                                  chunker=self._chunker)
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
         from graphstore.dsl.parser import set_cache_size
         set_cache_size(cfg.dsl.plan_cache_size)

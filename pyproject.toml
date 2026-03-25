@@ -60,6 +60,8 @@ playground = [
 ]
 voice = [
     "sounddevice>=0.4",
+    "moonshine-voice",
+    "piper-tts>=1.4",
 ]
 ingest-pro = [
     "docling>=2.0",

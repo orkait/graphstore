@@ -85,3 +85,10 @@ def chunk_fixed(text: str, chunk_size: int = 500, overlap: int = 50, summary_max
         if pos >= len(text):
             break
     return chunks
+
+
+class HeadingChunker:
+    """Default ChunkerProtocol implementation — delegates to chunk_by_heading."""
+
+    def chunk(self, text: str, **kwargs) -> list[Chunk]:
+        return chunk_by_heading(text, **kwargs)

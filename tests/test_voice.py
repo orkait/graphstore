@@ -125,7 +125,7 @@ class TestVoiceInstalled:
 
     @pytest.fixture(autouse=True)
     def skip_if_no_voice(self):
-        pytest.importorskip("moonshine")
+        pytest.importorskip("moonshine_voice")
         pytest.importorskip("piper")
 
     def test_stt_init(self):

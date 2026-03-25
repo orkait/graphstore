@@ -21,7 +21,6 @@ class IngestHandlers:
     def _ingest(self, q: IngestStmt) -> Result:
         """INGEST: parse file, chunk, create graph nodes + edges, store documents."""
         from graphstore.ingest.router import ingest_file, EXTENSION_MAP
-        from graphstore.ingest.chunker import chunk_by_heading
 
         resolved = _Path(q.file_path).resolve()
         if self._ingest_root:
@@ -41,12 +40,31 @@ class IngestHandlers:
         if ext in image_exts and q.vision_model:
             return self._ingest_image_with_vision(q, safe_path, ext)
 
-        result = ingest_file(safe_path, using=q.using)
+        if self._ingestor_registry is not None:
+            ingestor = self._ingestor_registry.resolve(safe_path, using=q.using)
+            result = ingestor.convert(safe_path)
+        else:
+            result = ingest_file(safe_path, using=q.using)
 
         chunk_size = getattr(self, '_chunk_max_size', 2000)
         summary_len = getattr(self, '_summary_max_length', 200)
         chunk_overlap = getattr(self, '_chunk_overlap', 50)
-        chunks = chunk_by_heading(result.markdown, max_chunk_size=chunk_size, summary_max_len=summary_len, overlap=chunk_overlap)
+
+        if self._chunker is not None:
+            chunks = self._chunker.chunk(
+                result.markdown,
+                max_chunk_size=chunk_size,
+                summary_max_len=summary_len,
+                overlap=chunk_overlap,
+            )
+        else:
+            from graphstore.ingest.chunker import chunk_by_heading
+            chunks = chunk_by_heading(
+                result.markdown,
+                max_chunk_size=chunk_size,
+                summary_max_len=summary_len,
+                overlap=chunk_overlap,
+            )
 
         parent_id = q.node_id
         if not parent_id:
