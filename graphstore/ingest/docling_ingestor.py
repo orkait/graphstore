@@ -4,7 +4,14 @@ from graphstore.ingest.base import Ingestor, IngestResult
 
 class DoclingIngestor(Ingestor):
     name = "docling"
-    supported_extensions = ["pdf", "docx"]
+    supported_extensions = [
+        "pdf", "docx", "pptx", "xlsx",                            # office / documents
+        "md", "html", "htm", "csv",                               # markup / structured
+        "tex", "adoc",                                             # LaTeX, AsciiDoc
+        "png", "jpg", "jpeg", "tiff", "tif", "bmp", "webp",       # images
+        "m4a", "aac",                                              # audio (requires docling[asr])
+        "mp4", "avi", "mov",                                       # video (requires docling[asr] + ffmpeg)
+    ]
 
     def convert(self, file_path: str, **kwargs) -> IngestResult:
         # Lazy import - docling is ~200MB, only loaded when explicitly requested
