@@ -117,7 +117,7 @@ class TestChunkerProtocol:
 
 class TestVoiceProtocols:
     def test_moonshine_stt_satisfies_protocol_when_installed(self):
-        pytest.importorskip("moonshine")
+        pytest.importorskip("moonshine_voice")
         from graphstore.voice.protocol import STTProtocol
         from graphstore.voice.stt import MoonshineSTT
         stt = MoonshineSTT()
