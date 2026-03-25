@@ -38,6 +38,7 @@ Six engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vect
 | **Working memory** | `CREATE NODE ... EXPIRES IN 30m` + `SYS EXPIRE` | 9 μs |
 | **Temporal queries** | `NODES WHERE __created_at__ > NOW() - 7d` | 102 μs |
 | **Isolated reasoning** | `BIND CONTEXT "session"` ... `DISCARD CONTEXT "session"` | 72 μs |
+| **Self-healing rules** | `SYS EVOLVE RULE "r" WHEN recall_hit_rate <= 0.4 THEN RUN SYS REEMBED COOLDOWN 86400` | event-driven |
 | **Scheduled maintenance** | `SYS CRON ADD "expire" SCHEDULE "0 * * * *" QUERY "SYS EXPIRE"` | persistent |
 | **Activity log** | `SYS LOG LIMIT 20` / `SYS LOG TRACE "session-42"` | queryable |
 | **Memory safety** | `SYS EVICT` (emergency eviction when approaching ceiling) | auto |
@@ -158,6 +159,32 @@ NODE "doc:q3:chunk:7" WITH DOCUMENT
 -- Auto-wire similar chunks across all documents
 SYS CONNECT
 ```
+
+**Custom ingestors and chunkers** - swap any part of the pipeline at construction:
+
+```python
+from graphstore.ingest.base import Ingestor, IngestResult, Chunk
+
+class MyIngestor(Ingestor):
+    name = "myformat"
+    supported_extensions = ["myext"]
+
+    def convert(self, file_path: str, **kwargs) -> IngestResult:
+        text = my_parser.parse(file_path)
+        return IngestResult(markdown=text, parser_used="myformat")
+
+class SentenceChunker:
+    def chunk(self, text: str, **kwargs) -> list[Chunk]:
+        ...
+
+g = GraphStore(
+    path="./brain",
+    ingestors={"pdf": MyPDFIngestor(), "myext": MyIngestor()},
+    chunker=SentenceChunker(),
+)
+```
+
+Custom ingestors override built-ins per extension. Any format not overridden falls through to the default tiered router. Custom chunkers replace `HeadingChunker` globally.
 
 </details>
 
@@ -281,6 +308,53 @@ Retrieval feedback: REMEMBER auto-increments `__recall_count__` and `__last_reca
 </details>
 
 <details>
+<summary><strong>Evolution Engine</strong> - signal-driven self-tuning and self-healing rules</summary>
+
+The evolution engine watches live signals and fires WHEN/THEN rules automatically. Rules persist in SQLite and survive restarts.
+
+```sql
+-- Self-tuning: adjust config when signals breach thresholds
+SYS EVOLVE RULE "scale-ceiling"
+  WHEN memory_pct >= 85
+  THEN ADJUST ceiling_mb BY 64 UNTIL 1024
+  COOLDOWN 3600
+  PRIORITY 5
+
+-- Self-healing: trigger maintenance when quality degrades
+SYS EVOLVE RULE "reindex-on-drift"
+  WHEN recall_hit_rate <= 0.4
+  THEN RUN SYS REEMBED
+  COOLDOWN 86400
+
+SYS EVOLVE RULE "compact-on-bloat"
+  WHEN tombstone_ratio >= 0.3
+  THEN RUN SYS OPTIMIZE COMPACT
+  COOLDOWN 3600
+
+SYS EVOLVE RULE "expire-on-misses"
+  WHEN recall_misses >= 100
+  THEN RUN SYS EXPIRE
+  COOLDOWN 7200
+
+-- Manage rules
+SYS EVOLVE LIST
+SYS EVOLVE SHOW "reindex-on-drift"
+SYS EVOLVE DISABLE "rule-name"
+SYS EVOLVE HISTORY LIMIT 10
+SYS EVOLVE RESET
+```
+
+**Available signals** (13): `memory_pct`, `memory_mb`, `node_count`, `tombstone_ratio`, `string_bloat`, `recall_hit_rate`, `recall_misses`, `avg_similarity`, `eviction_count`, `query_rate`, `write_rate`, `edge_density`, `wal_pending`
+
+**Tunable params** (10): `ceiling_mb`, `eviction_target_ratio`, `recall_decay`, `chunk_max_size`, `cost_threshold`, `optimize_interval`, `similarity_threshold`, `duplicate_threshold`, `remember_weights`, `protected_kinds`
+
+**THEN actions**: `SET param = value`, `ADJUST param BY delta UNTIL target`, `ADD param "element"`, `REMOVE param "element"`, `RUN <any DSL query>`
+
+Rules have `COOLDOWN` (minimum seconds between fires) and `PRIORITY` (lower number fires first, wins conflicts).
+
+</details>
+
+<details>
 <summary><strong>CRON Scheduler</strong> - persistent scheduled jobs with full cron syntax</summary>
 
 ```sql
@@ -379,6 +453,7 @@ DISCARD CONTEXT "reasoning-session-42"
 <summary><strong>Voice</strong> (opt-in: graphstore install-voice)</summary>
 
 ```python
+# Built-in: Moonshine STT + Piper TTS
 g = GraphStore(path="./brain", voice=True)
 
 # Agent speaks
@@ -391,6 +466,27 @@ g.stop_listening()
 # Ingest audio files
 g.execute('INGEST "meeting.wav"')  # Moonshine transcribes → chunks → embeds
 ```
+
+Custom STT/TTS adapters override the built-ins - any duck-typed object satisfying `STTProtocol` / `TTSProtocol` works:
+
+```python
+from graphstore.voice.protocol import STTProtocol, TTSProtocol
+
+class MyWhisperSTT:
+    def transcribe_file(self, audio_path: str) -> str: ...
+    def start_listening(self, on_text) -> None: ...
+    def stop_listening(self) -> None: ...
+    @property
+    def is_listening(self) -> bool: ...
+
+class MyTTS:
+    def speak(self, text: str) -> None: ...
+    def synthesize(self, text: str) -> bytes: ...
+
+g = GraphStore(path="./brain", stt=MyWhisperSTT(), tts=MyTTS())
+```
+
+Custom adapters take precedence over `voice=True`.
 
 </details>
 
@@ -477,6 +573,9 @@ SYS CRON ADD "name" SCHEDULE "0 * * * *" QUERY "SYS EXPIRE"
 SYS CRON DELETE / ENABLE / DISABLE / LIST / RUN "name"
 SYS EVICT
 SYS HEALTH / SYS OPTIMIZE
+SYS EVOLVE RULE "name" WHEN signal OP value [AND ...] THEN action [THEN ...] [COOLDOWN n] [PRIORITY n]
+SYS EVOLVE LIST / SHOW "name" / ENABLE "name" / DISABLE "name" / DELETE "name"
+SYS EVOLVE HISTORY [LIMIT n] / RESET
 ```
 
 </details>
@@ -523,8 +622,13 @@ g = GraphStore(
     ceiling_mb=256,          # graph memory ceiling
     embedder="default",      # "default" (model2vec) or custom Embedder
     threaded=True,           # thread-safe command queue + cron scheduler
-    voice=False,             # True to enable STT/TTS (opt-in)
+    voice=False,             # True to enable built-in STT/TTS (opt-in)
     vault="./notes",         # markdown vault directory (None = disabled)
+    # Extensibility - swap any subsystem
+    ingestors={"pdf": MyPDFIngestor()},  # override ingestor per extension
+    chunker=MyChunker(),                 # replace default HeadingChunker
+    stt=MySTT(),                         # custom STTProtocol implementation
+    tts=MyTTS(),                         # custom TTSProtocol implementation
     retention={              # blob lifecycle policy
         "blob_warm_days": 30,
         "blob_archive_days": 90,
@@ -600,6 +704,8 @@ graphstore/
 ├── wal.py                    # WALManager: append, replay, checkpoint, query log
 ├── cron.py                   # CronScheduler: persistent jobs, daemon timer
 ├── config.py                 # Typed config via msgspec Structs
+├── evolve.py                 # EvolutionEngine: WHEN/THEN signal-driven rules
+├── evolve_defaults.py        # Starter rules (disabled by default)
 ├── core/                     # Graph engine
 │   ├── store.py              # CoreStore: columnar node CRUD
 │   ├── columns.py            # ColumnStore: typed numpy arrays
@@ -645,17 +751,19 @@ graphstore/
 ├── document/                 # Document storage
 │   └── store.py              # DocumentStore: SQLite multi-table
 ├── ingest/                   # File → graph
-│   ├── base.py               # Ingestor protocol
+│   ├── base.py               # Ingestor protocol + Chunk dataclass
+│   ├── registry.py           # IngestorRegistry: per-extension routing
 │   ├── markitdown_ingestor.py  # Tier 1: general files
 │   ├── pymupdf4llm_ingestor.py # Tier 2: PDF structure
 │   ├── docling_ingestor.py   # Tier 3: hard PDFs (lazy)
-│   ├── chunker.py            # Text splitting + summaries
+│   ├── chunker.py            # HeadingChunker + chunk_by_heading
 │   ├── vision.py             # SmolVLM2/Qwen3-VL via Ollama
-│   ├── router.py             # Tiered routing
+│   ├── router.py             # Tiered routing (fast-path for .txt/.md)
 │   └── connector.py          # SYS CONNECT cross-doc wiring
 ├── voice/                    # Speech (opt-in)
-│   ├── stt.py                # Moonshine STT
-│   └── tts.py                # Piper TTS
+│   ├── protocol.py           # ChunkerProtocol, STTProtocol, TTSProtocol
+│   ├── stt.py                # MoonshineSTT (lazy libmoonshine.so init)
+│   └── tts.py                # PiperTTS + sounddevice playback
 ├── vault/                    # Markdown notes
 │   ├── parser.py             # Frontmatter, sections, wikilinks
 │   ├── manager.py            # Note CRUD (new/read/write/append)
