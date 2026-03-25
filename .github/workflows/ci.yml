@@ -15,11 +15,21 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Cache HuggingFace model weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-model2vec-${{ runner.os }}-${{ matrix.python-version }}
+          restore-keys: |
+            hf-model2vec-${{ runner.os }}-
 
       - name: Install dependencies
         run: pip install -e ".[dev,playground]"

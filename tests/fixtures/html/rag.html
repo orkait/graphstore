@@ -1,0 +1,1408 @@
+<!DOCTYPE html>
+<html class="client-nojs vector-feature-language-in-header-enabled vector-feature-language-in-main-menu-disabled vector-feature-language-in-main-page-header-disabled vector-feature-page-tools-pinned-disabled vector-feature-toc-pinned-clientpref-1 vector-feature-main-menu-pinned-disabled vector-feature-limited-width-clientpref-1 vector-feature-limited-width-content-enabled vector-feature-custom-font-size-clientpref-1 vector-feature-appearance-pinned-clientpref-1 skin-theme-clientpref-day vector-sticky-header-enabled wp25eastereggs-enable-clientpref-1 vector-toc-available skin-theme-clientpref-thumb-standard" lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<title>Retrieval-augmented generation - Wikipedia</title>
+<script>(function(){var className="client-js vector-feature-language-in-header-enabled vector-feature-language-in-main-menu-disabled vector-feature-language-in-main-page-header-disabled vector-feature-page-tools-pinned-disabled vector-feature-toc-pinned-clientpref-1 vector-feature-main-menu-pinned-disabled vector-feature-limited-width-clientpref-1 vector-feature-limited-width-content-enabled vector-feature-custom-font-size-clientpref-1 vector-feature-appearance-pinned-clientpref-1 skin-theme-clientpref-day vector-sticky-header-enabled wp25eastereggs-enable-clientpref-1 vector-toc-available skin-theme-clientpref-thumb-standard";var cookie=document.cookie.match(/(?:^|; )enwikimwclientpreferences=([^;]+)/);if(cookie){cookie[1].split('%2C').forEach(function(pref){className=className.replace(new RegExp('(^| )'+pref.replace(/-clientpref-\w+$|[^\w-]+/g,'')+'-clientpref-\\w+( |$)'),'$1'+pref+'$2');});}document.documentElement.className=className;}());RLCONF={"wgBreakFrames":false,"wgSeparatorTransformTable":["",""],"wgDigitTransformTable":["",""],"wgDefaultDateFormat":"dmy","wgMonthNames":["","January","February","March","April","May","June","July","August","September","October","November","December"],"wgRequestId":"e7721cbd-186c-4b0a-91c2-d24090a4f504","wgCanonicalNamespace":"","wgCanonicalSpecialPageName":false,"wgNamespaceNumber":0,"wgPageName":"Retrieval-augmented_generation","wgTitle":"Retrieval-augmented generation","wgCurRevisionId":1337298272,"wgRevisionId":1337298272,"wgArticleId":75229858,"wgIsArticle":true,"wgIsRedirect":false,"wgAction":"view","wgUserName":null,"wgUserGroups":["*"],"wgCategories":["Articles with short description","Short description is different from Wikidata","Articles containing potentially dated statements from 2023","All articles containing potentially dated statements","All articles with unsourced statements","Articles with unsourced statements from August 2025","Articles with unsourced statements from February 2025","Large language models","Natural language processing","Information retrieval systems","Generative artificial intelligence"],"wgPageViewLanguage":"en","wgPageContentLanguage":"en","wgPageContentModel":"wikitext","wgRelevantPageName":"Retrieval-augmented_generation","wgRelevantArticleId":75229858,"wgTempUserName":null,"wgIsProbablyEditable":true,"wgRelevantPageIsProbablyEditable":true,"wgRestrictionEdit":[],"wgRestrictionMove":[],"wgNoticeProject":"wikipedia","wgFlaggedRevsParams":{"tags":{"status":{"levels":1}}},"wgConfirmEditCaptchaNeededForGenericEdit":"hcaptcha","wgConfirmEditHCaptchaVisualEditorOnLoadIntegrationEnabled":false,"wgConfirmEditHCaptchaSiteKey":"5d0c670e-a5f4-4258-ad16-1f42792c9c62","wgMediaViewerOnClick":true,"wgMediaViewerEnabledByDefault":true,"wgPopupsFlags":0,"wgVisualEditor":{"pageLanguageCode":"en","pageLanguageDir":"ltr","pageVariantFallbacks":"en"},"wgMFDisplayWikibaseDescriptions":{"search":true,"watchlist":true,"tagline":false,"nearby":true},"wgWMESchemaEditAttemptStepOversample":false,"wgWMEPageLength":20000,"wgEditSubmitButtonLabelPublish":true,"wgVisualEditorPageIsDisambiguation":false,"wgULSPosition":"interlanguage","wgULSisCompactLinksEnabled":false,"wgVector2022LanguageInHeader":true,"wgULSisLanguageSelectorEmpty":false,"wgWikibaseItemId":"Q121362277","wgCheckUserClientHintsHeadersJsApi":["brands","architecture","bitness","fullVersionList","mobile","model","platform","platformVersion"],"GEHomepageSuggestedEditsEnableTopics":true,"wgGESuggestedEditsTaskTypes":{"taskTypes":["copyedit","link-recommendation"],"unavailableTaskTypes":[]},"wgGETopicsMatchModeEnabled":false,"wgGELevelingUpEnabledForUser":false,"wgTestKitchenUserExperiments":{"active_experiments":[],"overrides":[],"enrolled":[],"assigned":[],"subject_ids":[],"sampling_units":[],"coordinator":[]}};
+RLSTATE={"ext.globalCssJs.user.styles":"ready","site.styles":"ready","user.styles":"ready","ext.globalCssJs.user":"ready","user":"ready","user.options":"loading","ext.wikimediamessages.styles":"ready","ext.cite.styles":"ready","skins.vector.search.codex.styles":"ready","skins.vector.styles":"ready","skins.vector.icons":"ready","jquery.makeCollapsible.styles":"ready","ext.visualEditor.desktopArticleTarget.noscript":"ready","ext.uls.interlanguage":"ready","wikibase.client.init":"ready","ext.wp25EasterEggs.styles":"ready"};RLPAGEMODULES=["ext.parsermigration.survey","ext.cite.ux-enhancements","mediawiki.page.media","site","mediawiki.page.ready","jquery.makeCollapsible","mediawiki.toc","skins.vector.js","ext.centralNotice.geoIP","ext.centralNotice.startUp","ext.gadget.ReferenceTooltips","ext.gadget.switcher","ext.urlShortener.toolbar","ext.centralauth.centralautologin","mmv.bootstrap","ext.popups","ext.visualEditor.desktopArticleTarget.init","ext.echo.centralauth","ext.eventLogging","ext.wikimediaEvents","ext.navigationTiming","ext.uls.interface","ext.cx.eventlogging.campaigns","ext.cx.uls.quick.actions","wikibase.client.vector-2022","wikibase.databox.fromWikidata","ext.checkUser.clientHints","ext.quicksurveys.init","ext.growthExperiments.SuggestedEditSession","ext.testKitchen","ext.wp25EasterEggs"];</script>
+<script>(RLQ=window.RLQ||[]).push(function(){mw.loader.impl(function(){return["user.options@12s5i",function($,jQuery,require,module){mw.user.tokens.set({"patrolToken":"+\\","watchToken":"+\\","csrfToken":"+\\"});
+}];});});</script>
+<link rel="stylesheet" href="/w/load.php?lang=en&amp;modules=ext.cite.styles%7Cext.uls.interlanguage%7Cext.visualEditor.desktopArticleTarget.noscript%7Cext.wikimediamessages.styles%7Cext.wp25EasterEggs.styles%7Cjquery.makeCollapsible.styles%7Cskins.vector.icons%2Cstyles%7Cskins.vector.search.codex.styles%7Cwikibase.client.init&amp;only=styles&amp;skin=vector-2022">
+<script async="" src="/w/load.php?lang=en&amp;modules=startup&amp;only=scripts&amp;raw=1&amp;skin=vector-2022"></script>
+<meta name="ResourceLoaderDynamicStyles" content="">
+<link rel="stylesheet" href="/w/load.php?lang=en&amp;modules=site.styles&amp;only=styles&amp;skin=vector-2022">
+<meta name="generator" content="MediaWiki 1.46.0-wmf.20">
+<meta name="referrer" content="origin">
+<meta name="referrer" content="origin-when-cross-origin">
+<meta name="robots" content="max-image-preview:standard">
+<meta name="format-detection" content="telephone=no">
+<meta name="viewport" content="width=1120">
+<meta property="og:title" content="Retrieval-augmented generation - Wikipedia">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="//upload.wikimedia.org">
+<link rel="alternate" type="application/x-wiki" title="Edit this page" href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit">
+<link rel="apple-touch-icon" href="/static/apple-touch/wikipedia.png">
+<link rel="icon" href="/static/favicon/wikipedia.ico">
+<link rel="search" type="application/opensearchdescription+xml" href="/w/rest.php/v1/search" title="Wikipedia (en)">
+<link rel="EditURI" type="application/rsd+xml" href="//en.wikipedia.org/w/api.php?action=rsd">
+<link rel="canonical" href="https://en.wikipedia.org/wiki/Retrieval-augmented_generation">
+<link rel="license" href="https://creativecommons.org/licenses/by-sa/4.0/deed.en">
+<link rel="alternate" type="application/atom+xml" title="Wikipedia Atom feed" href="/w/index.php?title=Special:RecentChanges&amp;feed=atom">
+<link rel="dns-prefetch" href="//meta.wikimedia.org" />
+<link rel="dns-prefetch" href="auth.wikimedia.org">
+</head>
+<body class="skin--responsive skin-vector skin-vector-search-vue mediawiki ltr sitedir-ltr mw-hide-empty-elt ns-0 ns-subject mw-editable page-Retrieval-augmented_generation rootpage-Retrieval-augmented_generation skin-vector-2022 action-view">
+<div id="mw-aria-live-region" class="mw-aria-live-region" aria-live="polite"></div><a class="mw-jump-link" href="#bodyContent">Jump to content</a>
+<div class="vector-header-container">
+	<header class="vector-header mw-header no-font-mode-scale">
+		<div class="vector-header-start">
+			<nav class="vector-main-menu-landmark" aria-label="Site">
+				
+<div id="vector-main-menu-dropdown" class="vector-dropdown vector-main-menu-dropdown vector-button-flush-left vector-button-flush-right"  title="Main menu" >
+	<input type="checkbox" id="vector-main-menu-dropdown-checkbox" role="button" aria-haspopup="true" data-event-name="ui.dropdown-vector-main-menu-dropdown" class="vector-dropdown-checkbox "  aria-label="Main menu"  >
+	<label id="vector-main-menu-dropdown-label" for="vector-main-menu-dropdown-checkbox" class="vector-dropdown-label cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only " aria-hidden="true"  ><span class="vector-icon mw-ui-icon-menu mw-ui-icon-wikimedia-menu"></span>
+
+<span class="vector-dropdown-label-text">Main menu</span>
+	</label>
+	<div class="vector-dropdown-content">
+
+
+				<div id="vector-main-menu-unpinned-container" class="vector-unpinned-container">
+		
+<div id="vector-main-menu" class="vector-main-menu vector-pinnable-element">
+	<div
+	class="vector-pinnable-header vector-main-menu-pinnable-header vector-pinnable-header-unpinned"
+	data-feature-name="main-menu-pinned"
+	data-pinnable-element-id="vector-main-menu"
+	data-pinned-container-id="vector-main-menu-pinned-container"
+	data-unpinned-container-id="vector-main-menu-unpinned-container"
+>
+	<div class="vector-pinnable-header-label">Main menu</div>
+	<button class="vector-pinnable-header-toggle-button vector-pinnable-header-pin-button" data-event-name="pinnable-header.vector-main-menu.pin">move to sidebar</button>
+	<button class="vector-pinnable-header-toggle-button vector-pinnable-header-unpin-button" data-event-name="pinnable-header.vector-main-menu.unpin">hide</button>
+</div>
+
+	
+<div id="p-navigation" class="vector-menu mw-portlet mw-portlet-navigation"  >
+	<div class="vector-menu-heading">
+		Navigation
+	</div>
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			<li id="n-mainpage-description" class="mw-list-item"><a href="/wiki/Main_Page" title="Visit the main page [z]" accesskey="z"><span>Main page</span></a></li><li id="n-contents" class="mw-list-item"><a href="/wiki/Wikipedia:Contents" title="Guides to browsing Wikipedia"><span>Contents</span></a></li><li id="n-currentevents" class="mw-list-item"><a href="/wiki/Portal:Current_events" title="Articles related to current events"><span>Current events</span></a></li><li id="n-randompage" class="mw-list-item"><a href="/wiki/Special:Random" title="Visit a randomly selected article [x]" accesskey="x"><span>Random article</span></a></li><li id="n-aboutsite" class="mw-list-item"><a href="/wiki/Wikipedia:About" title="Learn about Wikipedia and how it works"><span>About Wikipedia</span></a></li><li id="n-contactpage" class="mw-list-item"><a href="//en.wikipedia.org/wiki/Wikipedia:Contact_us" title="How to contact Wikipedia"><span>Contact us</span></a></li>
+		</ul>
+		
+	</div>
+</div>
+
+	
+<div id="p-interaction" class="vector-menu mw-portlet mw-portlet-interaction"  >
+	<div class="vector-menu-heading">
+		Contribute
+	</div>
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			<li id="n-help" class="mw-list-item"><a href="/wiki/Help:Contents" title="Guidance on how to use and edit Wikipedia"><span>Help</span></a></li><li id="n-introduction" class="mw-list-item"><a href="/wiki/Help:Introduction" title="Learn how to edit Wikipedia"><span>Learn to edit</span></a></li><li id="n-portal" class="mw-list-item"><a href="/wiki/Wikipedia:Community_portal" title="The hub for editors"><span>Community portal</span></a></li><li id="n-recentchanges" class="mw-list-item"><a href="/wiki/Special:RecentChanges" title="A list of recent changes to Wikipedia [r]" accesskey="r"><span>Recent changes</span></a></li><li id="n-upload" class="mw-list-item"><a href="/wiki/Wikipedia:File_upload_wizard" title="Add images or other media for use on Wikipedia"><span>Upload file</span></a></li><li id="n-specialpages" class="mw-list-item"><a href="/wiki/Special:SpecialPages" title="A list of all special pages [q]" accesskey="q"><span>Special pages</span></a></li>
+		</ul>
+		
+	</div>
+</div>
+
+</div>
+
+				</div>
+
+	</div>
+</div>
+
+		</nav>
+			
+<a href="/wiki/Main_Page" class="mw-logo">
+	<img class="mw-logo-icon" src="/static/images/icons/enwiki-25.svg" alt="" aria-hidden="true" height="50" width="50">
+	<span class="mw-logo-container skin-invert">
+		<img class="mw-logo-wordmark" alt="Wikipedia" src="/static/images/mobile/copyright/wikipedia-wordmark-en-25.svg" style="width: 8.75em; height: 1.375em;">
+		<img class="mw-logo-tagline" alt="The Free Encyclopedia" src="/static/images/mobile/copyright/wikipedia-tagline-en-25.svg" width="140" height="11" style="width: 8.75em; height: 0.6875em;">
+	</span>
+</a>
+
+		</div>
+		<div class="vector-header-end">
+			
+<div id="p-search" role="search" class="vector-search-box-vue  vector-search-box-collapses vector-search-box-show-thumbnail vector-search-box-auto-expand-width vector-search-box">
+	<a href="/wiki/Special:Search" class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only search-toggle" title="Search Wikipedia [f]" accesskey="f"><span class="vector-icon mw-ui-icon-search mw-ui-icon-wikimedia-search"></span>
+
+<span>Search</span>
+	</a>
+	<div class="vector-typeahead-search-container">
+		<div class="cdx-typeahead-search cdx-typeahead-search--show-thumbnail cdx-typeahead-search--auto-expand-width">
+			<form action="/w/index.php" id="searchform" class="cdx-search-input cdx-search-input--has-end-button">
+				<div id="simpleSearch" class="cdx-search-input__input-wrapper"  data-search-loc="header-moved">
+					<div class="cdx-text-input cdx-text-input--has-start-icon">
+						<input
+							class="cdx-text-input__input mw-searchInput" autocomplete="off"
+							 type="search" name="search" placeholder="Search Wikipedia" aria-label="Search Wikipedia" autocapitalize="none" spellcheck="false" title="Search Wikipedia [f]" accesskey="f" id="searchInput"
+							>
+						<span class="cdx-text-input__icon cdx-text-input__start-icon"></span>
+					</div>
+					<input type="hidden" name="title" value="Special:Search">
+				</div>
+				<button class="cdx-button cdx-search-input__end-button">Search</button>
+			</form>
+		</div>
+	</div>
+</div>
+
+			<nav class="vector-user-links vector-user-links-wide" aria-label="Personal tools">
+	<div class="vector-user-links-main">
+	
+<div id="p-vector-user-menu-preferences" class="vector-menu mw-portlet emptyPortlet"  >
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			
+		</ul>
+		
+	</div>
+</div>
+
+	
+<div id="p-vector-user-menu-userpage" class="vector-menu mw-portlet emptyPortlet"  >
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			
+		</ul>
+		
+	</div>
+</div>
+
+	<nav class="vector-appearance-landmark" aria-label="Appearance">
+		
+<div id="vector-appearance-dropdown" class="vector-dropdown "  title="Change the appearance of the page&#039;s font size, width, and color" >
+	<input type="checkbox" id="vector-appearance-dropdown-checkbox" role="button" aria-haspopup="true" data-event-name="ui.dropdown-vector-appearance-dropdown" class="vector-dropdown-checkbox "  aria-label="Appearance"  >
+	<label id="vector-appearance-dropdown-label" for="vector-appearance-dropdown-checkbox" class="vector-dropdown-label cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only " aria-hidden="true"  ><span class="vector-icon mw-ui-icon-appearance mw-ui-icon-wikimedia-appearance"></span>
+
+<span class="vector-dropdown-label-text">Appearance</span>
+	</label>
+	<div class="vector-dropdown-content">
+
+
+			<div id="vector-appearance-unpinned-container" class="vector-unpinned-container">
+				
+			</div>
+		
+	</div>
+</div>
+
+	</nav>
+	
+<div id="p-vector-user-menu-notifications" class="vector-menu mw-portlet emptyPortlet"  >
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			
+		</ul>
+		
+	</div>
+</div>
+
+	
+<div id="p-vector-user-menu-overflow" class="vector-menu mw-portlet"  >
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			<li id="pt-sitesupport-2" class="user-links-collapsible-item mw-list-item user-links-collapsible-item"><a data-mw-interface  href="https://donate.wikimedia.org/?wmf_source=donate&amp;wmf_medium=sidebar&amp;wmf_campaign=en.wikipedia.org&amp;uselang=en" class=""><span>Donate</span></a>
+</li>
+<li id="pt-createaccount-2" class="user-links-collapsible-item mw-list-item user-links-collapsible-item"><a data-mw-interface  href="/w/index.php?title=Special:CreateAccount&amp;returnto=Retrieval-augmented+generation" title="You are encouraged to create an account and log in; however, it is not mandatory" class=""><span>Create account</span></a>
+</li>
+<li id="pt-login-2" class="user-links-collapsible-item mw-list-item user-links-collapsible-item"><a data-mw-interface  href="/w/index.php?title=Special:UserLogin&amp;returnto=Retrieval-augmented+generation" title="You&#039;re encouraged to log in; however, it&#039;s not mandatory. [o]" accesskey="o" class=""><span>Log in</span></a>
+</li>
+
+			
+		</ul>
+		
+	</div>
+</div>
+
+	</div>
+	
+<div id="vector-user-links-dropdown" class="vector-dropdown vector-user-menu vector-button-flush-right vector-user-menu-logged-out user-links-collapsible-item"  title="Log in and more options" >
+	<input type="checkbox" id="vector-user-links-dropdown-checkbox" role="button" aria-haspopup="true" data-event-name="ui.dropdown-vector-user-links-dropdown" class="vector-dropdown-checkbox "  aria-label="Personal tools"  >
+	<label id="vector-user-links-dropdown-label" for="vector-user-links-dropdown-checkbox" class="vector-dropdown-label cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only " aria-hidden="true"  ><span class="vector-icon mw-ui-icon-ellipsis mw-ui-icon-wikimedia-ellipsis"></span>
+
+<span class="vector-dropdown-label-text">Personal tools</span>
+	</label>
+	<div class="vector-dropdown-content">
+
+
+		
+<div id="p-personal" class="vector-menu mw-portlet mw-portlet-personal user-links-collapsible-item"  title="User menu" >
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			<li id="pt-sitesupport" class="user-links-collapsible-item mw-list-item"><a href="https://donate.wikimedia.org/?wmf_source=donate&amp;wmf_medium=sidebar&amp;wmf_campaign=en.wikipedia.org&amp;uselang=en"><span>Donate</span></a></li><li id="pt-createaccount" class="user-links-collapsible-item mw-list-item"><a href="/w/index.php?title=Special:CreateAccount&amp;returnto=Retrieval-augmented+generation" title="You are encouraged to create an account and log in; however, it is not mandatory"><span class="vector-icon mw-ui-icon-userAdd mw-ui-icon-wikimedia-userAdd"></span> <span>Create account</span></a></li><li id="pt-login" class="user-links-collapsible-item mw-list-item"><a href="/w/index.php?title=Special:UserLogin&amp;returnto=Retrieval-augmented+generation" title="You&#039;re encouraged to log in; however, it&#039;s not mandatory. [o]" accesskey="o"><span class="vector-icon mw-ui-icon-logIn mw-ui-icon-wikimedia-logIn"></span> <span>Log in</span></a></li>
+		</ul>
+		
+	</div>
+</div>
+
+	
+	</div>
+</div>
+
+</nav>
+
+		</div>
+	</header>
+</div>
+<div class="mw-page-container">
+	<div class="mw-page-container-inner">
+		<div class="vector-sitenotice-container">
+			<div id="siteNotice"><!-- CentralNotice --><div class="wp25eastereggs-sitenotice"><div class="wp25eastereggs-sitenotice-landmark"></div></div></div>
+		</div>
+		<div class="vector-column-start">
+			<div class="vector-main-menu-container">
+		<div id="mw-navigation">
+			<nav id="mw-panel" class="vector-main-menu-landmark" aria-label="Site">
+				<div id="vector-main-menu-pinned-container" class="vector-pinned-container">
+				
+				</div>
+		</nav>
+		</div>
+	</div>
+	<div class="vector-sticky-pinned-container">
+				<nav id="mw-panel-toc" aria-label="Contents" data-event-name="ui.sidebar-toc" class="mw-table-of-contents-container vector-toc-landmark">
+					<div id="vector-toc-pinned-container" class="vector-pinned-container">
+					<div id="vector-toc" class="vector-toc vector-pinnable-element">
+	<div
+	class="vector-pinnable-header vector-toc-pinnable-header vector-pinnable-header-pinned"
+	data-feature-name="toc-pinned"
+	data-pinnable-element-id="vector-toc"
+	data-pinned-container-id="vector-toc-pinned-container"
+	data-unpinned-container-id="vector-toc-unpinned-container"
+>
+	<h2 class="vector-pinnable-header-label">Contents</h2>
+	<button class="vector-pinnable-header-toggle-button vector-pinnable-header-pin-button" data-event-name="pinnable-header.vector-toc.pin">move to sidebar</button>
+	<button class="vector-pinnable-header-toggle-button vector-pinnable-header-unpin-button" data-event-name="pinnable-header.vector-toc.unpin">hide</button>
+</div>
+
+
+	<ul class="vector-toc-contents" id="mw-panel-toc-list">
+		<li id="toc-mw-content-text"
+			class="vector-toc-list-item vector-toc-level-1">
+			<a href="#" class="vector-toc-link">
+				<div class="vector-toc-text">(Top)</div>
+			</a>
+		</li>
+		<li id="toc-RAG_and_LLM_limitations"
+		class="vector-toc-list-item vector-toc-level-1 vector-toc-list-item-expanded">
+		<a class="vector-toc-link" href="#RAG_and_LLM_limitations">
+			<div class="vector-toc-text">
+				<span class="vector-toc-numb">1</span>
+				<span>RAG and LLM limitations</span>
+			</div>
+		</a>
+		
+		<ul id="toc-RAG_and_LLM_limitations-sublist" class="vector-toc-list">
+		</ul>
+	</li>
+	<li id="toc-Process"
+		class="vector-toc-list-item vector-toc-level-1 vector-toc-list-item-expanded">
+		<a class="vector-toc-link" href="#Process">
+			<div class="vector-toc-text">
+				<span class="vector-toc-numb">2</span>
+				<span>Process</span>
+			</div>
+		</a>
+		
+			<button aria-controls="toc-Process-sublist" class="cdx-button cdx-button--weight-quiet cdx-button--icon-only vector-toc-toggle">
+				<span class="vector-icon mw-ui-icon-wikimedia-expand"></span>
+				<span>Toggle Process subsection</span>
+			</button>
+		
+		<ul id="toc-Process-sublist" class="vector-toc-list">
+			<li id="toc-RAG_key_stages"
+			class="vector-toc-list-item vector-toc-level-2">
+			<a class="vector-toc-link" href="#RAG_key_stages">
+				<div class="vector-toc-text">
+					<span class="vector-toc-numb">2.1</span>
+					<span>RAG key stages</span>
+				</div>
+			</a>
+			
+			<ul id="toc-RAG_key_stages-sublist" class="vector-toc-list">
+			</ul>
+		</li>
+	</ul>
+	</li>
+	<li id="toc-Improvements"
+		class="vector-toc-list-item vector-toc-level-1 vector-toc-list-item-expanded">
+		<a class="vector-toc-link" href="#Improvements">
+			<div class="vector-toc-text">
+				<span class="vector-toc-numb">3</span>
+				<span>Improvements</span>
+			</div>
+		</a>
+		
+			<button aria-controls="toc-Improvements-sublist" class="cdx-button cdx-button--weight-quiet cdx-button--icon-only vector-toc-toggle">
+				<span class="vector-icon mw-ui-icon-wikimedia-expand"></span>
+				<span>Toggle Improvements subsection</span>
+			</button>
+		
+		<ul id="toc-Improvements-sublist" class="vector-toc-list">
+			<li id="toc-Encoder"
+			class="vector-toc-list-item vector-toc-level-2">
+			<a class="vector-toc-link" href="#Encoder">
+				<div class="vector-toc-text">
+					<span class="vector-toc-numb">3.1</span>
+					<span>Encoder</span>
+				</div>
+			</a>
+			
+			<ul id="toc-Encoder-sublist" class="vector-toc-list">
+			</ul>
+		</li>
+		<li id="toc-Retriever-centric_methods"
+			class="vector-toc-list-item vector-toc-level-2">
+			<a class="vector-toc-link" href="#Retriever-centric_methods">
+				<div class="vector-toc-text">
+					<span class="vector-toc-numb">3.2</span>
+					<span>Retriever-centric methods</span>
+				</div>
+			</a>
+			
+			<ul id="toc-Retriever-centric_methods-sublist" class="vector-toc-list">
+			</ul>
+		</li>
+		<li id="toc-Language_model"
+			class="vector-toc-list-item vector-toc-level-2">
+			<a class="vector-toc-link" href="#Language_model">
+				<div class="vector-toc-text">
+					<span class="vector-toc-numb">3.3</span>
+					<span>Language model</span>
+				</div>
+			</a>
+			
+			<ul id="toc-Language_model-sublist" class="vector-toc-list">
+			</ul>
+		</li>
+		<li id="toc-Chunking"
+			class="vector-toc-list-item vector-toc-level-2">
+			<a class="vector-toc-link" href="#Chunking">
+				<div class="vector-toc-text">
+					<span class="vector-toc-numb">3.4</span>
+					<span>Chunking</span>
+				</div>
+			</a>
+			
+			<ul id="toc-Chunking-sublist" class="vector-toc-list">
+			</ul>
+		</li>
+		<li id="toc-Hybrid_search"
+			class="vector-toc-list-item vector-toc-level-2">
+			<a class="vector-toc-link" href="#Hybrid_search">
+				<div class="vector-toc-text">
+					<span class="vector-toc-numb">3.5</span>
+					<span>Hybrid search</span>
+				</div>
+			</a>
+			
+			<ul id="toc-Hybrid_search-sublist" class="vector-toc-list">
+			</ul>
+		</li>
+		<li id="toc-Evaluation_and_benchmarks"
+			class="vector-toc-list-item vector-toc-level-2">
+			<a class="vector-toc-link" href="#Evaluation_and_benchmarks">
+				<div class="vector-toc-text">
+					<span class="vector-toc-numb">3.6</span>
+					<span>Evaluation and benchmarks</span>
+				</div>
+			</a>
+			
+			<ul id="toc-Evaluation_and_benchmarks-sublist" class="vector-toc-list">
+			</ul>
+		</li>
+	</ul>
+	</li>
+	<li id="toc-Challenges"
+		class="vector-toc-list-item vector-toc-level-1 vector-toc-list-item-expanded">
+		<a class="vector-toc-link" href="#Challenges">
+			<div class="vector-toc-text">
+				<span class="vector-toc-numb">4</span>
+				<span>Challenges</span>
+			</div>
+		</a>
+		
+			<button aria-controls="toc-Challenges-sublist" class="cdx-button cdx-button--weight-quiet cdx-button--icon-only vector-toc-toggle">
+				<span class="vector-icon mw-ui-icon-wikimedia-expand"></span>
+				<span>Toggle Challenges subsection</span>
+			</button>
+		
+		<ul id="toc-Challenges-sublist" class="vector-toc-list">
+			<li id="toc-RAG_poisoning"
+			class="vector-toc-list-item vector-toc-level-2">
+			<a class="vector-toc-link" href="#RAG_poisoning">
+				<div class="vector-toc-text">
+					<span class="vector-toc-numb">4.1</span>
+					<span>RAG poisoning</span>
+				</div>
+			</a>
+			
+			<ul id="toc-RAG_poisoning-sublist" class="vector-toc-list">
+			</ul>
+		</li>
+	</ul>
+	</li>
+	<li id="toc-References"
+		class="vector-toc-list-item vector-toc-level-1 vector-toc-list-item-expanded">
+		<a class="vector-toc-link" href="#References">
+			<div class="vector-toc-text">
+				<span class="vector-toc-numb">5</span>
+				<span>References</span>
+			</div>
+		</a>
+		
+		<ul id="toc-References-sublist" class="vector-toc-list">
+		</ul>
+	</li>
+</ul>
+</div>
+
+					</div>
+		</nav>
+			</div>
+		</div>
+		<div class="mw-content-container">
+			<main id="content" class="mw-body">
+				<header class="mw-body-header vector-page-titlebar no-font-mode-scale">
+					<nav aria-label="Contents" class="vector-toc-landmark">
+						
+<div id="vector-page-titlebar-toc" class="vector-dropdown vector-page-titlebar-toc vector-button-flush-left"  title="Table of Contents" >
+	<input type="checkbox" id="vector-page-titlebar-toc-checkbox" role="button" aria-haspopup="true" data-event-name="ui.dropdown-vector-page-titlebar-toc" class="vector-dropdown-checkbox "  aria-label="Toggle the table of contents"  >
+	<label id="vector-page-titlebar-toc-label" for="vector-page-titlebar-toc-checkbox" class="vector-dropdown-label cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only " aria-hidden="true"  ><span class="vector-icon mw-ui-icon-listBullet mw-ui-icon-wikimedia-listBullet"></span>
+
+<span class="vector-dropdown-label-text">Toggle the table of contents</span>
+	</label>
+	<div class="vector-dropdown-content">
+
+
+							<div id="vector-page-titlebar-toc-unpinned-container" class="vector-unpinned-container">
+			</div>
+		
+	</div>
+</div>
+
+					</nav>
+					<h1 id="firstHeading" class="firstHeading mw-first-heading"><span class="mw-page-title-main">Retrieval-augmented generation</span></h1>
+							
+<div id="p-lang-btn" class="vector-dropdown mw-portlet mw-portlet-lang"  >
+	<input type="checkbox" id="p-lang-btn-checkbox" role="button" aria-haspopup="true" data-event-name="ui.dropdown-p-lang-btn" class="vector-dropdown-checkbox mw-interlanguage-selector" aria-label="Go to an article in another language. Available in 20 languages"   >
+	<label id="p-lang-btn-label" for="p-lang-btn-checkbox" class="vector-dropdown-label cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--action-progressive mw-portlet-lang-heading-20" aria-hidden="true"  ><span class="vector-icon mw-ui-icon-language-progressive mw-ui-icon-wikimedia-language-progressive"></span>
+
+<span class="vector-dropdown-label-text">20 languages</span>
+	</label>
+	<div class="vector-dropdown-content">
+
+		<div class="vector-menu-content">
+			
+			<ul class="vector-menu-content-list">
+				
+				<li class="interlanguage-link interwiki-ar mw-list-item"><a href="https://ar.wikipedia.org/wiki/%D8%AA%D9%88%D9%84%D9%8A%D8%AF_%D9%85%D8%B9%D8%B2%D8%B2_%D8%A8%D8%A7%D9%84%D8%A7%D8%B3%D8%AA%D8%AD%D8%B6%D8%A7%D8%B1" title="توليد معزز بالاستحضار – Arabic" lang="ar" hreflang="ar" data-title="توليد معزز بالاستحضار" data-language-autonym="العربية" data-language-local-name="Arabic" class="interlanguage-link-target"><span>العربية</span></a></li><li class="interlanguage-link interwiki-ca mw-list-item"><a href="https://ca.wikipedia.org/wiki/Generaci%C3%B3_amb_recuperaci%C3%B3_augmentada" title="Generació amb recuperació augmentada – Catalan" lang="ca" hreflang="ca" data-title="Generació amb recuperació augmentada" data-language-autonym="Català" data-language-local-name="Catalan" class="interlanguage-link-target"><span>Català</span></a></li><li class="interlanguage-link interwiki-cs mw-list-item"><a href="https://cs.wikipedia.org/wiki/Retrieval-augmented_generation" title="Retrieval-augmented generation – Czech" lang="cs" hreflang="cs" data-title="Retrieval-augmented generation" data-language-autonym="Čeština" data-language-local-name="Czech" class="interlanguage-link-target"><span>Čeština</span></a></li><li class="interlanguage-link interwiki-de mw-list-item"><a href="https://de.wikipedia.org/wiki/Retrieval-Augmented_Generation" title="Retrieval-Augmented Generation – German" lang="de" hreflang="de" data-title="Retrieval-Augmented Generation" data-language-autonym="Deutsch" data-language-local-name="German" class="interlanguage-link-target"><span>Deutsch</span></a></li><li class="interlanguage-link interwiki-es mw-list-item"><a href="https://es.wikipedia.org/wiki/Generaci%C3%B3n_aumentada_por_recuperaci%C3%B3n" title="Generación aumentada por recuperación – Spanish" lang="es" hreflang="es" data-title="Generación aumentada por recuperación" data-language-autonym="Español" data-language-local-name="Spanish" class="interlanguage-link-target"><span>Español</span></a></li><li class="interlanguage-link interwiki-fr mw-list-item"><a href="https://fr.wikipedia.org/wiki/G%C3%A9n%C3%A9ration_%C3%A0_enrichissement_contextuel" title="Génération à enrichissement contextuel – French" lang="fr" hreflang="fr" data-title="Génération à enrichissement contextuel" data-language-autonym="Français" data-language-local-name="French" class="interlanguage-link-target"><span>Français</span></a></li><li class="interlanguage-link interwiki-he mw-list-item"><a href="https://he.wikipedia.org/wiki/%D7%99%D7%A6%D7%99%D7%A8%D7%94_%D7%9E%D7%91%D7%95%D7%A1%D7%A1%D7%AA-%D7%A9%D7%9C%D7%99%D7%A4%D7%94" title="יצירה מבוססת-שליפה – Hebrew" lang="he" hreflang="he" data-title="יצירה מבוססת-שליפה" data-language-autonym="עברית" data-language-local-name="Hebrew" class="interlanguage-link-target"><span>עברית</span></a></li><li class="interlanguage-link interwiki-id mw-list-item"><a href="https://id.wikipedia.org/wiki/Retrieval-augmented_generation" title="Retrieval-augmented generation – Indonesian" lang="id" hreflang="id" data-title="Retrieval-augmented generation" data-language-autonym="Bahasa Indonesia" data-language-local-name="Indonesian" class="interlanguage-link-target"><span>Bahasa Indonesia</span></a></li><li class="interlanguage-link interwiki-it mw-list-item"><a href="https://it.wikipedia.org/wiki/Retrieval_augmented_generation" title="Retrieval augmented generation – Italian" lang="it" hreflang="it" data-title="Retrieval augmented generation" data-language-autonym="Italiano" data-language-local-name="Italian" class="interlanguage-link-target"><span>Italiano</span></a></li><li class="interlanguage-link interwiki-ja mw-list-item"><a href="https://ja.wikipedia.org/wiki/Retrieval-Augmented_Generation" title="Retrieval-Augmented Generation – Japanese" lang="ja" hreflang="ja" data-title="Retrieval-Augmented Generation" data-language-autonym="日本語" data-language-local-name="Japanese" class="interlanguage-link-target"><span>日本語</span></a></li><li class="interlanguage-link interwiki-ko mw-list-item"><a href="https://ko.wikipedia.org/wiki/%EA%B2%80%EC%83%89%EC%A6%9D%EA%B0%95%EC%83%9D%EC%84%B1" title="검색증강생성 – Korean" lang="ko" hreflang="ko" data-title="검색증강생성" data-language-autonym="한국어" data-language-local-name="Korean" class="interlanguage-link-target"><span>한국어</span></a></li><li class="interlanguage-link interwiki-pl mw-list-item"><a href="https://pl.wikipedia.org/wiki/Retrieval-augmented_generation" title="Retrieval-augmented generation – Polish" lang="pl" hreflang="pl" data-title="Retrieval-augmented generation" data-language-autonym="Polski" data-language-local-name="Polish" class="interlanguage-link-target"><span>Polski</span></a></li><li class="interlanguage-link interwiki-pt mw-list-item"><a href="https://pt.wikipedia.org/wiki/Gera%C3%A7%C3%A3o_aumentada_por_recupera%C3%A7%C3%A3o" title="Geração aumentada por recuperação – Portuguese" lang="pt" hreflang="pt" data-title="Geração aumentada por recuperação" data-language-autonym="Português" data-language-local-name="Portuguese" class="interlanguage-link-target"><span>Português</span></a></li><li class="interlanguage-link interwiki-ru mw-list-item"><a href="https://ru.wikipedia.org/wiki/%D0%93%D0%B5%D0%BD%D0%B5%D1%80%D0%B0%D1%86%D0%B8%D1%8F_%D1%81_%D0%B4%D0%BE%D0%BF%D0%BE%D0%BB%D0%BD%D0%B5%D0%BD%D0%BD%D0%BE%D0%B9_%D0%B2%D1%8B%D0%B1%D0%BE%D1%80%D0%BA%D0%BE%D0%B9" title="Генерация с дополненной выборкой – Russian" lang="ru" hreflang="ru" data-title="Генерация с дополненной выборкой" data-language-autonym="Русский" data-language-local-name="Russian" class="interlanguage-link-target"><span>Русский</span></a></li><li class="interlanguage-link interwiki-szl mw-list-item"><a href="https://szl.wikipedia.org/wiki/RAG" title="RAG – Silesian" lang="szl" hreflang="szl" data-title="RAG" data-language-autonym="Ślůnski" data-language-local-name="Silesian" class="interlanguage-link-target"><span>Ślůnski</span></a></li><li class="interlanguage-link interwiki-th mw-list-item"><a href="https://th.wikipedia.org/wiki/%E0%B8%81%E0%B8%B2%E0%B8%A3%E0%B8%AA%E0%B8%A3%E0%B9%89%E0%B8%B2%E0%B8%87%E0%B8%97%E0%B8%B5%E0%B9%88%E0%B9%80%E0%B8%AA%E0%B8%A3%E0%B8%B4%E0%B8%A1%E0%B8%94%E0%B9%89%E0%B8%A7%E0%B8%A2%E0%B8%81%E0%B8%B2%E0%B8%A3%E0%B8%94%E0%B8%B6%E0%B8%87%E0%B8%82%E0%B9%89%E0%B8%AD%E0%B8%A1%E0%B8%B9%E0%B8%A5" title="การสร้างที่เสริมด้วยการดึงข้อมูล – Thai" lang="th" hreflang="th" data-title="การสร้างที่เสริมด้วยการดึงข้อมูล" data-language-autonym="ไทย" data-language-local-name="Thai" class="interlanguage-link-target"><span>ไทย</span></a></li><li class="interlanguage-link interwiki-tr mw-list-item"><a href="https://tr.wikipedia.org/wiki/Eri%C5%9Fim_destekli_%C3%BCretim" title="Erişim destekli üretim – Turkish" lang="tr" hreflang="tr" data-title="Erişim destekli üretim" data-language-autonym="Türkçe" data-language-local-name="Turkish" class="interlanguage-link-target"><span>Türkçe</span></a></li><li class="interlanguage-link interwiki-uk mw-list-item"><a href="https://uk.wikipedia.org/wiki/%D0%94%D0%BE%D0%BF%D0%BE%D0%B2%D0%BD%D0%B5%D0%BD%D0%B5_%D0%BF%D0%BE%D1%88%D1%83%D0%BA%D0%BE%D0%BC_%D0%B3%D0%B5%D0%BD%D0%B5%D1%80%D1%83%D0%B2%D0%B0%D0%BD%D0%BD%D1%8F" title="Доповнене пошуком генерування – Ukrainian" lang="uk" hreflang="uk" data-title="Доповнене пошуком генерування" data-language-autonym="Українська" data-language-local-name="Ukrainian" class="interlanguage-link-target"><span>Українська</span></a></li><li class="interlanguage-link interwiki-vi mw-list-item"><a href="https://vi.wikipedia.org/wiki/T%E1%BA%A1o_sinh_d%E1%BB%B1a_tr%C3%AAn_truy_xu%E1%BA%A5t_t%C4%83ng_c%C6%B0%E1%BB%9Dng" title="Tạo sinh dựa trên truy xuất tăng cường – Vietnamese" lang="vi" hreflang="vi" data-title="Tạo sinh dựa trên truy xuất tăng cường" data-language-autonym="Tiếng Việt" data-language-local-name="Vietnamese" class="interlanguage-link-target"><span>Tiếng Việt</span></a></li><li class="interlanguage-link interwiki-zh mw-list-item"><a href="https://zh.wikipedia.org/wiki/%E6%AA%A2%E7%B4%A2%E5%A2%9E%E5%BC%B7%E7%94%9F%E6%88%90" title="檢索增強生成 – Chinese" lang="zh" hreflang="zh" data-title="檢索增強生成" data-language-autonym="中文" data-language-local-name="Chinese" class="interlanguage-link-target"><span>中文</span></a></li>
+			</ul>
+			<div class="after-portlet after-portlet-lang"><span class="wb-langlinks-edit wb-langlinks-link"><a href="https://www.wikidata.org/wiki/Special:EntityPage/Q121362277#sitelinks-wikipedia" title="Edit interlanguage links" class="wbc-editpage">Edit links</a></span></div>
+		</div>
+
+	</div>
+</div>
+</header>
+				<div class="vector-page-toolbar vector-feature-custom-font-size-clientpref--excluded">
+					<div class="vector-page-toolbar-container">
+						<div id="left-navigation">
+							<nav aria-label="Namespaces">
+								
+<div id="p-associated-pages" class="vector-menu vector-menu-tabs mw-portlet mw-portlet-associated-pages"  >
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			<li id="ca-nstab-main" class="selected vector-tab-noicon mw-list-item"><a href="/wiki/Retrieval-augmented_generation" title="View the content page [c]" accesskey="c"><span>Article</span></a></li><li id="ca-talk" class="vector-tab-noicon mw-list-item"><a href="/wiki/Talk:Retrieval-augmented_generation" rel="discussion" title="Discuss improvements to the content page [t]" accesskey="t"><span>Talk</span></a></li>
+		</ul>
+		
+	</div>
+</div>
+
+								
+<div id="vector-variants-dropdown" class="vector-dropdown emptyPortlet"  >
+	<input type="checkbox" id="vector-variants-dropdown-checkbox" role="button" aria-haspopup="true" data-event-name="ui.dropdown-vector-variants-dropdown" class="vector-dropdown-checkbox " aria-label="Change language variant"   >
+	<label id="vector-variants-dropdown-label" for="vector-variants-dropdown-checkbox" class="vector-dropdown-label cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet" aria-hidden="true"  ><span class="vector-dropdown-label-text">English</span>
+	</label>
+	<div class="vector-dropdown-content">
+
+
+					
+<div id="p-variants" class="vector-menu mw-portlet mw-portlet-variants emptyPortlet"  >
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			
+		</ul>
+		
+	</div>
+</div>
+
+				
+	</div>
+</div>
+
+							</nav>
+						</div>
+						<div id="right-navigation" class="vector-collapsible">
+							<nav aria-label="Views">
+								
+<div id="p-views" class="vector-menu vector-menu-tabs mw-portlet mw-portlet-views"  >
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			<li id="ca-view" class="selected vector-tab-noicon mw-list-item"><a href="/wiki/Retrieval-augmented_generation"><span>Read</span></a></li><li id="ca-edit" class="vector-tab-noicon mw-list-item"><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit" title="Edit this page [e]" accesskey="e"><span>Edit</span></a></li><li id="ca-history" class="vector-tab-noicon mw-list-item"><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=history" title="Past revisions of this page [h]" accesskey="h"><span>View history</span></a></li>
+		</ul>
+		
+	</div>
+</div>
+
+							</nav>
+				
+							<nav class="vector-page-tools-landmark" aria-label="Page tools">
+								
+<div id="vector-page-tools-dropdown" class="vector-dropdown vector-page-tools-dropdown"  >
+	<input type="checkbox" id="vector-page-tools-dropdown-checkbox" role="button" aria-haspopup="true" data-event-name="ui.dropdown-vector-page-tools-dropdown" class="vector-dropdown-checkbox "  aria-label="Tools"  >
+	<label id="vector-page-tools-dropdown-label" for="vector-page-tools-dropdown-checkbox" class="vector-dropdown-label cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet" aria-hidden="true"  ><span class="vector-dropdown-label-text">Tools</span>
+	</label>
+	<div class="vector-dropdown-content">
+
+
+									<div id="vector-page-tools-unpinned-container" class="vector-unpinned-container">
+						
+<div id="vector-page-tools" class="vector-page-tools vector-pinnable-element">
+	<div
+	class="vector-pinnable-header vector-page-tools-pinnable-header vector-pinnable-header-unpinned"
+	data-feature-name="page-tools-pinned"
+	data-pinnable-element-id="vector-page-tools"
+	data-pinned-container-id="vector-page-tools-pinned-container"
+	data-unpinned-container-id="vector-page-tools-unpinned-container"
+>
+	<div class="vector-pinnable-header-label">Tools</div>
+	<button class="vector-pinnable-header-toggle-button vector-pinnable-header-pin-button" data-event-name="pinnable-header.vector-page-tools.pin">move to sidebar</button>
+	<button class="vector-pinnable-header-toggle-button vector-pinnable-header-unpin-button" data-event-name="pinnable-header.vector-page-tools.unpin">hide</button>
+</div>
+
+	
+<div id="p-cactions" class="vector-menu mw-portlet mw-portlet-cactions emptyPortlet vector-has-collapsible-items"  title="More options" >
+	<div class="vector-menu-heading">
+		Actions
+	</div>
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			<li id="ca-more-view" class="selected vector-more-collapsible-item mw-list-item"><a href="/wiki/Retrieval-augmented_generation"><span>Read</span></a></li><li id="ca-more-edit" class="vector-more-collapsible-item mw-list-item"><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit" title="Edit this page [e]" accesskey="e"><span>Edit</span></a></li><li id="ca-more-history" class="vector-more-collapsible-item mw-list-item"><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=history"><span>View history</span></a></li>
+		</ul>
+		
+	</div>
+</div>
+
+<div id="p-tb" class="vector-menu mw-portlet mw-portlet-tb"  >
+	<div class="vector-menu-heading">
+		General
+	</div>
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			<li id="t-whatlinkshere" class="mw-list-item"><a href="/wiki/Special:WhatLinksHere/Retrieval-augmented_generation" title="List of all English Wikipedia pages containing links to this page [j]" accesskey="j"><span>What links here</span></a></li><li id="t-recentchangeslinked" class="mw-list-item"><a href="/wiki/Special:RecentChangesLinked/Retrieval-augmented_generation" rel="nofollow" title="Recent changes in pages linked from this page [k]" accesskey="k"><span>Related changes</span></a></li><li id="t-upload" class="mw-list-item"><a href="//en.wikipedia.org/wiki/Wikipedia:File_Upload_Wizard" title="Upload files [u]" accesskey="u"><span>Upload file</span></a></li><li id="t-permalink" class="mw-list-item"><a href="/w/index.php?title=Retrieval-augmented_generation&amp;oldid=1337298272" title="Permanent link to this revision of this page"><span>Permanent link</span></a></li><li id="t-info" class="mw-list-item"><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=info" title="More information about this page"><span>Page information</span></a></li><li id="t-cite" class="mw-list-item"><a href="/w/index.php?title=Special:CiteThisPage&amp;page=Retrieval-augmented_generation&amp;id=1337298272&amp;wpFormIdentifier=titleform" title="Information on how to cite this page"><span>Cite this page</span></a></li><li id="t-urlshortener" class="mw-list-item"><a href="/w/index.php?title=Special:UrlShortener&amp;url=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FRetrieval-augmented_generation"><span>Get shortened URL</span></a></li>
+		</ul>
+		
+	</div>
+</div>
+
+<div id="p-coll-print_export" class="vector-menu mw-portlet mw-portlet-coll-print_export"  >
+	<div class="vector-menu-heading">
+		Print/export
+	</div>
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			<li id="coll-download-as-rl" class="mw-list-item"><a href="/w/index.php?title=Special:DownloadAsPdf&amp;page=Retrieval-augmented_generation&amp;action=show-download-screen" title="Download this page as a PDF file"><span>Download as PDF</span></a></li><li id="t-print" class="mw-list-item"><a href="/w/index.php?title=Retrieval-augmented_generation&amp;printable=yes" title="Printable version of this page [p]" accesskey="p"><span>Printable version</span></a></li>
+		</ul>
+		
+	</div>
+</div>
+
+<div id="p-wikibase-otherprojects" class="vector-menu mw-portlet mw-portlet-wikibase-otherprojects"  >
+	<div class="vector-menu-heading">
+		In other projects
+	</div>
+	<div class="vector-menu-content">
+		
+		<ul class="vector-menu-content-list">
+			
+			<li class="wb-otherproject-link wb-otherproject-commons mw-list-item"><a href="https://commons.wikimedia.org/wiki/Category:Retrieval-augmented_generation" hreflang="en"><span>Wikimedia Commons</span></a></li><li id="t-wikibase" class="wb-otherproject-link wb-otherproject-wikibase-dataitem mw-list-item"><a href="https://www.wikidata.org/wiki/Special:EntityPage/Q121362277" title="Structured data on this page hosted by Wikidata [g]" accesskey="g"><span>Wikidata item</span></a></li>
+		</ul>
+		
+	</div>
+</div>
+
+</div>
+
+									</div>
+				
+	</div>
+</div>
+
+							</nav>
+						</div>
+					</div>
+				</div>
+				<div class="vector-column-end no-font-mode-scale">
+					<div class="vector-sticky-pinned-container">
+						<div class="wp25eastereggs-vector-sitenotice-landmark"></div>
+						<nav class="vector-page-tools-landmark" aria-label="Page tools">
+							<div id="vector-page-tools-pinned-container" class="vector-pinned-container">
+				
+							</div>
+		</nav>
+						<nav class="vector-appearance-landmark" aria-label="Appearance">
+							<div id="vector-appearance-pinned-container" class="vector-pinned-container">
+				<div id="vector-appearance" class="vector-appearance vector-pinnable-element">
+	<div
+	class="vector-pinnable-header vector-appearance-pinnable-header vector-pinnable-header-pinned"
+	data-feature-name="appearance-pinned"
+	data-pinnable-element-id="vector-appearance"
+	data-pinned-container-id="vector-appearance-pinned-container"
+	data-unpinned-container-id="vector-appearance-unpinned-container"
+>
+	<div class="vector-pinnable-header-label">Appearance</div>
+	<button class="vector-pinnable-header-toggle-button vector-pinnable-header-pin-button" data-event-name="pinnable-header.vector-appearance.pin">move to sidebar</button>
+	<button class="vector-pinnable-header-toggle-button vector-pinnable-header-unpin-button" data-event-name="pinnable-header.vector-appearance.unpin">hide</button>
+</div>
+
+
+</div>
+
+							</div>
+		</nav>
+					</div>
+				</div>
+				<div id="bodyContent" class="vector-body" aria-labelledby="firstHeading" data-mw-ve-target-container>
+					<div class="vector-body-before-content">
+							<div class="mw-indicators">
+		</div>
+
+						<div id="siteSub" class="noprint">From Wikipedia, the free encyclopedia</div>
+					</div>
+					<div id="contentSub"><div id="mw-content-subtitle"></div></div>
+					
+					
+					<div id="mw-content-text" class="mw-body-content"><div class="mw-subjectpageheader">
+</div><div class="mw-content-ltr mw-parser-output" lang="en" dir="ltr"><div class="shortdescription nomobile noexcerpt noprint searchaux" style="display:none">Type of information retrieval using LLMs</div>
+<p><b>Retrieval-augmented generation</b> (<b>RAG</b>) is a technique that enables <a href="/wiki/Large_language_model" title="Large language model">large language models</a> (LLMs) to retrieve and incorporate new information from external data sources.<sup id="cite&#95;ref-IBM-2023&#95;1-0" class="reference"><a href="#cite_note-IBM-2023-1"><span class="cite-bracket">&#91;</span>1<span class="cite-bracket">&#93;</span></a></sup> With RAG, LLMs first refer to a specified set of documents, then respond to user queries. These documents supplement information from the LLM's pre-existing <a href="/wiki/Training_data" class="mw-redirect" title="Training data">training data</a>.<sup id="cite&#95;ref-MIT&#95;Technology&#95;Review-2024&#95;2-0" class="reference"><a href="#cite_note-MIT_Technology_Review-2024-2"><span class="cite-bracket">&#91;</span>2<span class="cite-bracket">&#93;</span></a></sup> This allows LLMs to use domain-specific and/or updated information that is not available in the training data.<sup id="cite&#95;ref-MIT&#95;Technology&#95;Review-2024&#95;2-1" class="reference"><a href="#cite_note-MIT_Technology_Review-2024-2"><span class="cite-bracket">&#91;</span>2<span class="cite-bracket">&#93;</span></a></sup> For example, this helps LLM-based <a href="/wiki/Chatbot" title="Chatbot">chatbots</a> access internal company data or generate responses based on authoritative sources.
+</p><p>RAG improves large language models (LLMs) by incorporating <a href="/wiki/Information_retrieval" title="Information retrieval">information retrieval</a> before generating responses.<sup id="cite&#95;ref-Lewis-2020&#95;3-0" class="reference"><a href="#cite_note-Lewis-2020-3"><span class="cite-bracket">&#91;</span>3<span class="cite-bracket">&#93;</span></a></sup> Unlike LLMs that rely on static training data, RAG pulls relevant text from databases, uploaded documents, or web sources.<sup id="cite&#95;ref-IBM-2023&#95;1-1" class="reference"><a href="#cite_note-IBM-2023-1"><span class="cite-bracket">&#91;</span>1<span class="cite-bracket">&#93;</span></a></sup> According to <i><a href="/wiki/Ars_Technica" title="Ars Technica">Ars Technica</a></i>, "RAG is a way of improving LLM performance, in essence by blending the LLM process with a web search or other document look-up process to help LLMs stick to the facts." This method helps reduce <a href="/wiki/AI_hallucinations" class="mw-redirect" title="AI hallucinations">AI hallucinations</a>,<sup id="cite&#95;ref-Lewis-2020&#95;3-1" class="reference"><a href="#cite_note-Lewis-2020-3"><span class="cite-bracket">&#91;</span>3<span class="cite-bracket">&#93;</span></a></sup> which have caused chatbots to describe policies that don't exist, or recommend nonexistent legal cases to lawyers that are looking for citations to support their arguments.<sup id="cite&#95;ref-Ars&#95;Technica-2024&#95;4-0" class="reference"><a href="#cite_note-Ars_Technica-2024-4"><span class="cite-bracket">&#91;</span>4<span class="cite-bracket">&#93;</span></a></sup>
+</p><p>RAG also reduces the need to retrain LLMs with new data, saving on computational and financial costs.<sup id="cite&#95;ref-IBM-2023&#95;1-2" class="reference"><a href="#cite_note-IBM-2023-1"><span class="cite-bracket">&#91;</span>1<span class="cite-bracket">&#93;</span></a></sup> Beyond efficiency gains, RAG also allows LLMs to include sources in their responses, so users can verify the cited sources. This provides greater transparency, as users can cross-check retrieved content to ensure accuracy and relevance.
+</p><p>The term RAG was first introduced in a 2020 research paper.<sup id="cite&#95;ref-Lewis-2020&#95;3-2" class="reference"><a href="#cite_note-Lewis-2020-3"><span class="cite-bracket">&#91;</span>3<span class="cite-bracket">&#93;</span></a></sup>
+</p>
+<meta property="mw:PageProp/toc" />
+<div class="mw-heading mw-heading2"><h2 id="RAG_and_LLM_limitations">RAG and LLM limitations</h2><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=1" title="Edit section: RAG and LLM limitations"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<p>LLMs can provide incorrect information. For example, when Google first demonstrated its LLM tool "<a href="/wiki/Google_Bard" class="mw-redirect" title="Google Bard">Google Bard</a>" (later re-branded to Gemini), the LLM provided incorrect information about the <a href="/wiki/James_Webb_Space_Telescope" title="James Webb Space Telescope">James Webb Space Telescope</a>. This error contributed to a $100 billion decline in <a href="/wiki/Alphabet_Inc." title="Alphabet Inc.">the company</a>’s stock value.<sup id="cite&#95;ref-Ars&#95;Technica-2024&#95;4-1" class="reference"><a href="#cite_note-Ars_Technica-2024-4"><span class="cite-bracket">&#91;</span>4<span class="cite-bracket">&#93;</span></a></sup> RAG is used to prevent these errors, but it does not solve all the problems. For example, LLMs can generate misinformation even when pulling from factually correct sources if they misinterpret the context. <i><a href="/wiki/MIT_Technology_Review" title="MIT Technology Review">MIT Technology Review</a></i> gives the example of an AI-generated response stating, "The United States has had one Muslim president, Barack Hussein Obama." The model retrieved this from an academic book rhetorically titled <i>Barack Hussein Obama: America’s First Muslim President?</i> The LLM did not "know" or "understand" the context of the title, generating a false statement.<sup id="cite&#95;ref-MIT&#95;Technology&#95;Review-2024&#95;2-2" class="reference"><a href="#cite_note-MIT_Technology_Review-2024-2"><span class="cite-bracket">&#91;</span>2<span class="cite-bracket">&#93;</span></a></sup>
+</p><p>LLMs with RAG are programmed to prioritize new information. This technique has been called "prompt stuffing." Without prompt stuffing, the LLM's input is generated by a user; with prompt stuffing, additional relevant context is added to this input to guide the model’s response. This approach provides the LLM with key information early in the prompt, encouraging it to prioritize the supplied data over pre-existing training knowledge.<sup id="cite&#95;ref-5" class="reference"><a href="#cite_note-5"><span class="cite-bracket">&#91;</span>5<span class="cite-bracket">&#93;</span></a></sup>
+</p>
+<div class="mw-heading mw-heading2"><h2 id="Process">Process</h2><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=2" title="Edit section: Process"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<p>Retrieval-augmented generation (RAG) enhances <a href="/wiki/Large_language_model" title="Large language model">large language models</a> (LLMs) by incorporating an <a href="/wiki/Information_retrieval" title="Information retrieval">information-retrieval</a> mechanism that allows models to access and utilize additional data beyond their original training set. <i><a href="/wiki/Ars_Technica" title="Ars Technica">Ars Technica</a></i> notes that "when new information becomes available, rather than having to retrain the model, all that’s needed is to augment the model’s external knowledge base with the updated information" ("augmentation").<sup id="cite&#95;ref-Ars&#95;Technica-2024&#95;4-2" class="reference"><a href="#cite_note-Ars_Technica-2024-4"><span class="cite-bracket">&#91;</span>4<span class="cite-bracket">&#93;</span></a></sup> IBM states that "in the generative phase, the LLM draws from the augmented prompt and its internal representation of its training data to synthesize" an answer.<sup id="cite&#95;ref-IBM-2023&#95;1-3" class="reference"><a href="#cite_note-IBM-2023-1"><span class="cite-bracket">&#91;</span>1<span class="cite-bracket">&#93;</span></a></sup>
+</p>
+<div class="mw-heading mw-heading3"><h3 id="RAG_key_stages">RAG key stages</h3><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=3" title="Edit section: RAG key stages"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<figure class="mw-default-size" typeof="mw:File/Thumb"><a href="/wiki/File:RAG_diagram.svg" class="mw-file-description"><img src="//upload.wikimedia.org/wikipedia/commons/thumb/1/14/RAG_diagram.svg/250px-RAG_diagram.svg.png" decoding="async" width="250" height="221" class="mw-file-element" srcset="//upload.wikimedia.org/wikipedia/commons/thumb/1/14/RAG_diagram.svg/500px-RAG_diagram.svg.png 1.5x" data-file-width="652" data-file-height="576" /></a><figcaption>Overview of RAG process, combining external documents and user input into an LLM prompt to get tailored output</figcaption></figure>
+<p>Typically, the data to be referenced is converted into LLM <a href="/wiki/Word_embeddings" class="mw-redirect" title="Word embeddings">embeddings</a>, numerical representations in the form of a large vector space. RAG can be used on unstructured (usually text), semi-structured, or structured data (for example <a href="/wiki/Knowledge_graphs" class="mw-redirect" title="Knowledge graphs">knowledge graphs</a>). These embeddings are then stored in a <a href="/wiki/Vector_database" title="Vector database">vector database</a> to allow for <a href="/wiki/Document_retrieval" title="Document retrieval">document retrieval</a>.
+</p><p>Given a user query, a document retriever is first called to select the most relevant documents that will be used to augment the query.<sup id="cite&#95;ref-MIT&#95;Technology&#95;Review-2024&#95;2-3" class="reference"><a href="#cite_note-MIT_Technology_Review-2024-2"><span class="cite-bracket">&#91;</span>2<span class="cite-bracket">&#93;</span></a></sup><sup id="cite&#95;ref-Lewis-2020&#95;3-3" class="reference"><a href="#cite_note-Lewis-2020-3"><span class="cite-bracket">&#91;</span>3<span class="cite-bracket">&#93;</span></a></sup> This comparison can be done using a variety of methods, which depend in part on the type of indexing used.<sup id="cite&#95;ref-IBM-2023&#95;1-4" class="reference"><a href="#cite_note-IBM-2023-1"><span class="cite-bracket">&#91;</span>1<span class="cite-bracket">&#93;</span></a></sup>
+</p><p>The model feeds this relevant retrieved information into the LLM via <a href="/wiki/Prompt_engineering" title="Prompt engineering">prompt engineering</a> of the user's original query. Newer implementations (as of 2023<sup class="plainlinks noexcerpt noprint asof-tag update" style="display:none;"><a class="external text" href="https://en.wikipedia.org/w/index.php?title=Retrieval-augmented_generation&amp;action=edit">&#91;update&#93;</a></sup>) can also incorporate specific augmentation modules with abilities such as expanding queries into multiple domains and using memory and self-improvement to learn from previous retrievals.
+</p><p>Finally, the LLM can generate output based on both the query and the retrieved documents.<sup id="cite&#95;ref-MIT&#95;Technology&#95;Review-2024&#95;2-4" class="reference"><a href="#cite_note-MIT_Technology_Review-2024-2"><span class="cite-bracket">&#91;</span>2<span class="cite-bracket">&#93;</span></a></sup><sup id="cite&#95;ref-BUZBP&#95;6-0" class="reference"><a href="#cite_note-BUZBP-6"><span class="cite-bracket">&#91;</span>6<span class="cite-bracket">&#93;</span></a></sup> Some models incorporate extra steps to improve output, such as the re-ranking of retrieved information, context selection, and <a href="/wiki/Fine-tuning_(deep_learning)" title="Fine-tuning (deep learning)">fine-tuning</a>.
+</p>
+<div class="mw-heading mw-heading2"><h2 id="Improvements">Improvements</h2><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=4" title="Edit section: Improvements"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<p>Improvements to the basic process above can be applied at different stages in the RAG flow. 
+</p>
+<div class="mw-heading mw-heading3"><h3 id="Encoder">Encoder</h3><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=5" title="Edit section: Encoder"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<p>These methods focus on the encoding of text as either dense or sparse vectors. <a href="/wiki/Sparse_vector" class="mw-redirect" title="Sparse vector">Sparse vectors</a>, which encode the identity of a word, are typically <a href="/wiki/Large_language_model#Tokenization" title="Large language model">dictionary</a>-length and contain mostly zeros. <a href="/wiki/Dense_matrix" class="mw-redirect" title="Dense matrix">Dense vectors</a>, which encode meaning, are more compact and contain fewer zeros. Various enhancements can improve the way similarities are calculated in the vector stores (databases).<sup id="cite&#95;ref-Luan-2021&#95;7-0" class="reference"><a href="#cite_note-Luan-2021-7"><span class="cite-bracket">&#91;</span>7<span class="cite-bracket">&#93;</span></a></sup>  
+</p>
+<ul><li>Performance improves by optimizing how vector similarities are calculated. <a href="/wiki/Dot_product" title="Dot product">Dot products</a> enhance similarity scoring, while <a href="/wiki/Approximate_nearest_neighbor_search" class="mw-redirect" title="Approximate nearest neighbor search">approximate nearest neighbor</a> (ANN) searches improve retrieval efficiency over <a href="/wiki/K-nearest_neighbors_algorithm" title="K-nearest neighbors algorithm">K-nearest neighbors</a> (KNN) searches.<sup id="cite&#95;ref-8" class="reference"><a href="#cite_note-8"><span class="cite-bracket">&#91;</span>8<span class="cite-bracket">&#93;</span></a></sup></li>
+<li>Accuracy may be improved with Late Interactions, which allow the system to compare words more precisely after retrieval. This helps refine document ranking and improve search relevance.<sup id="cite&#95;ref-colbert&#95;9-0" class="reference"><a href="#cite_note-colbert-9"><span class="cite-bracket">&#91;</span>9<span class="cite-bracket">&#93;</span></a></sup></li>
+<li>Hybrid vector approaches may be used to combine dense vector representations with sparse <a href="/wiki/One-hot" title="One-hot">one-hot</a> vectors, taking advantage of the computational efficiency of sparse dot products over dense vector operations.<sup id="cite&#95;ref-Luan-2021&#95;7-1" class="reference"><a href="#cite_note-Luan-2021-7"><span class="cite-bracket">&#91;</span>7<span class="cite-bracket">&#93;</span></a></sup></li>
+<li>Other retrieval techniques focus on improving accuracy by refining how documents are selected. Some retrieval methods combine sparse representations, such as SPLADE, with query expansion strategies to improve search accuracy and recall.<sup id="cite&#95;ref-10" class="reference"><a href="#cite_note-10"><span class="cite-bracket">&#91;</span>10<span class="cite-bracket">&#93;</span></a></sup></li></ul>
+<div class="mw-heading mw-heading3"><h3 id="Retriever-centric_methods">Retriever-centric methods</h3><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=6" title="Edit section: Retriever-centric methods"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<p>These methods aim to enhance the quality of document retrieval in vector databases:
+</p>
+<ul><li>Pre-training the retriever using the <i>Inverse Cloze Task</i> (ICT), a technique that helps the model learn retrieval patterns by predicting masked text within documents.<sup id="cite&#95;ref-orqa&#95;11-0" class="reference"><a href="#cite_note-orqa-11"><span class="cite-bracket">&#91;</span>11<span class="cite-bracket">&#93;</span></a></sup></li>
+<li>Supervised retriever optimization aligns retrieval probabilities with the generator model’s likelihood distribution. This involves retrieving the top-k vectors for a given prompt, scoring the generated response’s <a href="/wiki/Perplexity" title="Perplexity">perplexity</a>, and minimizing <a href="/wiki/KL_divergence" class="mw-redirect" title="KL divergence">KL divergence</a> between the retriever’s selections and the model’s likelihoods to refine retrieval.<sup id="cite&#95;ref-12" class="reference"><a href="#cite_note-12"><span class="cite-bracket">&#91;</span>12<span class="cite-bracket">&#93;</span></a></sup></li>
+<li>Reranking techniques can refine retriever performance by prioritizing the most relevant retrieved documents during training.<sup id="cite&#95;ref-13" class="reference"><a href="#cite_note-13"><span class="cite-bracket">&#91;</span>13<span class="cite-bracket">&#93;</span></a></sup></li></ul>
+<div class="mw-heading mw-heading3"><h3 id="Language_model">Language model</h3><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=7" title="Edit section: Language model"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<div class="center"><div class="thumb tnone" style=""><div class="thumbinner" style="width: 302px;"><div class="thumbimage noresize" style="width: 300px;">
+<span typeof="mw:File"><a href="/wiki/File:Language_model_in_Deepmind%27s_2021_Retro_for_RAG.svg" class="mw-file-description"><img src="//upload.wikimedia.org/wikipedia/commons/thumb/4/48/Language_model_in_Deepmind%27s_2021_Retro_for_RAG.svg/330px-Language_model_in_Deepmind%27s_2021_Retro_for_RAG.svg.png" decoding="async" width="300" height="184" class="mw-file-element" srcset="//upload.wikimedia.org/wikipedia/commons/thumb/4/48/Language_model_in_Deepmind%27s_2021_Retro_for_RAG.svg/500px-Language_model_in_Deepmind%27s_2021_Retro_for_RAG.svg.png 1.5x, //upload.wikimedia.org/wikipedia/commons/thumb/4/48/Language_model_in_Deepmind%27s_2021_Retro_for_RAG.svg/960px-Language_model_in_Deepmind%27s_2021_Retro_for_RAG.svg.png 2x" data-file-width="512" data-file-height="314" /></a></span> </div><div class="thumbcaption">Retro language model for RAG.  Each Retro block consists of Attention, Chunked Cross Attention, and Feed Forward layers.  Black-lettered boxes show data being changed, and blue lettering shows the algorithm performing the changes.</div></div></div></div>
+<p>By redesigning the language model with the retriever in mind, a 25-time smaller network can get comparable perplexity as its much larger counterparts.<sup id="cite&#95;ref-borgeaud&#95;14-0" class="reference"><a href="#cite_note-borgeaud-14"><span class="cite-bracket">&#91;</span>14<span class="cite-bracket">&#93;</span></a></sup> Because it is trained from scratch, this method (Retro) incurs the high cost of training runs that the original RAG scheme avoided. The hypothesis is that by giving domain knowledge during training, Retro needs less focus on the domain and can devote its smaller weight resources only to language semantics. The redesigned language model is shown here.  
+</p><p>It has been reported that Retro is not reproducible, so modifications were made to make it so.  The more reproducible version is called Retro++ and includes in-context RAG.<sup id="cite&#95;ref-wang2023a&#95;15-0" class="reference"><a href="#cite_note-wang2023a-15"><span class="cite-bracket">&#91;</span>15<span class="cite-bracket">&#93;</span></a></sup>
+</p>
+<div class="mw-heading mw-heading3"><h3 id="Chunking">Chunking</h3><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=8" title="Edit section: Chunking"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<p>Chunking involves various strategies for breaking up the data into vectors so the retriever can find details in it.
+</p>
+<div class="center"><div class="thumb tnone" style=""><div class="thumbinner" style="width: 502px;"><div class="thumbimage noresize" style="width: 500px;">
+<span typeof="mw:File"><a href="/wiki/File:Rag-doc-styles.png" class="mw-file-description"><img src="//upload.wikimedia.org/wikipedia/commons/thumb/0/0c/Rag-doc-styles.png/500px-Rag-doc-styles.png" decoding="async" width="500" height="200" class="mw-file-element" srcset="//upload.wikimedia.org/wikipedia/commons/0/0c/Rag-doc-styles.png 1.5x" data-file-width="585" data-file-height="234" /></a></span> </div><div class="thumbcaption">Different data styles have patterns that correct chunking can take advantage of.</div></div></div></div>
+<p>Three types of chunking strategies are:<sup class="noprint Inline-Template Template-Fact" style="white-space:nowrap;">&#91;<i><a href="/wiki/Wikipedia:Citation_needed" title="Wikipedia:Citation needed"><span title="This claim needs references to reliable sources. (August 2025)">citation needed</span></a></i>&#93;</sup>
+</p>
+<ul><li>Fixed length with overlap. This is fast and easy. Overlapping consecutive chunks helps to maintain semantic context across chunks.</li>
+<li>Syntax-based chunks can break the document up into sentences. Libraries such as spaCy or NLTK can also help.</li>
+<li>File format-based chunking. Certain file types have natural chunks built in, and it's best to respect them. For example, code files are best chunked and vectorized as whole functions or classes. HTML files should leave &lt;table&gt; or base64 encoded &lt;img&gt; elements intact. Similar considerations should be taken for pdf files. Libraries such as Unstructured or Langchain can assist with this method.</li></ul>
+<div class="mw-heading mw-heading3"><h3 id="Hybrid_search">Hybrid search</h3><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=9" title="Edit section: Hybrid search"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<p>Sometimes vector database searches can miss key facts needed to answer a user's question. One way to mitigate this is to do a traditional text search, add those results to the text chunks linked to the retrieved vectors from the vector search, and feed the combined hybrid text into the language model for generation.<sup class="noprint Inline-Template Template-Fact" style="white-space:nowrap;">&#91;<i><a href="/wiki/Wikipedia:Citation_needed" title="Wikipedia:Citation needed"><span title="This claim needs references to reliable sources. (February 2025)">citation needed</span></a></i>&#93;</sup>
+</p>
+<div class="mw-heading mw-heading3"><h3 id="Evaluation_and_benchmarks">Evaluation and benchmarks</h3><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=10" title="Edit section: Evaluation and benchmarks"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<p>RAG systems are commonly evaluated using benchmarks designed to test <a href="/wiki/Retrievability" title="Retrievability">retrievability</a>, retrieval accuracy and generative quality. Popular datasets include BEIR, a suite of information retrieval tasks across diverse domains, and Natural Questions or Google QA for open-domain QA.<sup class="noprint Inline-Template Template-Fact" style="white-space:nowrap;">&#91;<i><a href="/wiki/Wikipedia:Citation_needed" title="Wikipedia:Citation needed"><span title="This claim needs references to reliable sources. (August 2025)">citation needed</span></a></i>&#93;</sup>
+</p>
+<div class="mw-heading mw-heading2"><h2 id="Challenges">Challenges</h2><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=11" title="Edit section: Challenges"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<p>RAG does not prevent hallucinations in LLMs. According to <i><a href="/wiki/Ars_Technica" title="Ars Technica">Ars Technica</a></i>, "It is not a direct solution because the LLM can still hallucinate around the source material in its response."<sup id="cite&#95;ref-Ars&#95;Technica-2024&#95;4-3" class="reference"><a href="#cite_note-Ars_Technica-2024-4"><span class="cite-bracket">&#91;</span>4<span class="cite-bracket">&#93;</span></a></sup>
+</p><p>While RAG improves the accuracy of large language models (LLMs), it does not eliminate all challenges. One limitation is that while RAG reduces the need for frequent model retraining, it does not remove it entirely. Additionally, LLMs may struggle to recognize when they lack sufficient information to provide a reliable response. Without specific training, models may generate answers even when they should indicate uncertainty. According to <a href="/wiki/IBM" title="IBM">IBM</a>, this issue can arise when the model lacks the ability to assess its own knowledge limitations.<sup id="cite&#95;ref-IBM-2023&#95;1-5" class="reference"><a href="#cite_note-IBM-2023-1"><span class="cite-bracket">&#91;</span>1<span class="cite-bracket">&#93;</span></a></sup>
+</p>
+<div class="mw-heading mw-heading3"><h3 id="RAG_poisoning">RAG poisoning</h3><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=12" title="Edit section: RAG poisoning"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<p>RAG systems may retrieve factually correct but misleading sources, leading to errors in interpretation. In some cases, an LLM may extract statements from a source without considering its context, resulting in an incorrect conclusion. Additionally, when faced with conflicting information, RAG models may struggle to determine which source is accurate. The worst case outcome of this limitation is that the model may combine details from multiple sources producing responses that merge outdated and updated information in a misleading manner. According to the <i><a href="/wiki/MIT_Technology_Review" title="MIT Technology Review">MIT Technology Review</a></i>, these issues occur because RAG systems may misinterpret the data they retrieve.<sup id="cite&#95;ref-MIT&#95;Technology&#95;Review-2024&#95;2-5" class="reference"><a href="#cite_note-MIT_Technology_Review-2024-2"><span class="cite-bracket">&#91;</span>2<span class="cite-bracket">&#93;</span></a></sup>
+</p>
+<div class="mw-heading mw-heading2"><h2 id="References">References</h2><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/w/index.php?title=Retrieval-augmented_generation&amp;action=edit&amp;section=13" title="Edit section: References"><span>edit</span></a><span class="mw-editsection-bracket">]</span></span></div>
+<div class="mw-references-wrap mw-references-columns"><ol class="references">
+<li id="cite&#95;note-IBM-2023-1"><span class="mw-cite-backlink">^ <a href="#cite_ref-IBM-2023_1-0"><sup><i><b>a</b></i></sup></a> <a href="#cite_ref-IBM-2023_1-1"><sup><i><b>b</b></i></sup></a> <a href="#cite_ref-IBM-2023_1-2"><sup><i><b>c</b></i></sup></a> <a href="#cite_ref-IBM-2023_1-3"><sup><i><b>d</b></i></sup></a> <a href="#cite_ref-IBM-2023_1-4"><sup><i><b>e</b></i></sup></a> <a href="#cite_ref-IBM-2023_1-5"><sup><i><b>f</b></i></sup></a></span> <span class="reference-text"><style data-mw-deduplicate="TemplateStyles:r1333433106">.mw-parser-output cite.citation{font-style:inherit;word-wrap:break-word}.mw-parser-output .citation q{quotes:"\"""\"""'""'"}.mw-parser-output .citation:target{background-color:rgba(0,127,255,0.133)}.mw-parser-output .id-lock-free.id-lock-free a{background:url("//upload.wikimedia.org/wikipedia/commons/6/65/Lock-green.svg")right 0.1em center/9px no-repeat}.mw-parser-output .id-lock-limited.id-lock-limited a,.mw-parser-output .id-lock-registration.id-lock-registration a{background:url("//upload.wikimedia.org/wikipedia/commons/d/d6/Lock-gray-alt-2.svg")right 0.1em center/9px no-repeat}.mw-parser-output .id-lock-subscription.id-lock-subscription a{background:url("//upload.wikimedia.org/wikipedia/commons/a/aa/Lock-red-alt-2.svg")right 0.1em center/9px no-repeat}.mw-parser-output .cs1-ws-icon a{background:url("//upload.wikimedia.org/wikipedia/commons/4/4c/Wikisource-logo.svg")right 0.1em center/12px no-repeat}body:not(.skin-timeless):not(.skin-minerva) .mw-parser-output .id-lock-free a,body:not(.skin-timeless):not(.skin-minerva) .mw-parser-output .id-lock-limited a,body:not(.skin-timeless):not(.skin-minerva) .mw-parser-output .id-lock-registration a,body:not(.skin-timeless):not(.skin-minerva) .mw-parser-output .id-lock-subscription a,body:not(.skin-timeless):not(.skin-minerva) .mw-parser-output .cs1-ws-icon a{background-size:contain;padding:0 1em 0 0}.mw-parser-output .cs1-code{color:inherit;background:inherit;border:none;padding:inherit}.mw-parser-output .cs1-hidden-error{display:none;color:var(--color-error,#bf3c2c)}.mw-parser-output .cs1-visible-error{color:var(--color-error,#bf3c2c)}.mw-parser-output .cs1-maint{display:none;color:#085;margin-left:0.3em}.mw-parser-output .cs1-kern-left{padding-left:0.2em}.mw-parser-output .cs1-kern-right{padding-right:0.2em}.mw-parser-output .citation .mw-selflink{font-weight:inherit}@media screen{.mw-parser-output .cs1-format{font-size:95%}html.skin-theme-clientpref-night .mw-parser-output .cs1-maint{color:#18911f}}@media screen and (prefers-color-scheme:dark){html.skin-theme-clientpref-os .mw-parser-output .cs1-maint{color:#18911f}}</style><cite class="citation web cs1"><a rel="nofollow" class="external text" href="https://research.ibm.com/blog/retrieval-augmented-generation-RAG">"What is retrieval-augmented generation?"</a>. <i>IBM</i>. 22 August 2023<span class="reference-accessdate">. Retrieved <span class="nowrap">7 March</span> 2025</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=unknown&amp;rft.jtitle=IBM&amp;rft.atitle=What+is+retrieval-augmented+generation%3F&amp;rft.date=2023-08-22&amp;rft&#95;id=https%3A%2F%2Fresearch.ibm.com%2Fblog%2Fretrieval-augmented-generation-RAG&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-MIT&#95;Technology&#95;Review-2024-2"><span class="mw-cite-backlink">^ <a href="#cite_ref-MIT_Technology_Review-2024_2-0"><sup><i><b>a</b></i></sup></a> <a href="#cite_ref-MIT_Technology_Review-2024_2-1"><sup><i><b>b</b></i></sup></a> <a href="#cite_ref-MIT_Technology_Review-2024_2-2"><sup><i><b>c</b></i></sup></a> <a href="#cite_ref-MIT_Technology_Review-2024_2-3"><sup><i><b>d</b></i></sup></a> <a href="#cite_ref-MIT_Technology_Review-2024_2-4"><sup><i><b>e</b></i></sup></a> <a href="#cite_ref-MIT_Technology_Review-2024_2-5"><sup><i><b>f</b></i></sup></a></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite class="citation web cs1"><a rel="nofollow" class="external text" href="https://www.technologyreview.com/2024/05/31/1093019/why-are-googles-ai-overviews-results-so-bad/">"Why Google's AI Overviews gets things wrong"</a>. <i>MIT Technology Review</i>. 31 May 2024<span class="reference-accessdate">. Retrieved <span class="nowrap">7 March</span> 2025</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=unknown&amp;rft.jtitle=MIT+Technology+Review&amp;rft.atitle=Why+Google%27s+AI+Overviews+gets+things+wrong&amp;rft.date=2024-05-31&amp;rft&#95;id=https%3A%2F%2Fwww.technologyreview.com%2F2024%2F05%2F31%2F1093019%2Fwhy-are-googles-ai-overviews-results-so-bad%2F&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-Lewis-2020-3"><span class="mw-cite-backlink">^ <a href="#cite_ref-Lewis-2020_3-0"><sup><i><b>a</b></i></sup></a> <a href="#cite_ref-Lewis-2020_3-1"><sup><i><b>b</b></i></sup></a> <a href="#cite_ref-Lewis-2020_3-2"><sup><i><b>c</b></i></sup></a> <a href="#cite_ref-Lewis-2020_3-3"><sup><i><b>d</b></i></sup></a></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite id="CITEREFLewisPerezPiktusPetroni2020" class="citation conference cs1">Lewis, Patrick; Perez, Ethan; Piktus, Aleksandra; Petroni, Fabio; Karpukhin, Vladimir; Goyal, Naman; Küttler, Heinrich; Lewis, Mike; Yih, Wen-tau; Rocktäschel, Tim; Riedel, Sebastian; Kiela, Douwe (6 December 2020). <a rel="nofollow" class="external text" href="https://dl.acm.org/doi/abs/10.5555/3495724.3496517"><i>Retrieval-augmented generation for knowledge-intensive NLP tasks</i></a>. International Conference on Neural Information Processing Systems. Red Hook, NY, USA: Curran Associates Inc. <a href="/wiki/ISBN_(identifier)" class="mw-redirect" title="ISBN (identifier)">ISBN</a>&#160;<a href="/wiki/Special:BookSources/978-1-7138-2954-6" title="Special:BookSources/978-1-7138-2954-6"><bdi>978-1-7138-2954-6</bdi></a><span class="reference-accessdate">. Retrieved <span class="nowrap">9 December</span> 2025</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=conference&amp;rft.btitle=Retrieval-augmented+generation+for+knowledge-intensive+NLP+tasks&amp;rft.place=Red+Hook%2C+NY%2C+USA&amp;rft.pub=Curran+Associates+Inc.&amp;rft.date=2020-12-06&amp;rft.isbn=978-1-7138-2954-6&amp;rft.aulast=Lewis&amp;rft.aufirst=Patrick&amp;rft.au=Perez%2C+Ethan&amp;rft.au=Piktus%2C+Aleksandra&amp;rft.au=Petroni%2C+Fabio&amp;rft.au=Karpukhin%2C+Vladimir&amp;rft.au=Goyal%2C+Naman&amp;rft.au=K%C3%BCttler%2C+Heinrich&amp;rft.au=Lewis%2C+Mike&amp;rft.au=Yih%2C+Wen-tau&amp;rft.au=Rockt%C3%A4schel%2C+Tim&amp;rft.au=Riedel%2C+Sebastian&amp;rft.au=Kiela%2C+Douwe&amp;rft&#95;id=https%3A%2F%2Fdl.acm.org%2Fdoi%2Fabs%2F10.5555%2F3495724.3496517&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-Ars&#95;Technica-2024-4"><span class="mw-cite-backlink">^ <a href="#cite_ref-Ars_Technica-2024_4-0"><sup><i><b>a</b></i></sup></a> <a href="#cite_ref-Ars_Technica-2024_4-1"><sup><i><b>b</b></i></sup></a> <a href="#cite_ref-Ars_Technica-2024_4-2"><sup><i><b>c</b></i></sup></a> <a href="#cite_ref-Ars_Technica-2024_4-3"><sup><i><b>d</b></i></sup></a></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite class="citation web cs1"><a rel="nofollow" class="external text" href="https://arstechnica.com/ai/2024/06/can-a-technology-called-rag-keep-ai-models-from-making-stuff-up/">"Can a technology called RAG keep AI models from making stuff up?"</a>. <i>Ars Technica</i>. 6 June 2024<span class="reference-accessdate">. Retrieved <span class="nowrap">7 March</span> 2025</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=unknown&amp;rft.jtitle=Ars+Technica&amp;rft.atitle=Can+a+technology+called+RAG+keep+AI+models+from+making+stuff+up%3F&amp;rft.date=2024-06-06&amp;rft&#95;id=https%3A%2F%2Farstechnica.com%2Fai%2F2024%2F06%2Fcan-a-technology-called-rag-keep-ai-models-from-making-stuff-up%2F&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-5"><span class="mw-cite-backlink"><b><a href="#cite_ref-5">^</a></b></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite class="citation web cs1"><a rel="nofollow" class="external text" href="https://www.bbc.co.uk/rd/articles/2024-06-mitigating-llm-hallucinations-in-text-summarisation">"Mitigating LLM hallucinations in text summarisation"</a>. <i>BBC</i>. 20 June 2024<span class="reference-accessdate">. Retrieved <span class="nowrap">7 March</span> 2025</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=unknown&amp;rft.jtitle=BBC&amp;rft.atitle=Mitigating+LLM+hallucinations+in+text+summarisation&amp;rft.date=2024-06-20&amp;rft&#95;id=https%3A%2F%2Fwww.bbc.co.uk%2Frd%2Farticles%2F2024-06-mitigating-llm-hallucinations-in-text-summarisation&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-BUZBP-6"><span class="mw-cite-backlink"><b><a href="#cite_ref-BUZBP_6-0">^</a></b></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite id="CITEREFLewisPerezPiktusPetroni2020" class="citation journal cs1">Lewis, Patrick; Perez, Ethan; Piktus, Aleksandra; Petroni, Fabio; Karpukhin, Vladimir; Goyal, Naman; Küttler, Heinrich; Lewis, Mike; Yih, Wen-tau; Rocktäschel, Tim; Riedel, Sebastian; Kiela, Douwe (2020). <a rel="nofollow" class="external text" href="https://proceedings.neurips.cc/paper/2020/hash/6b493230205f780e1bc26945df7481e5-Abstract.html">"Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks"</a>. <i>Advances in Neural Information Processing Systems</i>. <b>33</b>. Curran Associates, Inc.: <span class="nowrap">9459–</span>9474. <a href="/wiki/ArXiv_(identifier)" class="mw-redirect" title="ArXiv (identifier)">arXiv</a>:<span class="id-lock-free" title="Freely accessible"><a rel="nofollow" class="external text" href="https://arxiv.org/abs/2005.11401">2005.11401</a></span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=article&amp;rft.jtitle=Advances+in+Neural+Information+Processing+Systems&amp;rft.atitle=Retrieval-Augmented+Generation+for+Knowledge-Intensive+NLP+Tasks&amp;rft.volume=33&amp;rft.pages=9459-9474&amp;rft.date=2020&amp;rft&#95;id=info%3Aarxiv%2F2005.11401&amp;rft.aulast=Lewis&amp;rft.aufirst=Patrick&amp;rft.au=Perez%2C+Ethan&amp;rft.au=Piktus%2C+Aleksandra&amp;rft.au=Petroni%2C+Fabio&amp;rft.au=Karpukhin%2C+Vladimir&amp;rft.au=Goyal%2C+Naman&amp;rft.au=K%C3%BCttler%2C+Heinrich&amp;rft.au=Lewis%2C+Mike&amp;rft.au=Yih%2C+Wen-tau&amp;rft.au=Rockt%C3%A4schel%2C+Tim&amp;rft.au=Riedel%2C+Sebastian&amp;rft.au=Kiela%2C+Douwe&amp;rft&#95;id=https%3A%2F%2Fproceedings.neurips.cc%2Fpaper%2F2020%2Fhash%2F6b493230205f780e1bc26945df7481e5-Abstract.html&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-Luan-2021-7"><span class="mw-cite-backlink">^ <a href="#cite_ref-Luan-2021_7-0"><sup><i><b>a</b></i></sup></a> <a href="#cite_ref-Luan-2021_7-1"><sup><i><b>b</b></i></sup></a></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite id="CITEREFLuanEisensteinToutanovaCollins2021" class="citation journal cs1">Luan, Yi; Eisenstein, Jacob; Toutanova, Kristina; Collins, Michael (26 April 2021). <a rel="nofollow" class="external text" href="https://direct.mit.edu/tacl/article/doi/10.1162/tacl_a_00369/100684/Sparse-Dense-and-Attentional-Representations-for">"Sparse, Dense, and Attentional Representations for Text Retrieval"</a>. <i>Transactions of the Association for Computational Linguistics</i>. <b>9</b>: <span class="nowrap">329–</span>345. <a href="/wiki/ArXiv_(identifier)" class="mw-redirect" title="ArXiv (identifier)">arXiv</a>:<span class="id-lock-free" title="Freely accessible"><a rel="nofollow" class="external text" href="https://arxiv.org/abs/2005.00181">2005.00181</a></span>. <a href="/wiki/Doi_(identifier)" class="mw-redirect" title="Doi (identifier)">doi</a>:<a rel="nofollow" class="external text" href="https://doi.org/10.1162%2Ftacl_a_00369">10.1162/tacl_a_00369</a><span class="reference-accessdate">. Retrieved <span class="nowrap">15 March</span> 2025</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=article&amp;rft.jtitle=Transactions+of+the+Association+for+Computational+Linguistics&amp;rft.atitle=Sparse%2C+Dense%2C+and+Attentional+Representations+for+Text+Retrieval&amp;rft.volume=9&amp;rft.pages=329-345&amp;rft.date=2021-04-26&amp;rft&#95;id=info%3Aarxiv%2F2005.00181&amp;rft&#95;id=info%3Adoi%2F10.1162%2Ftacl&#95;a&#95;00369&amp;rft.aulast=Luan&amp;rft.aufirst=Yi&amp;rft.au=Eisenstein%2C+Jacob&amp;rft.au=Toutanova%2C+Kristina&amp;rft.au=Collins%2C+Michael&amp;rft&#95;id=https%3A%2F%2Fdirect.mit.edu%2Ftacl%2Farticle%2Fdoi%2F10.1162%2Ftacl&#95;a&#95;00369%2F100684%2FSparse-Dense-and-Attentional-Representations-for&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-8"><span class="mw-cite-backlink"><b><a href="#cite_ref-8">^</a></b></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite class="citation web cs1"><a rel="nofollow" class="external text" href="https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/rag/rag-information-retrieval">"Information retrieval"</a>. <i>Microsoft</i>. 10 January 2025<span class="reference-accessdate">. Retrieved <span class="nowrap">15 March</span> 2025</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=unknown&amp;rft.jtitle=Microsoft&amp;rft.atitle=Information+retrieval&amp;rft.date=2025-01-10&amp;rft&#95;id=https%3A%2F%2Flearn.microsoft.com%2Fen-us%2Fazure%2Farchitecture%2Fai-ml%2Fguide%2Frag%2Frag-information-retrieval&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-colbert-9"><span class="mw-cite-backlink"><b><a href="#cite_ref-colbert_9-0">^</a></b></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite id="CITEREFKhattabZaharia2020" class="citation book cs1">Khattab, Omar; Zaharia, Matei (2020). <span class="id-lock-subscription" title="Paid subscription required"><a rel="nofollow" class="external text" href="https://dl.acm.org/doi/10.1145/3397271.3401075">"ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT"</a></span>. <i>Proceedings of the 43rd International ACM SIGIR Conference on Research and Development in Information Retrieval</i>. pp.&#160;<span class="nowrap">39–</span>48. <a href="/wiki/Doi_(identifier)" class="mw-redirect" title="Doi (identifier)">doi</a>:<a rel="nofollow" class="external text" href="https://doi.org/10.1145%2F3397271.3401075">10.1145/3397271.3401075</a>. <a href="/wiki/ISBN_(identifier)" class="mw-redirect" title="ISBN (identifier)">ISBN</a>&#160;<a href="/wiki/Special:BookSources/978-1-4503-8016-4" title="Special:BookSources/978-1-4503-8016-4"><bdi>978-1-4503-8016-4</bdi></a>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=bookitem&amp;rft.atitle=ColBERT%3A+Efficient+and+Effective+Passage+Search+via+Contextualized+Late+Interaction+over+BERT&amp;rft.btitle=Proceedings+of+the+43rd+International+ACM+SIGIR+Conference+on+Research+and+Development+in+Information+Retrieval&amp;rft.pages=39-48&amp;rft.date=2020&amp;rft&#95;id=info%3Adoi%2F10.1145%2F3397271.3401075&amp;rft.isbn=978-1-4503-8016-4&amp;rft.aulast=Khattab&amp;rft.aufirst=Omar&amp;rft.au=Zaharia%2C+Matei&amp;rft&#95;id=https%3A%2F%2Fdl.acm.org%2Fdoi%2F10.1145%2F3397271.3401075&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-10"><span class="mw-cite-backlink"><b><a href="#cite_ref-10">^</a></b></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite id="CITEREFWangConroyMolinoYang2024" class="citation web cs1">Wang, Yup; Conroy, John M.; Molino, Neil; Yang, Julia; Green, Mike (2024). <a rel="nofollow" class="external text" href="https://trec.nist.gov/pubs/trec33/index.html">"Laboratory for Analytic Sciences in TREC 2024 Retrieval Augmented Generation Track"</a>. <i>NIST TREC 2024</i><span class="reference-accessdate">. Retrieved <span class="nowrap">15 March</span> 2025</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=unknown&amp;rft.jtitle=NIST+TREC+2024&amp;rft.atitle=Laboratory+for+Analytic+Sciences+in+TREC+2024+Retrieval+Augmented+Generation+Track&amp;rft.date=2024&amp;rft.aulast=Wang&amp;rft.aufirst=Yup&amp;rft.au=Conroy%2C+John+M.&amp;rft.au=Molino%2C+Neil&amp;rft.au=Yang%2C+Julia&amp;rft.au=Green%2C+Mike&amp;rft&#95;id=https%3A%2F%2Ftrec.nist.gov%2Fpubs%2Ftrec33%2Findex.html&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-orqa-11"><span class="mw-cite-backlink"><b><a href="#cite_ref-orqa_11-0">^</a></b></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite id="CITEREFLeeChangToutanova2019" class="citation web cs1">Lee, Kenton; Chang, Ming-Wei; Toutanova, Kristina (2019). <a rel="nofollow" class="external text" href="https://aclanthology.org/P19-1612.pdf">"<span class="cs1-kern-left"></span>"Latent Retrieval for Weakly Supervised Open Domain Question Answering"<span class="cs1-kern-right"></span>"</a> <span class="cs1-format">(PDF)</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=unknown&amp;rft.btitle=%22Latent+Retrieval+for+Weakly+Supervised+Open+Domain+Question+Answering%22&amp;rft.date=2019&amp;rft.aulast=Lee&amp;rft.aufirst=Kenton&amp;rft.au=Chang%2C+Ming-Wei&amp;rft.au=Toutanova%2C+Kristina&amp;rft&#95;id=https%3A%2F%2Faclanthology.org%2FP19-1612.pdf&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-12"><span class="mw-cite-backlink"><b><a href="#cite_ref-12">^</a></b></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite id="CITEREFShiMinYasunagaSeo2024" class="citation book cs1">Shi, Weijia; Min, Sewon; Yasunaga, Michihiro; Seo, Minjoon; James, Rich; Lewis, Mike; Zettlemoyer, Luke; Yih, Wen-tau (June 2024). <a rel="nofollow" class="external text" href="https://aclanthology.org/2024.naacl-long.463/">"REPLUG: Retrieval-Augmented Black-Box Language Models"</a>. <i>Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers)</i>. pp.&#160;<span class="nowrap">8371–</span>8384. <a href="/wiki/ArXiv_(identifier)" class="mw-redirect" title="ArXiv (identifier)">arXiv</a>:<span class="id-lock-free" title="Freely accessible"><a rel="nofollow" class="external text" href="https://arxiv.org/abs/2301.12652">2301.12652</a></span>. <a href="/wiki/Doi_(identifier)" class="mw-redirect" title="Doi (identifier)">doi</a>:<a rel="nofollow" class="external text" href="https://doi.org/10.18653%2Fv1%2F2024.naacl-long.463">10.18653/v1/2024.naacl-long.463</a><span class="reference-accessdate">. Retrieved <span class="nowrap">16 March</span> 2025</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=bookitem&amp;rft.atitle=REPLUG%3A+Retrieval-Augmented+Black-Box+Language+Models&amp;rft.btitle=Proceedings+of+the+2024+Conference+of+the+North+American+Chapter+of+the+Association+for+Computational+Linguistics%3A+Human+Language+Technologies+%28Volume+1%3A+Long+Papers%29&amp;rft.pages=8371-8384&amp;rft.date=2024-06&amp;rft&#95;id=info%3Aarxiv%2F2301.12652&amp;rft&#95;id=info%3Adoi%2F10.18653%2Fv1%2F2024.naacl-long.463&amp;rft.aulast=Shi&amp;rft.aufirst=Weijia&amp;rft.au=Min%2C+Sewon&amp;rft.au=Yasunaga%2C+Michihiro&amp;rft.au=Seo%2C+Minjoon&amp;rft.au=James%2C+Rich&amp;rft.au=Lewis%2C+Mike&amp;rft.au=Zettlemoyer%2C+Luke&amp;rft.au=Yih%2C+Wen-tau&amp;rft&#95;id=https%3A%2F%2Faclanthology.org%2F2024.naacl-long.463%2F&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-13"><span class="mw-cite-backlink"><b><a href="#cite_ref-13">^</a></b></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite id="CITEREFRamLevineDalmedigosMuhlgay2023" class="citation journal cs1">Ram, Ori; Levine, Yoav; Dalmedigos, Itay; Muhlgay, Dor; Shashua, Amnon; Leyton-Brown, Kevin; Shoham, Yoav (2023). <a rel="nofollow" class="external text" href="https://aclanthology.org/2023.tacl-1.75/">"In-Context Retrieval-Augmented Language Models"</a>. <i>Transactions of the Association for Computational Linguistics</i>. <b>11</b>: <span class="nowrap">1316–</span>1331. <a href="/wiki/ArXiv_(identifier)" class="mw-redirect" title="ArXiv (identifier)">arXiv</a>:<span class="id-lock-free" title="Freely accessible"><a rel="nofollow" class="external text" href="https://arxiv.org/abs/2302.00083">2302.00083</a></span>. <a href="/wiki/Doi_(identifier)" class="mw-redirect" title="Doi (identifier)">doi</a>:<a rel="nofollow" class="external text" href="https://doi.org/10.1162%2Ftacl_a_00605">10.1162/tacl_a_00605</a><span class="reference-accessdate">. Retrieved <span class="nowrap">16 March</span> 2025</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Ajournal&amp;rft.genre=article&amp;rft.jtitle=Transactions+of+the+Association+for+Computational+Linguistics&amp;rft.atitle=In-Context+Retrieval-Augmented+Language+Models&amp;rft.volume=11&amp;rft.pages=1316-1331&amp;rft.date=2023&amp;rft&#95;id=info%3Aarxiv%2F2302.00083&amp;rft&#95;id=info%3Adoi%2F10.1162%2Ftacl&#95;a&#95;00605&amp;rft.aulast=Ram&amp;rft.aufirst=Ori&amp;rft.au=Levine%2C+Yoav&amp;rft.au=Dalmedigos%2C+Itay&amp;rft.au=Muhlgay%2C+Dor&amp;rft.au=Shashua%2C+Amnon&amp;rft.au=Leyton-Brown%2C+Kevin&amp;rft.au=Shoham%2C+Yoav&amp;rft&#95;id=https%3A%2F%2Faclanthology.org%2F2023.tacl-1.75%2F&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-borgeaud-14"><span class="mw-cite-backlink"><b><a href="#cite_ref-borgeaud_14-0">^</a></b></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite id="CITEREFBorgeaudMensch2021" class="citation web cs1">Borgeaud, Sebastian; Mensch, Arthur (2021). <a rel="nofollow" class="external text" href="https://proceedings.mlr.press/v162/borgeaud22a/borgeaud22a.pdf">"Improving language models by retrieving from trillions of tokens"</a> <span class="cs1-format">(PDF)</span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=unknown&amp;rft.btitle=Improving+language+models+by+retrieving+from+trillions+of+tokens&amp;rft.date=2021&amp;rft.aulast=Borgeaud&amp;rft.aufirst=Sebastian&amp;rft.au=Mensch%2C+Arthur&amp;rft&#95;id=https%3A%2F%2Fproceedings.mlr.press%2Fv162%2Fborgeaud22a%2Fborgeaud22a.pdf&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+<li id="cite&#95;note-wang2023a-15"><span class="mw-cite-backlink"><b><a href="#cite_ref-wang2023a_15-0">^</a></b></span> <span class="reference-text"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333433106" /><cite id="CITEREFWangPingXuMcAfee2023" class="citation book cs1">Wang, Boxin; Ping, Wei; Xu, Peng; McAfee, Lawrence; Liu, Zihan; Shoeybi, Mohammad; Dong, Yi; Kuchaiev, Oleksii; Li, Bo; Xiao, Chaowei; Anandkumar, Anima; Catanzaro, Bryan (2023). <a rel="nofollow" class="external text" href="https://aclanthology.org/2023.emnlp-main.482/">"Shall We Pretrain Autoregressive Language Models with Retrieval? A Comprehensive Study"</a>. <i>Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing</i>. pp.&#160;<span class="nowrap">7763–</span>7786. <a href="/wiki/Doi_(identifier)" class="mw-redirect" title="Doi (identifier)">doi</a>:<span class="id-lock-free" title="Freely accessible"><a rel="nofollow" class="external text" href="https://doi.org/10.18653%2Fv1%2F2023.emnlp-main.482">10.18653/v1/2023.emnlp-main.482</a></span>.</cite><span title="ctx&#95;ver=Z39.88-2004&amp;rft&#95;val&#95;fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Abook&amp;rft.genre=bookitem&amp;rft.atitle=Shall+We+Pretrain+Autoregressive+Language+Models+with+Retrieval%3F+A+Comprehensive+Study&amp;rft.btitle=Proceedings+of+the+2023+Conference+on+Empirical+Methods+in+Natural+Language+Processing&amp;rft.pages=7763-7786&amp;rft.date=2023&amp;rft&#95;id=info%3Adoi%2F10.18653%2Fv1%2F2023.emnlp-main.482&amp;rft.aulast=Wang&amp;rft.aufirst=Boxin&amp;rft.au=Ping%2C+Wei&amp;rft.au=Xu%2C+Peng&amp;rft.au=McAfee%2C+Lawrence&amp;rft.au=Liu%2C+Zihan&amp;rft.au=Shoeybi%2C+Mohammad&amp;rft.au=Dong%2C+Yi&amp;rft.au=Kuchaiev%2C+Oleksii&amp;rft.au=Li%2C+Bo&amp;rft.au=Xiao%2C+Chaowei&amp;rft.au=Anandkumar%2C+Anima&amp;rft.au=Catanzaro%2C+Bryan&amp;rft&#95;id=https%3A%2F%2Faclanthology.org%2F2023.emnlp-main.482%2F&amp;rfr&#95;id=info%3Asid%2Fen.wikipedia.org%3ARetrieval-augmented+generation" class="Z3988"></span></span>
+</li>
+</ol></div>
+<div class="navbox-styles"><style data-mw-deduplicate="TemplateStyles:r1333133064">.mw-parser-output .hlist dl,.mw-parser-output .hlist ol,.mw-parser-output .hlist ul{margin:0;padding:0}.mw-parser-output .hlist dd,.mw-parser-output .hlist dt,.mw-parser-output .hlist li{margin:0;display:inline}.mw-parser-output .hlist.inline,.mw-parser-output .hlist.inline dl,.mw-parser-output .hlist.inline ol,.mw-parser-output .hlist.inline ul,.mw-parser-output .hlist dl dl,.mw-parser-output .hlist dl ol,.mw-parser-output .hlist dl ul,.mw-parser-output .hlist ol dl,.mw-parser-output .hlist ol ol,.mw-parser-output .hlist ol ul,.mw-parser-output .hlist ul dl,.mw-parser-output .hlist ul ol,.mw-parser-output .hlist ul ul{display:inline}.mw-parser-output .hlist .mw-empty-li{display:none}.mw-parser-output .hlist dt::after{content:": "}.mw-parser-output .hlist dd::after,.mw-parser-output .hlist li::after{content:"\a0 · ";font-weight:bold}.mw-parser-output .hlist dd:last-child::after,.mw-parser-output .hlist dt:last-child::after,.mw-parser-output .hlist li:last-child::after{content:none}.mw-parser-output .hlist dd dd:first-child::before,.mw-parser-output .hlist dd dt:first-child::before,.mw-parser-output .hlist dd li:first-child::before,.mw-parser-output .hlist dt dd:first-child::before,.mw-parser-output .hlist dt dt:first-child::before,.mw-parser-output .hlist dt li:first-child::before,.mw-parser-output .hlist li dd:first-child::before,.mw-parser-output .hlist li dt:first-child::before,.mw-parser-output .hlist li li:first-child::before{content:" (";font-weight:normal}.mw-parser-output .hlist dd dd:last-child::after,.mw-parser-output .hlist dd dt:last-child::after,.mw-parser-output .hlist dd li:last-child::after,.mw-parser-output .hlist dt dd:last-child::after,.mw-parser-output .hlist dt dt:last-child::after,.mw-parser-output .hlist dt li:last-child::after,.mw-parser-output .hlist li dd:last-child::after,.mw-parser-output .hlist li dt:last-child::after,.mw-parser-output .hlist li li:last-child::after{content:")";font-weight:normal}.mw-parser-output .hlist ol{counter-reset:listitem}.mw-parser-output .hlist ol>li{counter-increment:listitem}.mw-parser-output .hlist ol>li::before{content:" "counter(listitem)"\a0 "}.mw-parser-output .hlist dd ol>li:first-child::before,.mw-parser-output .hlist dt ol>li:first-child::before,.mw-parser-output .hlist li ol>li:first-child::before{content:" ("counter(listitem)"\a0 "}</style><style data-mw-deduplicate="TemplateStyles:r1314944253">.mw-parser-output .navbox{box-sizing:border-box;border:1px solid #a2a9b1;width:100%;clear:both;font-size:88%;text-align:center;padding:1px;margin:1em auto 0}.mw-parser-output .navbox .navbox{margin-top:0}.mw-parser-output .navbox+.navbox,.mw-parser-output .navbox+.navbox-styles+.navbox{margin-top:-1px}.mw-parser-output .navbox-inner,.mw-parser-output .navbox-subgroup{width:100%}.mw-parser-output .navbox-group,.mw-parser-output .navbox-title,.mw-parser-output .navbox-abovebelow{padding:0.25em 1em;line-height:1.5em;text-align:center}.mw-parser-output .navbox-group{white-space:nowrap;text-align:right}.mw-parser-output .navbox,.mw-parser-output .navbox-subgroup{background-color:#fdfdfd;color:inherit}.mw-parser-output .navbox-list{line-height:1.5em;border-color:#fdfdfd}.mw-parser-output .navbox-list-with-group{text-align:left;border-left-width:2px;border-left-style:solid}.mw-parser-output tr+tr>.navbox-abovebelow,.mw-parser-output tr+tr>.navbox-group,.mw-parser-output tr+tr>.navbox-image,.mw-parser-output tr+tr>.navbox-list{border-top:2px solid #fdfdfd}.mw-parser-output .navbox-title{background-color:#ccf;color:inherit}.mw-parser-output .navbox-abovebelow,.mw-parser-output .navbox-group,.mw-parser-output .navbox-subgroup .navbox-title{background-color:#ddf;color:inherit}.mw-parser-output .navbox-subgroup .navbox-group,.mw-parser-output .navbox-subgroup .navbox-abovebelow{background-color:#e6e6ff;color:inherit}.mw-parser-output .navbox-even{background-color:#f7f7f7;color:inherit}.mw-parser-output .navbox-odd{background-color:transparent;color:inherit}.mw-parser-output .navbox .hlist td dl,.mw-parser-output .navbox .hlist td ol,.mw-parser-output .navbox .hlist td ul,.mw-parser-output .navbox td.hlist dl,.mw-parser-output .navbox td.hlist ol,.mw-parser-output .navbox td.hlist ul{padding:0.125em 0}.mw-parser-output .navbox .navbar{display:block;font-size:100%}.mw-parser-output .navbox-title .navbar{float:left;text-align:left;margin-right:0.5em}body.skin--responsive .mw-parser-output .navbox-image img{max-width:none!important}@media print{body.ns-0 .mw-parser-output .navbox{display:none!important}}</style></div><div role="navigation" class="navbox" aria-labelledby="Generative&#95;AI6551" style="padding:3px"><table class="nowraplinks hlist mw-collapsible autocollapse navbox-inner" style="border-spacing:0;background:transparent;color:inherit"><tbody><tr><th scope="col" class="navbox-title" colspan="2"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333133064" /><style data-mw-deduplicate="TemplateStyles:r1239400231">.mw-parser-output .navbar{display:inline;font-size:88%;font-weight:normal}.mw-parser-output .navbar-collapse{float:left;text-align:left}.mw-parser-output .navbar-boxtext{word-spacing:0}.mw-parser-output .navbar ul{display:inline-block;white-space:nowrap;line-height:inherit}.mw-parser-output .navbar-brackets::before{margin-right:-0.125em;content:"[ "}.mw-parser-output .navbar-brackets::after{margin-left:-0.125em;content:" ]"}.mw-parser-output .navbar li{word-spacing:-0.125em}.mw-parser-output .navbar a>span,.mw-parser-output .navbar a>abbr{text-decoration:inherit}.mw-parser-output .navbar-mini abbr{font-variant:small-caps;border-bottom:none;text-decoration:none;cursor:inherit}.mw-parser-output .navbar-ct-full{font-size:114%;margin:0 7em}.mw-parser-output .navbar-ct-mini{font-size:114%;margin:0 4em}html.skin-theme-clientpref-night .mw-parser-output .navbar li a abbr{color:var(--color-base)!important}@media(prefers-color-scheme:dark){html.skin-theme-clientpref-os .mw-parser-output .navbar li a abbr{color:var(--color-base)!important}}@media print{.mw-parser-output .navbar{display:none!important}}</style><div class="navbar plainlinks hlist navbar-mini"><ul><li class="nv-view"><a href="/wiki/Template:Generative_AI" title="Template:Generative AI"><abbr title="View this template">v</abbr></a></li><li class="nv-talk"><a href="/wiki/Template_talk:Generative_AI" title="Template talk:Generative AI"><abbr title="Discuss this template">t</abbr></a></li><li class="nv-edit"><a href="/wiki/Special:EditPage/Template:Generative_AI" title="Special:EditPage/Template:Generative AI"><abbr title="Edit this template">e</abbr></a></li></ul></div><div id="Generative&#95;AI6551" style="font-size:114%;margin:0 4em"><a href="/wiki/Generative_AI" title="Generative AI">Generative AI</a></div></th></tr><tr><th scope="row" class="navbox-group" style="width:1%">Concepts</th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Autoencoder" title="Autoencoder">Autoencoder</a></li>
+<li><a href="/wiki/Deep_learning" title="Deep learning">Deep learning</a></li>
+<li><a href="/wiki/Fine-tuning_(deep_learning)" title="Fine-tuning (deep learning)">Fine-tuning</a></li>
+<li><a href="/wiki/Foundation_model" title="Foundation model">Foundation model</a></li>
+<li><a href="/wiki/Generative_adversarial_network" title="Generative adversarial network">Generative adversarial network</a></li>
+<li><a href="/wiki/Generative_pre-trained_transformer" title="Generative pre-trained transformer">Generative pre-trained transformer</a></li>
+<li><a href="/wiki/Large_language_model" title="Large language model">Large language model</a></li>
+<li><a href="/wiki/Model_Context_Protocol" title="Model Context Protocol">Model Context Protocol</a></li>
+<li><a href="/wiki/Neural_network_(machine_learning)" title="Neural network (machine learning)">Neural network</a></li>
+<li><a href="/wiki/Prompt_engineering" title="Prompt engineering">Prompt engineering</a></li>
+<li><a href="/wiki/Reinforcement_learning_from_human_feedback" title="Reinforcement learning from human feedback">Reinforcement learning from human feedback</a></li>
+<li><a class="mw-selflink selflink">Retrieval-augmented generation</a></li>
+<li><a href="/wiki/Self-supervised_learning" title="Self-supervised learning">Self-supervised learning</a></li>
+<li><a href="/wiki/AI_slop" title="AI slop">Slop</a></li>
+<li><a href="/wiki/Stochastic_parrot" title="Stochastic parrot">Stochastic parrot</a></li>
+<li><a href="/wiki/Synthetic_data" title="Synthetic data">Synthetic data</a></li>
+<li><a href="/wiki/Top-p_sampling" title="Top-p sampling">Top-p sampling</a></li>
+<li><a href="/wiki/Transformer_(deep_learning_architecture)" class="mw-redirect" title="Transformer (deep learning architecture)">Transformer</a></li>
+<li><a href="/wiki/Variational_autoencoder" title="Variational autoencoder">Variational autoencoder</a></li>
+<li><a href="/wiki/Vibe_coding" title="Vibe coding">Vibe coding</a></li>
+<li><a href="/wiki/Vision_transformer" title="Vision transformer">Vision transformer</a></li>
+<li><a href="/wiki/Word_embedding" title="Word embedding">Word embedding</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%">Models</th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em"></div><table class="nowraplinks navbox-subgroup" style="border-spacing:0"><tbody><tr><th scope="row" class="navbox-group" style="width:1%">Text</th><td class="navbox-list-with-group navbox-list navbox-even" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Character.ai" title="Character.ai">Character.ai</a></li>
+<li><a href="/wiki/ChatGPT" title="ChatGPT">ChatGPT</a></li>
+<li><a href="/wiki/Cohere#Products" title="Cohere">Command</a></li>
+<li><a href="/wiki/Claude_(language_model)" title="Claude (language model)">Claude</a></li>
+<li><a href="/wiki/DeepSeek_(chatbot)" title="DeepSeek (chatbot)">DeepSeek</a></li>
+<li><a href="/wiki/Ernie_Bot" title="Ernie Bot">Ernie</a></li>
+<li><a href="/wiki/Google_Gemini" title="Google Gemini">Gemini</a></li>
+<li><a href="/wiki/Gemma_(language_model)" title="Gemma (language model)">Gemma</a></li>
+<li><a href="/wiki/Z.ai#GLM" title="Z.ai">GLM</a></li>
+<li><a href="/wiki/Generative_pre-trained_transformer" title="Generative pre-trained transformer">GPT</a>
+<ul><li><a href="/wiki/GPT-1" title="GPT-1">1</a></li>
+<li><a href="/wiki/GPT-2" title="GPT-2">2</a></li>
+<li><a href="/wiki/GPT-3" title="GPT-3">3</a></li>
+<li><a href="/wiki/GPT-J" title="GPT-J">J</a></li>
+<li><a href="/wiki/GPT-3.5" class="mw-redirect" title="GPT-3.5">3.5</a></li>
+<li><a href="/wiki/GPT-4" title="GPT-4">4</a></li>
+<li><a href="/wiki/GPT-4o" title="GPT-4o">4o</a></li>
+<li><a href="/wiki/OpenAI_o1" title="OpenAI o1">o1</a></li>
+<li><a href="/wiki/OpenAI_o3" title="OpenAI o3">o3</a></li>
+<li><a href="/wiki/GPT-4.5" title="GPT-4.5">4.5</a></li>
+<li><a href="/wiki/GPT-4.1" title="GPT-4.1">4.1</a></li>
+<li><a href="/wiki/OpenAI_o4-mini" title="OpenAI o4-mini">o4-mini</a></li>
+<li><a href="/wiki/GPT-OSS" class="mw-redirect" title="GPT-OSS">OSS</a></li>
+<li><a href="/wiki/GPT-5" title="GPT-5">5</a></li>
+<li><a href="/wiki/GPT-5.1" title="GPT-5.1">5.1</a></li>
+<li><a href="/wiki/GPT-5.2" title="GPT-5.2">5.2</a></li>
+<li><a href="/wiki/GPT-5.4" title="GPT-5.4">5.4</a></li></ul></li>
+<li><a href="/wiki/Grok_(chatbot)" title="Grok (chatbot)">Grok</a></li>
+<li><a href="/wiki/Tencent#2021–present:_Regulatory_scrutiny" title="Tencent">Hunyuan</a></li>
+<li><a href="/wiki/Kimi_(chatbot)" title="Kimi (chatbot)">Kimi</a></li>
+<li><a href="/wiki/Llama_(language_model)" title="Llama (language model)">Llama</a></li>
+<li><a href="/wiki/Microsoft_Copilot" title="Microsoft Copilot">Microsoft Copilot</a></li>
+<li><a href="/wiki/MiniMax_(company)#Other_AI_products" class="mw-redirect" title="MiniMax (company)">MiniMax</a></li>
+<li><a href="/wiki/Mistral_AI#Mistral_Large_3_and_Ministral_3" title="Mistral AI">Mistral Large</a></li>
+<li><a href="/wiki/Qwen" title="Qwen">Qwen</a></li>
+<li><a href="/wiki/Velvet_AI" title="Velvet AI">Velvet</a></li>
+<li><a href="/wiki/Upstage_(company)#Models" title="Upstage (company)">Solar Pro</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%">Coding</th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Claude_Code" class="mw-redirect" title="Claude Code">Claude Code</a></li>
+<li><a href="/wiki/Cursor_(code_editor)" title="Cursor (code editor)">Cursor</a></li>
+<li><a href="/wiki/Mistral_AI" title="Mistral AI">Devstral</a></li>
+<li><a href="/wiki/GitHub_Copilot" title="GitHub Copilot">GitHub Copilot</a></li>
+<li><a href="/wiki/Google_Antigravity" title="Google Antigravity">Google Antigravity</a></li>
+<li><a href="/wiki/Grok_(chatbot)" title="Grok (chatbot)">Grok Code Fast 1</a></li>
+<li><a href="/wiki/Moonshot_AI" title="Moonshot AI">Kimi Code</a></li>
+<li><a href="/wiki/Qwen" title="Qwen">Qwen3-Coder</a></li>
+<li><a href="/wiki/Replit" title="Replit">Replit</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%"><a href="/wiki/Text-to-image_model" title="Text-to-image model">Image</a></th><td class="navbox-list-with-group navbox-list navbox-even" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Aurora_(text-to-image_model)" class="mw-redirect" title="Aurora (text-to-image model)">Aurora</a></li>
+<li><a href="/wiki/Adobe_Firefly" title="Adobe Firefly">Firefly</a></li>
+<li><a href="/wiki/Flux_(text-to-image_model)" title="Flux (text-to-image model)">Flux</a></li>
+<li><a href="/wiki/GPT_Image" title="GPT Image">GPT Image</a></li>
+<li><a href="/wiki/Grok_(chatbot)#Grok_Imagine" title="Grok (chatbot)">Grok Imagine</a></li>
+<li><a href="/wiki/Ideogram_(text-to-image_model)" title="Ideogram (text-to-image model)">Ideogram</a></li>
+<li><a href="/wiki/Imagen_(text-to-image_model)" title="Imagen (text-to-image model)">Imagen</a></li>
+<li><a href="/wiki/Canva#Acquisitions" title="Canva">Leonardo</a></li>
+<li><a href="/wiki/Midjourney" title="Midjourney">Midjourney</a></li>
+<li><a href="/wiki/Nano_Banana" class="mw-redirect" title="Nano Banana">Nano Banana</a></li>
+<li><a href="/wiki/Qwen" title="Qwen">Qwen-Image</a></li>
+<li><a href="/wiki/Recraft" title="Recraft">Recraft</a></li>
+<li><a href="/wiki/Seedream" class="mw-redirect" title="Seedream">Seedream</a></li>
+<li><a href="/wiki/Stable_Diffusion" title="Stable Diffusion">Stable Diffusion</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%"><a href="/wiki/Text-to-video_model" title="Text-to-video model">Video</a></th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Dream_Machine_(text-to-video_model)" title="Dream Machine (text-to-video model)">Dream Machine</a></li>
+<li><a href="/wiki/Genie_(AI_model)" title="Genie (AI model)">Genie</a></li>
+<li><a href="/wiki/MiniMax_(company)#Hailuo_AI" class="mw-redirect" title="MiniMax (company)">Hailuo AI</a></li>
+<li><a href="/wiki/Kling_AI" title="Kling AI">Kling AI</a></li>
+<li><a href="/wiki/LTX-2" title="LTX-2">LTX-2</a></li>
+<li><a href="/wiki/Luma_Labs" class="mw-redirect" title="Luma Labs">Luma Ray</a></li>
+<li><a href="/wiki/Runway_(company)#Services_and_technologies" title="Runway (company)">Runway Gen</a></li>
+<li><a href="/wiki/Seedance_2.0" title="Seedance 2.0">Seedance</a></li>
+<li><a href="/wiki/Sora_(text-to-video_model)" title="Sora (text-to-video model)">Sora</a></li>
+<li><a href="/wiki/Veo_(text-to-video_model)" title="Veo (text-to-video model)">Veo</a></li>
+<li><a href="/wiki/Alibaba_Group#Cloud_computing_and_artificial_intelligence_technology" title="Alibaba Group">Wan</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%"><a href="/wiki/Speech_synthesis#Text-to-speech_systems" title="Speech synthesis">Speech</a></th><td class="navbox-list-with-group navbox-list navbox-even" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/15.ai" title="15.ai">15.ai</a></li>
+<li><a href="/wiki/ElevenLabs#Products" title="ElevenLabs">Eleven</a></li>
+<li><a href="/wiki/Gemini_(language_model)" title="Gemini (language model)">Gemini Speech</a></li>
+<li><a href="/wiki/GPT-4o_mini" class="mw-redirect" title="GPT-4o mini">GPT-4o mini TTS</a></li>
+<li><a href="/wiki/MiniMax_(company)#Technology" class="mw-redirect" title="MiniMax (company)">MiniMax Speech</a></li>
+<li><a href="/wiki/Speechify" title="Speechify">Speechify</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%">Music</th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/ElevenLabs#Products" title="ElevenLabs">Eleven Music</a></li>
+<li><a href="/wiki/Endel_(app)" title="Endel (app)">Endel</a></li>
+<li><a href="/wiki/Google_DeepMind#Music_generation" title="Google DeepMind">Lyria</a></li>
+<li><a href="/wiki/MiniMax_(company)#Technology" class="mw-redirect" title="MiniMax (company)">MiniMax Music</a></li>
+<li><a href="/wiki/Riffusion" title="Riffusion">Riffusion</a></li>
+<li><a href="/wiki/Stability_AI#Product_and_application" title="Stability AI">Stable Audio</a></li>
+<li><a href="/wiki/Suno_(platform)" title="Suno (platform)">Suno</a></li>
+<li><a href="/wiki/Udio" title="Udio">Udio</a></li></ul>
+</div></td></tr></tbody></table><div></div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%"><a href="/wiki/Intelligent_agent" title="Intelligent agent">Agents</a></th><td class="navbox-list-with-group navbox-list navbox-even" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Salesforce#Artificial_intelligence" title="Salesforce">Agentforce</a></li>
+<li><a href="/wiki/Zhipu_AI#AutoGLM" class="mw-redirect" title="Zhipu AI">AutoGLM</a></li>
+<li><a href="/wiki/AutoGPT" title="AutoGPT">AutoGPT</a></li>
+<li><a href="/wiki/ChatGPT_agent" class="mw-redirect" title="ChatGPT agent">ChatGPT agent</a></li>
+<li><a href="/wiki/Devin_AI" title="Devin AI">Devin AI</a></li>
+<li><a href="/wiki/Manus_(AI_agent)" title="Manus (AI agent)">Manus</a></li>
+<li><a href="/wiki/MiniMax_(company)#Technology" class="mw-redirect" title="MiniMax (company)">MiniMax Agent</a></li>
+<li><a href="/wiki/OpenAI_Codex_(AI_agent)" title="OpenAI Codex (AI agent)">OpenAI Codex</a></li>
+<li><a href="/wiki/OpenClaw" title="OpenClaw">OpenClaw</a></li>
+<li><a href="/wiki/Replit" title="Replit">Replit Agent</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%"><a href="/wiki/List_of_artificial_intelligence_companies" title="List of artificial intelligence companies">Companies</a></th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Adobe_Inc." title="Adobe Inc.">Adobe</a></li>
+<li><a href="/wiki/Aleph_Alpha" title="Aleph Alpha">Aleph Alpha</a></li>
+<li><a href="/wiki/Anthropic" title="Anthropic">Anthropic</a></li>
+<li><a href="/wiki/Anysphere" title="Anysphere">Anysphere</a></li>
+<li><a href="/wiki/Baichuan" title="Baichuan">Baichuan</a></li>
+<li><a href="/wiki/Canva" title="Canva">Canva</a></li>
+<li><a href="/wiki/Cognition_AI" title="Cognition AI">Cognition AI</a></li>
+<li><a href="/wiki/Cohere" title="Cohere">Cohere</a></li>
+<li><a href="/wiki/Contextual_AI" title="Contextual AI">Contextual AI</a></li>
+<li><a href="/wiki/DeepSeek" title="DeepSeek">DeepSeek</a></li>
+<li><a href="/wiki/DeepL_Translator" title="DeepL Translator">DeepL</a></li>
+<li><a href="/wiki/EleutherAI" title="EleutherAI">EleutherAI</a></li>
+<li><a href="/wiki/ElevenLabs" title="ElevenLabs">ElevenLabs</a></li>
+<li><a href="/wiki/Google_DeepMind" title="Google DeepMind">Google DeepMind</a></li>
+<li><a href="/wiki/HeyGen" title="HeyGen">HeyGen</a></li>
+<li><a href="/wiki/Hugging_Face" title="Hugging Face">Hugging Face</a></li>
+<li><a href="/wiki/Inflection_AI" title="Inflection AI">Inflection AI</a></li>
+<li><a href="/wiki/Kuaishou" title="Kuaishou">Kuaishou</a></li>
+<li><a href="/wiki/Lightricks" title="Lightricks">Lightricks</a></li>
+<li><a href="/wiki/Luma_Labs" class="mw-redirect" title="Luma Labs">Luma Labs</a></li>
+<li><a href="/wiki/Meta_AI" title="Meta AI">Meta AI</a></li>
+<li><a href="/wiki/MiniMax_(company)" class="mw-redirect" title="MiniMax (company)">MiniMax</a></li>
+<li><a href="/wiki/Mistral_AI" title="Mistral AI">Mistral AI</a></li>
+<li><a href="/wiki/Moonshot_AI" title="Moonshot AI">Moonshot AI</a></li>
+<li><a href="/wiki/OpenAI" title="OpenAI">OpenAI</a></li>
+<li><a href="/wiki/Perplexity_AI" title="Perplexity AI">Perplexity AI</a></li>
+<li><a href="/wiki/Runway_(company)" title="Runway (company)">Runway</a></li>
+<li><a href="/wiki/Safe_Superintelligence_Inc." title="Safe Superintelligence Inc.">Safe Superintelligence</a></li>
+<li><a href="/wiki/Sakana_AI" title="Sakana AI">Sakana AI</a></li>
+<li><a href="/wiki/Salesforce" title="Salesforce">Salesforce</a></li>
+<li><a href="/wiki/Scale_AI" title="Scale AI">Scale AI</a></li>
+<li><a href="/wiki/ServiceNow" title="ServiceNow">ServiceNow</a></li>
+<li><a href="/wiki/SoundHound" class="mw-redirect" title="SoundHound">SoundHound</a></li>
+<li><a href="/wiki/Stability_AI" title="Stability AI">Stability AI</a></li>
+<li><a href="/wiki/StepFun" title="StepFun">StepFun</a></li>
+<li><a href="/wiki/Synthesia_(company)" title="Synthesia (company)">Synthesia</a></li>
+<li><a href="/wiki/Thinking_Machines_Lab" title="Thinking Machines Lab">Thinking Machines Lab</a></li>
+<li><a href="/wiki/Upstage_(company)" title="Upstage (company)">Upstage</a></li>
+<li><a href="/wiki/XAI_(company)" title="XAI (company)">xAI</a></li>
+<li><a href="/wiki/Z.ai" title="Z.ai">Z.ai</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%"><a href="/wiki/Artificial_intelligence_controversies" title="Artificial intelligence controversies">Controversies</a></th><td class="navbox-list-with-group navbox-list navbox-even" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Generative_AI_pornography" title="Generative AI pornography">Generative AI pornography</a>
+<ul><li><a href="/wiki/Deepfake_pornography" title="Deepfake pornography">Deepfake pornography</a>
+<ul><li><a href="/wiki/Grok_sexual_deepfake_scandal" title="Grok sexual deepfake scandal">on Grok</a></li>
+<li><a href="/wiki/Taylor_Swift_deepfake_pornography_controversy" title="Taylor Swift deepfake pornography controversy">of Taylor Swift</a></li></ul></li></ul></li>
+<li><a href="/wiki/Google_Gemini_image_generation_controversy" class="mw-redirect" title="Google Gemini image generation controversy">Google Gemini image generation</a></li>
+<li><a href="/wiki/Pause_Giant_AI_Experiments:_An_Open_Letter" title="Pause Giant AI Experiments: An Open Letter">Pause Giant AI Experiments</a></li>
+<li><a href="/wiki/Removal_of_Sam_Altman_from_OpenAI" title="Removal of Sam Altman from OpenAI">Removal of Sam Altman from OpenAI</a></li>
+<li><a href="/wiki/Statement_on_AI_Risk" title="Statement on AI Risk">Statement on AI Risk</a></li>
+<li><a href="/wiki/Tay_(chatbot)" title="Tay (chatbot)">Tay (chatbot)</a></li>
+<li><i><a href="/wiki/Th%C3%A9%C3%A2tre_D%27op%C3%A9ra_Spatial" title="Théâtre D&#39;opéra Spatial">Théâtre D'opéra Spatial</a></i></li>
+<li><a href="/wiki/Voiceverse_NFT_plagiarism_scandal" title="Voiceverse NFT plagiarism scandal">Voiceverse NFT plagiarism</a></li></ul>
+</div></td></tr><tr><td class="navbox-abovebelow" colspan="2"><div>
+<ul><li><span class="noviewer" typeof="mw:File"><span title="Category"><img alt="" src="//upload.wikimedia.org/wikipedia/en/thumb/9/96/Symbol_category_class.svg/20px-Symbol_category_class.svg.png" decoding="async" width="16" height="16" class="mw-file-element" srcset="//upload.wikimedia.org/wikipedia/en/thumb/9/96/Symbol_category_class.svg/40px-Symbol_category_class.svg.png 1.5x" data-file-width="180" data-file-height="185" /></span></span> <a href="/wiki/Category:Generative_artificial_intelligence" title="Category:Generative artificial intelligence">Category</a></li></ul>
+</div></td></tr></tbody></table></div>
+<div class="navbox-styles"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333133064" /><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1314944253" /></div><div role="navigation" class="navbox" aria-labelledby="Artificial&#95;intelligence&#95;(AI)9109" style="padding:3px"><table class="nowraplinks hlist mw-collapsible autocollapse navbox-inner" style="border-spacing:0;background:transparent;color:inherit"><tbody><tr><th scope="col" class="navbox-title" colspan="2"><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1333133064" /><link rel="mw-deduplicated-inline-style" href="mw-data:TemplateStyles:r1239400231" /><div class="navbar plainlinks hlist navbar-mini"><ul><li class="nv-view"><a href="/wiki/Template:Artificial_intelligence_navbox" title="Template:Artificial intelligence navbox"><abbr title="View this template">v</abbr></a></li><li class="nv-talk"><a href="/wiki/Template_talk:Artificial_intelligence_navbox" title="Template talk:Artificial intelligence navbox"><abbr title="Discuss this template">t</abbr></a></li><li class="nv-edit"><a href="/wiki/Special:EditPage/Template:Artificial_intelligence_navbox" title="Special:EditPage/Template:Artificial intelligence navbox"><abbr title="Edit this template">e</abbr></a></li></ul></div><div id="Artificial&#95;intelligence&#95;(AI)9109" style="font-size:114%;margin:0 4em"><a href="/wiki/Artificial_intelligence" title="Artificial intelligence">Artificial intelligence</a> (AI)</div></th></tr><tr><td class="navbox-abovebelow" colspan="2"><div>
+<ul><li><a href="/wiki/History_of_artificial_intelligence" title="History of artificial intelligence">History</a>
+<ul><li><a href="/wiki/Timeline_of_artificial_intelligence" title="Timeline of artificial intelligence">timeline</a></li></ul></li>
+<li><a href="/wiki/Glossary_of_artificial_intelligence" title="Glossary of artificial intelligence">Glossary</a></li>
+<li><a href="/wiki/List_of_artificial_intelligence_companies" title="List of artificial intelligence companies">Companies</a></li>
+<li><a href="/wiki/List_of_artificial_intelligence_projects" title="List of artificial intelligence projects">Projects</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%">Concepts</th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Parameter" title="Parameter">Parameter</a>
+<ul><li><a href="/wiki/Hyperparameter_(machine_learning)" title="Hyperparameter (machine learning)">Hyperparameter</a></li></ul></li>
+<li><a href="/wiki/Loss_functions_for_classification" title="Loss functions for classification">Loss functions</a></li>
+<li><a href="/wiki/Regression_analysis" title="Regression analysis">Regression</a>
+<ul><li><a href="/wiki/Bias%E2%80%93variance_tradeoff" title="Bias–variance tradeoff">Bias–variance tradeoff</a></li>
+<li><a href="/wiki/Double_descent" title="Double descent">Double descent</a></li>
+<li><a href="/wiki/Overfitting" title="Overfitting">Overfitting</a></li></ul></li>
+<li><a href="/wiki/Cluster_analysis" title="Cluster analysis">Clustering</a></li>
+<li><a href="/wiki/Gradient_descent" title="Gradient descent">Gradient descent</a>
+<ul><li><a href="/wiki/Stochastic_gradient_descent" title="Stochastic gradient descent">SGD</a></li>
+<li><a href="/wiki/Quasi-Newton_method" title="Quasi-Newton method">Quasi-Newton method</a></li>
+<li><a href="/wiki/Conjugate_gradient_method" title="Conjugate gradient method">Conjugate gradient method</a></li></ul></li>
+<li><a href="/wiki/Backpropagation" title="Backpropagation">Backpropagation</a></li>
+<li><a href="/wiki/Attention_(machine_learning)" title="Attention (machine learning)">Attention</a></li>
+<li><a href="/wiki/Convolution" title="Convolution">Convolution</a></li>
+<li><a href="/wiki/Normalization_(machine_learning)" title="Normalization (machine learning)">Normalization</a>
+<ul><li><a href="/wiki/Batch_normalization" title="Batch normalization">Batchnorm</a></li></ul></li>
+<li><a href="/wiki/Activation_function" title="Activation function">Activation</a>
+<ul><li><a href="/wiki/Softmax_function" title="Softmax function">Softmax</a></li>
+<li><a href="/wiki/Sigmoid_function" title="Sigmoid function">Sigmoid</a></li>
+<li><a href="/wiki/Rectifier_(neural_networks)" class="mw-redirect" title="Rectifier (neural networks)">Rectifier</a></li></ul></li>
+<li><a href="/wiki/Gating_mechanism" title="Gating mechanism">Gating</a></li>
+<li><a href="/wiki/Weight_initialization" title="Weight initialization">Weight initialization</a></li>
+<li><a href="/wiki/Regularization_(mathematics)" title="Regularization (mathematics)">Regularization</a></li>
+<li><a href="/wiki/Training,_validation,_and_test_data_sets" title="Training, validation, and test data sets">Datasets</a>
+<ul><li><a href="/wiki/Data_augmentation" title="Data augmentation">Augmentation</a></li></ul></li>
+<li><a href="/wiki/Prompt_engineering" title="Prompt engineering">Prompt engineering</a></li>
+<li><a href="/wiki/Reinforcement_learning" title="Reinforcement learning">Reinforcement learning</a>
+<ul><li><a href="/wiki/Q-learning" title="Q-learning">Q-learning</a></li>
+<li><a href="/wiki/State%E2%80%93action%E2%80%93reward%E2%80%93state%E2%80%93action" title="State–action–reward–state–action">SARSA</a></li>
+<li><a href="/wiki/Imitation_learning" title="Imitation learning">Imitation</a></li>
+<li><a href="/wiki/Policy_gradient_method" title="Policy gradient method">Policy gradient</a></li></ul></li>
+<li><a href="/wiki/Diffusion_process" title="Diffusion process">Diffusion</a></li>
+<li><a href="/wiki/Latent_diffusion_model" title="Latent diffusion model">Latent diffusion model</a></li>
+<li><a href="/wiki/Autoregressive_model" title="Autoregressive model">Autoregression</a></li>
+<li><a href="/wiki/Adversarial_machine_learning" title="Adversarial machine learning">Adversary</a></li>
+<li><a class="mw-selflink selflink">RAG</a></li>
+<li><a href="/wiki/Uncanny_valley" title="Uncanny valley">Uncanny valley</a></li>
+<li><a href="/wiki/Reinforcement_learning_from_human_feedback" title="Reinforcement learning from human feedback">RLHF</a></li>
+<li><a href="/wiki/Self-supervised_learning" title="Self-supervised learning">Self-supervised learning</a></li>
+<li><a href="/wiki/Reflection_(artificial_intelligence)" class="mw-redirect" title="Reflection (artificial intelligence)">Reflection</a></li>
+<li><a href="/wiki/Recursive_self-improvement" title="Recursive self-improvement">Recursive self-improvement</a></li>
+<li><a href="/wiki/Hallucination_(artificial_intelligence)" title="Hallucination (artificial intelligence)">Hallucination</a></li>
+<li><a href="/wiki/Word_embedding" title="Word embedding">Word embedding</a></li>
+<li><a href="/wiki/Vibe_coding" title="Vibe coding">Vibe coding</a></li>
+<li><a href="/wiki/Symbolic_artificial_intelligence" title="Symbolic artificial intelligence">Symbolic AI</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%"><a href="/wiki/Applications_of_artificial_intelligence" title="Applications of artificial intelligence">Applications</a></th><td class="navbox-list-with-group navbox-list navbox-even" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Machine_learning" title="Machine learning">Machine learning</a>
+<ul><li><a href="/wiki/Prompt_engineering#In-context_learning" title="Prompt engineering">In-context learning</a></li></ul></li>
+<li><a href="/wiki/Neural_network_(machine_learning)" title="Neural network (machine learning)">Artificial neural network</a>
+<ul><li><a href="/wiki/Deep_learning" title="Deep learning">Deep learning</a></li></ul></li>
+<li><a href="/wiki/Language_model" title="Language model">Language model</a>
+<ul><li><a href="/wiki/Large_language_model" title="Large language model">Large</a></li>
+<li><a href="/wiki/Neural_machine_translation" title="Neural machine translation">NMT</a></li>
+<li><a href="/wiki/Reasoning_model" title="Reasoning model">Reasoning</a></li></ul></li>
+<li><a href="/wiki/Model_Context_Protocol" title="Model Context Protocol">Model Context Protocol</a></li>
+<li><a href="/wiki/Intelligent_agent" title="Intelligent agent">Intelligent agent</a>
+<ul><li><a href="/wiki/AI_agent" title="AI agent">AI agent</a></li></ul></li>
+<li><a href="/wiki/Artificial_human_companion" title="Artificial human companion">Artificial human companion</a></li>
+<li><a href="/wiki/Humanity%27s_Last_Exam" title="Humanity&#39;s Last Exam">Humanity's Last Exam</a></li>
+<li><a href="/wiki/Lethal_autonomous_weapon" title="Lethal autonomous weapon">Lethal autonomous weapons (LAWs)</a></li>
+<li><a href="/wiki/Generative_artificial_intelligence" class="mw-redirect" title="Generative artificial intelligence">Generative artificial intelligence (GenAI)</a></li>
+<li><a href="/wiki/Weak_artificial_intelligence" title="Weak artificial intelligence">Weak AI</a></li>
+<li>(Hypothetical: <a href="/wiki/Artificial_general_intelligence" title="Artificial general intelligence">Artificial general intelligence (AGI)</a>)</li>
+<li>(Hypothetical: <a href="/wiki/Artificial_superintelligence" class="mw-redirect" title="Artificial superintelligence">Artificial superintelligence (ASI)</a>)</li>
+<li><a href="/wiki/Agent2Agent" title="Agent2Agent">Agent2Agent protocol</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%">Implementations</th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em"></div><table class="nowraplinks navbox-subgroup" style="border-spacing:0"><tbody><tr><th scope="row" class="navbox-group" style="width:1%">Audio–visual</th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/AlexNet" title="AlexNet">AlexNet</a></li>
+<li><a href="/wiki/WaveNet" title="WaveNet">WaveNet</a></li>
+<li><a href="/wiki/Human_image_synthesis" title="Human image synthesis">Human image synthesis</a></li>
+<li><a href="/wiki/Handwriting_recognition" title="Handwriting recognition">HWR</a></li>
+<li><a href="/wiki/Optical_character_recognition" title="Optical character recognition">OCR</a></li>
+<li><a href="/wiki/Computer_vision" title="Computer vision">Computer vision</a></li>
+<li><a href="/wiki/Deep_learning_speech_synthesis" title="Deep learning speech synthesis">Speech synthesis</a>
+<ul><li><a href="/wiki/15.ai" title="15.ai">15.ai</a></li>
+<li><a href="/wiki/ElevenLabs" title="ElevenLabs">ElevenLabs</a></li></ul></li>
+<li><a href="/wiki/Speech_recognition" title="Speech recognition">Speech recognition</a>
+<ul><li><a href="/wiki/Whisper_(speech_recognition_system)" title="Whisper (speech recognition system)">Whisper</a></li></ul></li>
+<li><a href="/wiki/Facial_recognition_system" title="Facial recognition system">Facial recognition</a></li>
+<li><a href="/wiki/AlphaFold" title="AlphaFold">AlphaFold</a></li>
+<li><a href="/wiki/Text-to-image_model" title="Text-to-image model">Text-to-image models</a>
+<ul><li><a href="/wiki/Aurora_(text-to-image_model)" class="mw-redirect" title="Aurora (text-to-image model)">Aurora</a></li>
+<li><a href="/wiki/DALL-E" title="DALL-E">DALL-E</a></li>
+<li><a href="/wiki/Adobe_Firefly" title="Adobe Firefly">Firefly</a></li>
+<li><a href="/wiki/Flux_(text-to-image_model)" title="Flux (text-to-image model)">Flux</a></li>
+<li><a href="/wiki/GPT_Image" title="GPT Image">GPT Image</a></li>
+<li><a href="/wiki/Ideogram_(text-to-image_model)" title="Ideogram (text-to-image model)">Ideogram</a></li>
+<li><a href="/wiki/Imagen_(text-to-image_model)" title="Imagen (text-to-image model)">Imagen</a></li>
+<li><a href="/wiki/Midjourney" title="Midjourney">Midjourney</a></li>
+<li><a href="/wiki/Recraft" title="Recraft">Recraft</a></li>
+<li><a href="/wiki/Stable_Diffusion" title="Stable Diffusion">Stable Diffusion</a></li></ul></li>
+<li><a href="/wiki/Text-to-video_model" title="Text-to-video model">Text-to-video models</a>
+<ul><li><a href="/wiki/Dream_Machine_(text-to-video_model)" title="Dream Machine (text-to-video model)">Dream Machine</a></li>
+<li><a href="/wiki/Runway_(company)#Services_and_technologies" title="Runway (company)">Runway Gen</a></li>
+<li><a href="/wiki/MiniMax_(company)#Hailuo_AI" class="mw-redirect" title="MiniMax (company)">Hailuo AI</a></li>
+<li><a href="/wiki/Kling_AI" title="Kling AI">Kling</a></li>
+<li><a href="/wiki/Sora_(text-to-video_model)" title="Sora (text-to-video model)">Sora</a></li>
+<li><a href="/wiki/Seedance_2.0" title="Seedance 2.0">Seedance</a></li>
+<li><a href="/wiki/Veo_(text-to-video_model)" title="Veo (text-to-video model)">Veo</a></li></ul></li>
+<li><a href="/wiki/Music_and_artificial_intelligence" title="Music and artificial intelligence">Music generation</a>
+<ul><li><a href="/wiki/Riffusion" title="Riffusion">Riffusion</a></li>
+<li><a href="/wiki/Suno_(platform)" title="Suno (platform)">Suno</a></li>
+<li><a href="/wiki/Udio" title="Udio">Udio</a></li></ul></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%">Text</th><td class="navbox-list-with-group navbox-list navbox-even" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Word2vec" title="Word2vec">Word2vec</a></li>
+<li><a href="/wiki/Seq2seq" title="Seq2seq">Seq2seq</a></li>
+<li><a href="/wiki/GloVe" title="GloVe">GloVe</a></li>
+<li><a href="/wiki/BERT_(language_model)" title="BERT (language model)">BERT</a></li>
+<li><a href="/wiki/T5_(language_model)" title="T5 (language model)">T5</a></li>
+<li><a href="/wiki/Llama_(language_model)" title="Llama (language model)">Llama</a></li>
+<li><a href="/wiki/Chinchilla_(language_model)" title="Chinchilla (language model)">Chinchilla AI</a></li>
+<li><a href="/wiki/PaLM" title="PaLM">PaLM</a></li>
+<li><a href="/wiki/Generative_pre-trained_transformer" title="Generative pre-trained transformer">GPT</a></li>
+<li><a href="/wiki/Claude_(language_model)" title="Claude (language model)">Claude</a></li>
+<li><a href="/wiki/Gemini_(chatbot)" class="mw-redirect" title="Gemini (chatbot)">Gemini</a>
+<ul><li><a href="/wiki/Gemini_(language_model)" title="Gemini (language model)">Gemini (language model)</a></li>
+<li><a href="/wiki/Gemma_(language_model)" title="Gemma (language model)">Gemma</a></li></ul></li>
+<li><a href="/wiki/Grok_(chatbot)" title="Grok (chatbot)">Grok</a></li>
+<li><a href="/wiki/LaMDA" title="LaMDA">LaMDA</a></li>
+<li><a href="/wiki/BLOOM_(language_model)" title="BLOOM (language model)">BLOOM</a></li>
+<li><a href="/wiki/DBRX" title="DBRX">DBRX</a></li>
+<li><a href="/wiki/Project_Debater" title="Project Debater">Project Debater</a></li>
+<li><a href="/wiki/IBM_Watson" title="IBM Watson">IBM Watson</a></li>
+<li><a href="/wiki/IBM_Watsonx" title="IBM Watsonx">IBM Watsonx</a></li>
+<li><a href="/wiki/IBM_Granite" title="IBM Granite">Granite</a></li>
+<li><a href="/wiki/Huawei_PanGu" title="Huawei PanGu">PanGu-Σ</a></li>
+<li><a href="/wiki/DeepSeek_(chatbot)" title="DeepSeek (chatbot)">DeepSeek</a></li>
+<li><a href="/wiki/Qwen" title="Qwen">Qwen</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%">Decisional</th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/AlphaGo" title="AlphaGo">AlphaGo</a></li>
+<li><a href="/wiki/AlphaZero" title="AlphaZero">AlphaZero</a></li>
+<li><a href="/wiki/OpenAI_Five" title="OpenAI Five">OpenAI Five</a></li>
+<li><a href="/wiki/Self-driving_car" title="Self-driving car">Self-driving car</a></li>
+<li><a href="/wiki/MuZero" title="MuZero">MuZero</a></li>
+<li><a href="/wiki/Action_selection" title="Action selection">Action selection</a>
+<ul><li><a href="/wiki/AutoGPT" title="AutoGPT">AutoGPT</a></li></ul></li>
+<li><a href="/wiki/Robot_control" title="Robot control">Robot control</a></li></ul>
+</div></td></tr></tbody></table><div></div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%">People</th><td class="navbox-list-with-group navbox-list navbox-even" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Alan_Turing" title="Alan Turing">Alan Turing</a></li>
+<li><a href="/wiki/Warren_Sturgis_McCulloch" title="Warren Sturgis McCulloch">Warren Sturgis McCulloch</a></li>
+<li><a href="/wiki/Walter_Pitts" title="Walter Pitts">Walter Pitts</a></li>
+<li><a href="/wiki/John_von_Neumann" title="John von Neumann">John von Neumann</a></li>
+<li><a href="/wiki/Christopher_D._Manning" title="Christopher D. Manning">Christopher D. Manning</a></li>
+<li><a href="/wiki/Claude_Shannon" title="Claude Shannon">Claude Shannon</a></li>
+<li><a href="/wiki/Shun%27ichi_Amari" title="Shun&#39;ichi Amari">Shun'ichi Amari</a></li>
+<li><a href="/wiki/Kunihiko_Fukushima" title="Kunihiko Fukushima">Kunihiko Fukushima</a></li>
+<li><a href="/wiki/Takeo_Kanade" title="Takeo Kanade">Takeo Kanade</a></li>
+<li><a href="/wiki/Marvin_Minsky" title="Marvin Minsky">Marvin Minsky</a></li>
+<li><a href="/wiki/John_McCarthy_(computer_scientist)" title="John McCarthy (computer scientist)">John McCarthy</a></li>
+<li><a href="/wiki/Nathaniel_Rochester_(computer_scientist)" title="Nathaniel Rochester (computer scientist)">Nathaniel Rochester</a></li>
+<li><a href="/wiki/Allen_Newell" title="Allen Newell">Allen Newell</a></li>
+<li><a href="/wiki/Cliff_Shaw" title="Cliff Shaw">Cliff Shaw</a></li>
+<li><a href="/wiki/Herbert_A._Simon" title="Herbert A. Simon">Herbert A. Simon</a></li>
+<li><a href="/wiki/Oliver_Selfridge" title="Oliver Selfridge">Oliver Selfridge</a></li>
+<li><a href="/wiki/Frank_Rosenblatt" title="Frank Rosenblatt">Frank Rosenblatt</a></li>
+<li><a href="/wiki/Bernard_Widrow" title="Bernard Widrow">Bernard Widrow</a></li>
+<li><a href="/wiki/Joseph_Weizenbaum" title="Joseph Weizenbaum">Joseph Weizenbaum</a></li>
+<li><a href="/wiki/Seymour_Papert" title="Seymour Papert">Seymour Papert</a></li>
+<li><a href="/wiki/Seppo_Linnainmaa" title="Seppo Linnainmaa">Seppo Linnainmaa</a></li>
+<li><a href="/wiki/Paul_Werbos" title="Paul Werbos">Paul Werbos</a></li>
+<li><a href="/wiki/Geoffrey_Hinton" title="Geoffrey Hinton">Geoffrey Hinton</a></li>
+<li><a href="/wiki/John_Hopfield" title="John Hopfield">John Hopfield</a></li>
+<li><a href="/wiki/J%C3%BCrgen_Schmidhuber" title="Jürgen Schmidhuber">Jürgen Schmidhuber</a></li>
+<li><a href="/wiki/Yann_LeCun" title="Yann LeCun">Yann LeCun</a></li>
+<li><a href="/wiki/Yoshua_Bengio" title="Yoshua Bengio">Yoshua Bengio</a></li>
+<li><a href="/wiki/Lotfi_A._Zadeh" title="Lotfi A. Zadeh">Lotfi A. Zadeh</a></li>
+<li><a href="/wiki/Stephen_Grossberg" title="Stephen Grossberg">Stephen Grossberg</a></li>
+<li><a href="/wiki/Alex_Graves_(computer_scientist)" title="Alex Graves (computer scientist)">Alex Graves</a></li>
+<li><a href="/wiki/James_Goodnight" title="James Goodnight">James Goodnight</a></li>
+<li><a href="/wiki/Andrew_Ng" title="Andrew Ng">Andrew Ng</a></li>
+<li><a href="/wiki/Fei-Fei_Li" title="Fei-Fei Li">Fei-Fei Li</a></li>
+<li><a href="/wiki/Alex_Krizhevsky" title="Alex Krizhevsky">Alex Krizhevsky</a></li>
+<li><a href="/wiki/Ilya_Sutskever" title="Ilya Sutskever">Ilya Sutskever</a></li>
+<li><a href="/wiki/Oriol_Vinyals" title="Oriol Vinyals">Oriol Vinyals</a></li>
+<li><a href="/wiki/Quoc_V._Le" title="Quoc V. Le">Quoc V. Le</a></li>
+<li><a href="/wiki/Ian_Goodfellow" title="Ian Goodfellow">Ian Goodfellow</a></li>
+<li><a href="/wiki/Demis_Hassabis" title="Demis Hassabis">Demis Hassabis</a></li>
+<li><a href="/wiki/David_Silver_(computer_scientist)" title="David Silver (computer scientist)">David Silver</a></li>
+<li><a href="/wiki/Andrej_Karpathy" title="Andrej Karpathy">Andrej Karpathy</a></li>
+<li><a href="/wiki/Ashish_Vaswani" title="Ashish Vaswani">Ashish Vaswani</a></li>
+<li><a href="/wiki/Noam_Shazeer" title="Noam Shazeer">Noam Shazeer</a></li>
+<li><a href="/wiki/Aidan_Gomez" title="Aidan Gomez">Aidan Gomez</a></li>
+<li><a href="/wiki/John_Schulman" title="John Schulman">John Schulman</a></li>
+<li><a href="/wiki/Mustafa_Suleyman" title="Mustafa Suleyman">Mustafa Suleyman</a></li>
+<li><a href="/wiki/Jan_Leike" title="Jan Leike">Jan Leike</a></li>
+<li><a href="/wiki/Daniel_Kokotajlo_(researcher)" title="Daniel Kokotajlo (researcher)">Daniel Kokotajlo</a></li>
+<li><a href="/wiki/Fran%C3%A7ois_Chollet" title="François Chollet">François Chollet</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%">Architectures</th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Neural_Turing_machine" title="Neural Turing machine">Neural Turing machine</a></li>
+<li><a href="/wiki/Differentiable_neural_computer" title="Differentiable neural computer">Differentiable neural computer</a></li>
+<li><a href="/wiki/Transformer_(deep_learning_architecture)" class="mw-redirect" title="Transformer (deep learning architecture)">Transformer</a>
+<ul><li><a href="/wiki/Vision_transformer" title="Vision transformer">Vision transformer (ViT)</a></li></ul></li>
+<li><a href="/wiki/Recurrent_neural_network" title="Recurrent neural network">Recurrent neural network (RNN)</a></li>
+<li><a href="/wiki/Long_short-term_memory" title="Long short-term memory">Long short-term memory (LSTM)</a></li>
+<li><a href="/wiki/Gated_recurrent_unit" title="Gated recurrent unit">Gated recurrent unit (GRU)</a></li>
+<li><a href="/wiki/Echo_state_network" title="Echo state network">Echo state network</a></li>
+<li><a href="/wiki/Multilayer_perceptron" title="Multilayer perceptron">Multilayer perceptron (MLP)</a></li>
+<li><a href="/wiki/Convolutional_neural_network" title="Convolutional neural network">Convolutional neural network (CNN)</a></li>
+<li><a href="/wiki/Residual_neural_network" title="Residual neural network">Residual neural network (RNN)</a></li>
+<li><a href="/wiki/Highway_network" title="Highway network">Highway network</a></li>
+<li><a href="/wiki/Mamba_(deep_learning_architecture)" title="Mamba (deep learning architecture)">Mamba</a></li>
+<li><a href="/wiki/Autoencoder" title="Autoencoder">Autoencoder</a></li>
+<li><a href="/wiki/Variational_autoencoder" title="Variational autoencoder">Variational autoencoder (VAE)</a></li>
+<li><a href="/wiki/Generative_adversarial_network" title="Generative adversarial network">Generative adversarial network (GAN)</a></li>
+<li><a href="/wiki/Graph_neural_network" title="Graph neural network">Graph neural network (GNN)</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%">Political</th><td class="navbox-list-with-group navbox-list navbox-even" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/Artificial_Intelligence_Cold_War" title="Artificial Intelligence Cold War">AI Cold War</a></li>
+<li><a href="/wiki/AI_safety" title="AI safety">AI safety</a> (<a href="/wiki/AI_alignment" title="AI alignment">Alignment</a>)</li>
+<li><a href="/wiki/AI_takeover" title="AI takeover">AI takeover</a></li>
+<li><a href="/wiki/Artificial_intelligence_and_elections" title="Artificial intelligence and elections">Elections</a></li>
+<li><a href="/wiki/Ethics_of_artificial_intelligence" title="Ethics of artificial intelligence">Ethics of AI</a></li>
+<li>EU <a href="/wiki/Artificial_Intelligence_Act" title="Artificial Intelligence Act">AI Act</a></li>
+<li><a href="/wiki/AI_nationalism" title="AI nationalism">Nationalism</a></li>
+<li><a href="/wiki/Precautionary_principle" title="Precautionary principle">Precautionary principle</a></li>
+<li><a href="/wiki/Regulation_of_artificial_intelligence" title="Regulation of artificial intelligence">Regulation of AI</a>
+<ul><li><a href="/wiki/Regulation_of_artificial_intelligence_in_the_United_States" title="Regulation of artificial intelligence in the United States">US</a></li></ul></li>
+<li><a href="/wiki/Virtual_politician" title="Virtual politician">Virtual politician</a></li></ul>
+</div></td></tr><tr><th scope="row" class="navbox-group" style="width:1%">Social and economic</th><td class="navbox-list-with-group navbox-list navbox-odd" style="width:100%;padding:0"><div style="padding:0 0.25em">
+<ul><li><a href="/wiki/AI_boom" title="AI boom">AI boom</a></li>
+<li><a href="/wiki/AI_bubble" title="AI bubble">AI bubble</a></li>
+<li><a href="/wiki/AI_data_center" title="AI data center">AI data center</a></li>
+<li><a href="/wiki/AI_effect" title="AI effect">AI effect</a></li>
+<li><a href="/wiki/AI_literacy" title="AI literacy">AI literacy</a></li>
+<li><a href="/wiki/AI_slop" title="AI slop">AI slop</a></li>
+<li><a href="/wiki/AI_veganism" title="AI veganism">AI veganism</a></li>
+<li><a href="/wiki/AI_winter" title="AI winter">AI winter</a></li>
+<li><a href="/wiki/AI_anthropomorphism" title="AI anthropomorphism">Anthropomorphism</a></li>
+<li><a href="/wiki/Artificial_intelligence_arms_race" title="Artificial intelligence arms race">Arms race</a></li>
+<li><a href="/wiki/Competition_in_artificial_intelligence" title="Competition in artificial intelligence">Competition</a></li>
+<li><a href="/wiki/Environmental_impact_of_artificial_intelligence" title="Environmental impact of artificial intelligence">Environmental impact</a></li>
+<li><a href="/wiki/Artificial_intelligence_in_architecture" title="Artificial intelligence in architecture">In architecture</a></li>
+<li><a href="/wiki/Artificial_intelligence_in_education" title="Artificial intelligence in education">In education</a></li>
+<li><a href="/wiki/Artificial_intelligence_in_fiction" title="Artificial intelligence in fiction">In fiction</a></li>
+<li><a href="/wiki/Artificial_intelligence_in_healthcare" title="Artificial intelligence in healthcare">In healthcare</a>
+<ul><li><a href="/wiki/Chatbot_psychosis" title="Chatbot psychosis">Chatbot psychosis</a></li>
+<li><a href="/wiki/Artificial_intelligence_in_mental_health" title="Artificial intelligence in mental health">Mental health</a></li></ul></li>
+<li><a href="/wiki/Artificial_intelligence_in_video_games" title="Artificial intelligence in video games">In video games</a></li>
+<li><a href="/wiki/Artificial_intelligence_visual_art" class="mw-redirect" title="Artificial intelligence visual art">In visual art</a></li>
+<li><a href="/wiki/Workplace_impact_of_artificial_intelligence" title="Workplace impact of artificial intelligence">Workplace impact</a></li></ul>
+</div></td></tr><tr><td class="navbox-abovebelow" colspan="2"><div>
+<ul><li><span class="noviewer" typeof="mw:File"><span title="Category"><img alt="" src="//upload.wikimedia.org/wikipedia/en/thumb/9/96/Symbol_category_class.svg/20px-Symbol_category_class.svg.png" decoding="async" width="16" height="16" class="mw-file-element" srcset="//upload.wikimedia.org/wikipedia/en/thumb/9/96/Symbol_category_class.svg/40px-Symbol_category_class.svg.png 1.5x" data-file-width="180" data-file-height="185" /></span></span> <a href="/wiki/Category:Artificial_intelligence" title="Category:Artificial intelligence">Category</a></li></ul>
+</div></td></tr></tbody></table></div>
+<!-- 
+NewPP limit report
+Parsed by mw‐web.codfw.main‐64847965b5‐6l86j
+Cached time: 20260322233021
+Cache expiry: 1821
+Cache expiry source: Template:As_of (#time)
+Reduced expiry: true
+Complications: [vary‐revision‐sha1, prevent‐selective‐update, show‐toc]
+CPU time usage: 0.430 seconds
+Real time usage: 0.516 seconds
+Preprocessor visited node count: 2434/1000000
+Revision size: 19273/2097152 bytes
+Post‐expand include size: 118887/2097152 bytes
+Template argument size: 3587/2097152 bytes
+Highest expansion depth: 15/100
+Expensive parser function count: 4/500
+Unstrip recursion depth: 1/20
+Unstrip post‐expand size: 79136/5000000 bytes
+Lua time usage: 0.254/10.000 seconds
+Lua memory usage: 5919118/52428800 bytes
+Number of Wikibase entities loaded: 0/500
+-->
+<!--
+Transclusion expansion time report (%,ms,calls,template)
+100.00%  389.321      1 -total
+ 27.77%  108.111      4 Template:Navbox
+ 26.55%  103.361      8 Template:Cite_web
+ 24.89%   96.896      1 Template:Generative_AI
+ 12.54%   48.828      1 Template:Short_description
+ 10.63%   41.372      3 Template:Citation_Needed
+  8.39%   32.666      3 Template:Fix
+  7.49%   29.171      2 Template:Pagetype
+  5.61%   21.839      3 Template:Cite_journal
+  5.09%   19.824      3 Template:Cite_book
+-->
+
+<!-- Saved in parser cache with key enwiki:pcache:75229858:|#|:idhash:canonical and timestamp 20260322233021 and revision id 1337298272. Rendering was triggered because: page_view
+ -->
+</div><noscript><img src="https://en.wikipedia.org/wiki/Special:CentralAutoLogin/start?useformat=desktop&amp;type=1x1&amp;usesul3=1" alt="" width="1" height="1" style="border: none; position: absolute;"></noscript>
+<div class="printfooter" data-nosnippet="">Retrieved from "<a dir="ltr" href="https://en.wikipedia.org/w/index.php?title=Retrieval-augmented_generation&amp;oldid=1337298272">https://en.wikipedia.org/w/index.php?title=Retrieval-augmented_generation&amp;oldid=1337298272</a>"</div></div>
+					<div id="catlinks" class="catlinks" data-mw-interface=""><div id="mw-normal-catlinks" class="mw-normal-catlinks"><a href="/wiki/Help:Category" title="Help:Category">Categories</a>: <ul><li><a href="/wiki/Category:Large_language_models" title="Category:Large language models">Large language models</a></li><li><a href="/wiki/Category:Natural_language_processing" title="Category:Natural language processing">Natural language processing</a></li><li><a href="/wiki/Category:Information_retrieval_systems" title="Category:Information retrieval systems">Information retrieval systems</a></li><li><a href="/wiki/Category:Generative_artificial_intelligence" title="Category:Generative artificial intelligence">Generative artificial intelligence</a></li></ul></div><div id="mw-hidden-catlinks" class="mw-hidden-catlinks mw-hidden-cats-hidden">Hidden categories: <ul><li><a href="/wiki/Category:Articles_with_short_description" title="Category:Articles with short description">Articles with short description</a></li><li><a href="/wiki/Category:Short_description_is_different_from_Wikidata" title="Category:Short description is different from Wikidata">Short description is different from Wikidata</a></li><li><a href="/wiki/Category:Articles_containing_potentially_dated_statements_from_2023" title="Category:Articles containing potentially dated statements from 2023">Articles containing potentially dated statements from 2023</a></li><li><a href="/wiki/Category:All_articles_containing_potentially_dated_statements" title="Category:All articles containing potentially dated statements">All articles containing potentially dated statements</a></li><li><a href="/wiki/Category:All_articles_with_unsourced_statements" title="Category:All articles with unsourced statements">All articles with unsourced statements</a></li><li><a href="/wiki/Category:Articles_with_unsourced_statements_from_August_2025" title="Category:Articles with unsourced statements from August 2025">Articles with unsourced statements from August 2025</a></li><li><a href="/wiki/Category:Articles_with_unsourced_statements_from_February_2025" title="Category:Articles with unsourced statements from February 2025">Articles with unsourced statements from February 2025</a></li></ul></div></div>
+				</div>
+			</main>
+			
+		</div>
+		<div class="mw-footer-container">
+			
+<footer id="footer" class="mw-footer" >
+	<ul id="footer-info">
+	<li id="footer-info-lastmod"> This page was last edited on 8 February 2026, at 16:36<span class="anonymous-show">&#160;(UTC)</span>.</li>
+	<li id="footer-info-copyright">Text is available under the <a href="/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License" title="Wikipedia:Text of the Creative Commons Attribution-ShareAlike 4.0 International License">Creative Commons Attribution-ShareAlike 4.0 License</a>;
+additional terms may apply. By using this site, you agree to the <a href="https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Terms_of_Use" class="extiw" title="foundation:Special:MyLanguage/Policy:Terms of Use">Terms of Use</a> and <a href="https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Privacy_policy" class="extiw" title="foundation:Special:MyLanguage/Policy:Privacy policy">Privacy Policy</a>. Wikipedia® is a registered trademark of the <a rel="nofollow" class="external text" href="https://wikimediafoundation.org/">Wikimedia Foundation, Inc.</a>, a non-profit organization.</li>
+</ul>
+
+	<ul id="footer-places">
+	<li id="footer-places-privacy"><a href="https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Privacy_policy">Privacy policy</a></li>
+	<li id="footer-places-about"><a href="/wiki/Wikipedia:About">About Wikipedia</a></li>
+	<li id="footer-places-disclaimers"><a href="/wiki/Wikipedia:General_disclaimer">Disclaimers</a></li>
+	<li id="footer-places-contact"><a href="//en.wikipedia.org/wiki/Wikipedia:Contact_us">Contact Wikipedia</a></li>
+	<li id="footer-places-legal-safety-contacts"><a href="https://foundation.wikimedia.org/wiki/Special:MyLanguage/Legal:Wikimedia_Foundation_Legal_and_Safety_Contact_Information">Legal &amp; safety contacts</a></li>
+	<li id="footer-places-wm-codeofconduct"><a href="https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Universal_Code_of_Conduct">Code of Conduct</a></li>
+	<li id="footer-places-developers"><a href="https://developer.wikimedia.org">Developers</a></li>
+	<li id="footer-places-statslink"><a href="https://stats.wikimedia.org/#/en.wikipedia.org">Statistics</a></li>
+	<li id="footer-places-cookiestatement"><a href="https://foundation.wikimedia.org/wiki/Special:MyLanguage/Policy:Cookie_statement">Cookie statement</a></li>
+	<li id="footer-places-mobileview"><a href="//en.wikipedia.org/w/index.php?title=Retrieval-augmented_generation&amp;mobileaction=toggle_view_mobile" class="noprint stopMobileRedirectToggle">Mobile view</a></li>
+</ul>
+
+	<ul id="footer-icons" class="noprint">
+	<li id="footer-copyrightico"><a href="https://www.wikimedia.org/" class="cdx-button cdx-button--fake-button cdx-button--size-large cdx-button--fake-button--enabled"><picture><source media="(min-width: 500px)" srcset="/static/images/footer/wikimedia-button.svg" width="84" height="29"><img src="/static/images/footer/wikimedia.svg" width="25" height="25" alt="Wikimedia Foundation" lang="en" loading="lazy"></picture></a></li>
+	<li id="footer-poweredbyico"><a href="https://www.mediawiki.org/" class="cdx-button cdx-button--fake-button cdx-button--size-large cdx-button--fake-button--enabled"><picture><source media="(min-width: 500px)" srcset="/w/resources/assets/poweredby_mediawiki.svg" width="88" height="31"><img src="/w/resources/assets/mediawiki_compact.svg" alt="Powered by MediaWiki" lang="en" width="25" height="25" loading="lazy"></picture></a></li>
+</ul>
+
+</footer>
+
+		</div>
+	</div> 
+</div> 
+<div class="vector-header-container vector-sticky-header-container no-font-mode-scale">
+	<div id="vector-sticky-header" class="vector-sticky-header">
+		<div class="vector-sticky-header-start">
+			<div class="vector-sticky-header-icon-start vector-button-flush-left" aria-hidden="true">
+				<button class="cdx-button cdx-button--weight-quiet cdx-button--icon-only vector-sticky-header-search-toggle" tabindex="-1" data-event-name="ui.vector-sticky-search-form.icon"><span class="vector-icon mw-ui-icon-search mw-ui-icon-wikimedia-search"></span>
+
+<span>Search</span>
+			</button>
+		</div>
+			
+		<div role="search" class="vector-search-box-vue  vector-search-box-show-thumbnail vector-search-box">
+			<div class="vector-typeahead-search-container">
+				<div class="cdx-typeahead-search cdx-typeahead-search--show-thumbnail">
+					<form action="/w/index.php" id="vector-sticky-search-form" class="cdx-search-input cdx-search-input--has-end-button">
+						<div  class="cdx-search-input__input-wrapper"  data-search-loc="header-moved">
+							<div class="cdx-text-input cdx-text-input--has-start-icon">
+								<input
+									class="cdx-text-input__input mw-searchInput" autocomplete="off"
+									
+									type="search" name="search" placeholder="Search Wikipedia">
+								<span class="cdx-text-input__icon cdx-text-input__start-icon"></span>
+							</div>
+							<input type="hidden" name="title" value="Special:Search">
+						</div>
+						<button class="cdx-button cdx-search-input__end-button">Search</button>
+					</form>
+				</div>
+			</div>
+		</div>
+		<div class="vector-sticky-header-context-bar">
+				<nav aria-label="Contents" class="vector-toc-landmark">
+						
+					<div id="vector-sticky-header-toc" class="vector-dropdown mw-portlet mw-portlet-sticky-header-toc vector-sticky-header-toc vector-button-flush-left"  >
+						<input type="checkbox" id="vector-sticky-header-toc-checkbox" role="button" aria-haspopup="true" data-event-name="ui.dropdown-vector-sticky-header-toc" class="vector-dropdown-checkbox "  aria-label="Toggle the table of contents"  >
+						<label id="vector-sticky-header-toc-label" for="vector-sticky-header-toc-checkbox" class="vector-dropdown-label cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only " aria-hidden="true"  ><span class="vector-icon mw-ui-icon-listBullet mw-ui-icon-wikimedia-listBullet"></span>
+
+<span class="vector-dropdown-label-text">Toggle the table of contents</span>
+						</label>
+						<div class="vector-dropdown-content">
+					
+						<div id="vector-sticky-header-toc-unpinned-container" class="vector-unpinned-container">
+						</div>
+					
+						</div>
+					</div>
+			</nav>
+				<div class="vector-sticky-header-context-bar-primary" aria-hidden="true" ><span class="mw-page-title-main">Retrieval-augmented generation</span></div>
+			</div>
+		</div>
+		<div class="vector-sticky-header-end" aria-hidden="true">
+			<div class="vector-sticky-header-icons">
+				<a href="#" class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only" id="ca-talk-sticky-header" tabindex="-1" data-event-name="talk-sticky-header"><span class="vector-icon mw-ui-icon-speechBubbles mw-ui-icon-wikimedia-speechBubbles"></span>
+
+<span></span>
+			</a>
+			<a href="#" class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only" id="ca-subject-sticky-header" tabindex="-1" data-event-name="subject-sticky-header"><span class="vector-icon mw-ui-icon-article mw-ui-icon-wikimedia-article"></span>
+
+<span></span>
+			</a>
+			<a href="#" class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only" id="ca-history-sticky-header" tabindex="-1" data-event-name="history-sticky-header"><span class="vector-icon mw-ui-icon-wikimedia-history mw-ui-icon-wikimedia-wikimedia-history"></span>
+
+<span></span>
+			</a>
+			<a href="#" class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only mw-watchlink" id="ca-watchstar-sticky-header" tabindex="-1" data-event-name="watch-sticky-header"><span class="vector-icon mw-ui-icon-wikimedia-star mw-ui-icon-wikimedia-wikimedia-star"></span>
+
+<span></span>
+			</a>
+			<a href="#" class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only" id="ca-edit-sticky-header" tabindex="-1" data-event-name="wikitext-edit-sticky-header"><span class="vector-icon mw-ui-icon-wikimedia-wikiText mw-ui-icon-wikimedia-wikimedia-wikiText"></span>
+
+<span></span>
+			</a>
+			<a href="#" class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only" id="ca-ve-edit-sticky-header" tabindex="-1" data-event-name="ve-edit-sticky-header"><span class="vector-icon mw-ui-icon-wikimedia-edit mw-ui-icon-wikimedia-wikimedia-edit"></span>
+
+<span></span>
+			</a>
+			<a href="#" class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--icon-only" id="ca-viewsource-sticky-header" tabindex="-1" data-event-name="ve-edit-protected-sticky-header"><span class="vector-icon mw-ui-icon-wikimedia-editLock mw-ui-icon-wikimedia-wikimedia-editLock"></span>
+
+<span></span>
+			</a>
+		</div>
+			<div class="vector-sticky-header-buttons">
+				<button class="cdx-button cdx-button--weight-quiet mw-interlanguage-selector" id="p-lang-btn-sticky-header" tabindex="-1" data-event-name="ui.dropdown-p-lang-btn-sticky-header"><span class="vector-icon mw-ui-icon-wikimedia-language mw-ui-icon-wikimedia-wikimedia-language"></span>
+
+<span>20 languages</span>
+			</button>
+			<a href="#" class="cdx-button cdx-button--fake-button cdx-button--fake-button--enabled cdx-button--weight-quiet cdx-button--action-progressive" id="ca-addsection-sticky-header" tabindex="-1" data-event-name="addsection-sticky-header"><span class="vector-icon mw-ui-icon-speechBubbleAdd-progressive mw-ui-icon-wikimedia-speechBubbleAdd-progressive"></span>
+
+<span>Add topic</span>
+			</a>
+		</div>
+			<div class="vector-sticky-header-icon-end">
+				<div class="vector-user-links">
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+<div class="mw-portlet mw-portlet-dock-bottom emptyPortlet" id="p-dock-bottom">
+	<ul>
+		
+	</ul>
+</div>
+<script>(RLQ=window.RLQ||[]).push(function(){mw.config.set({"wgHostname":"mw-web.codfw.main-64847965b5-6l86j","wgBackendResponseTime":742,"wgPageParseReport":{"limitreport":{"cputime":"0.430","walltime":"0.516","ppvisitednodes":{"value":2434,"limit":1000000},"revisionsize":{"value":19273,"limit":2097152},"postexpandincludesize":{"value":118887,"limit":2097152},"templateargumentsize":{"value":3587,"limit":2097152},"expansiondepth":{"value":15,"limit":100},"expensivefunctioncount":{"value":4,"limit":500},"unstrip-depth":{"value":1,"limit":20},"unstrip-size":{"value":79136,"limit":5000000},"entityaccesscount":{"value":0,"limit":500},"timingprofile":["100.00%  389.321      1 -total"," 27.77%  108.111      4 Template:Navbox"," 26.55%  103.361      8 Template:Cite_web"," 24.89%   96.896      1 Template:Generative_AI"," 12.54%   48.828      1 Template:Short_description"," 10.63%   41.372      3 Template:Citation_Needed","  8.39%   32.666      3 Template:Fix","  7.49%   29.171      2 Template:Pagetype","  5.61%   21.839      3 Template:Cite_journal","  5.09%   19.824      3 Template:Cite_book"]},"scribunto":{"limitreport-timeusage":{"value":"0.254","limit":"10.000"},"limitreport-memusage":{"value":5919118,"limit":52428800}},"cachereport":{"origin":"mw-web.codfw.main-64847965b5-6l86j","timestamp":"20260322233021","ttl":1821,"transientcontent":true,"expiry-source":"Template:As_of (#time)"}}});});</script>
+<script type="application/ld+json">{"@context":"https:\/\/schema.org","@type":"Article","name":"Retrieval-augmented generation","url":"https:\/\/en.wikipedia.org\/wiki\/Retrieval-augmented_generation","sameAs":"http:\/\/www.wikidata.org\/entity\/Q121362277","mainEntity":"http:\/\/www.wikidata.org\/entity\/Q121362277","author":{"@type":"Organization","name":"Contributors to Wikimedia projects"},"publisher":{"@type":"Organization","name":"Wikimedia Foundation, Inc.","logo":{"@type":"ImageObject","url":"https:\/\/www.wikimedia.org\/static\/images\/wmf-hor-googpub.png"}},"datePublished":"2023-11-05T13:19:20Z","dateModified":"2026-02-08T16:36:21Z","headline":"techniques that enable large-scale language models to retrieve and incorporate new information from external data sources"}</script>
+</body>
+</html>
