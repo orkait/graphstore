@@ -1,9 +1,17 @@
 """Piper TTS wrapper for text-to-speech. CPU only, < 100ms latency."""
 
 import io
+import wave
 import logging
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
+
+try:
+    import sounddevice as sd
+except ImportError:
+    sd = None
 
 
 class PiperTTS:
@@ -21,14 +29,11 @@ class PiperTTS:
 
     def speak(self, text: str) -> None:
         """Generate and play audio from text."""
-        # Piper generates WAV bytes, play via platform audio
         audio = self.synthesize(text)
         self._play_audio(audio)
 
     def synthesize(self, text: str) -> bytes:
         """Generate WAV audio bytes from text (without playing)."""
-        # Implementation depends on piper's API
-        # This is the interface contract
         try:
             voice = self._piper.PiperVoice.load(self._voice_name)
             buf = io.BytesIO()
@@ -45,14 +50,25 @@ class PiperTTS:
             f.write(audio)
 
     def _play_audio(self, audio_bytes: bytes) -> None:
-        """Platform-specific audio playback."""
+        """Play WAV audio bytes via sounddevice + numpy."""
         if not audio_bytes:
             return
-        # Try pygame, then sounddevice, then skip
+        if sd is None:
+            logger.debug("sounddevice not available, audio playback skipped")
+            return
         try:
-            import pygame
-            pygame.mixer.init()
-            sound = pygame.mixer.Sound(io.BytesIO(audio_bytes))
-            sound.play()
-        except ImportError as e:
-            logger.debug("audio playback unavailable: %s", e)
+            buf = io.BytesIO(audio_bytes)
+            with wave.open(buf) as wf:
+                samplerate = wf.getframerate()
+                channels = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                frames = wf.readframes(wf.getnframes())
+            dtype_map = {1: np.int8, 2: np.int16, 4: np.int32}
+            dtype = dtype_map.get(sampwidth, np.int16)
+            audio = np.frombuffer(frames, dtype=dtype)
+            if channels > 1:
+                audio = audio.reshape(-1, channels)
+            sd.play(audio, samplerate=samplerate)
+            sd.wait()
+        except Exception as e:
+            logger.debug("audio playback failed: %s", e, exc_info=True)
