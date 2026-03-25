@@ -17,6 +17,7 @@ class CoreConfig(msgspec.Struct, frozen=True):
     initial_capacity: int = 1024
     compact_threshold: float = 0.2
     string_gc_threshold: float = 3.0
+    eviction_target_ratio: float = 0.8
     protected_kinds: list[str] = msgspec.field(default_factory=lambda: ["schema", "config", "system"])
 
 
@@ -119,12 +120,13 @@ def merge_kwargs(config: GraphStoreConfig, **kwargs) -> GraphStoreConfig:
     """
     updates: dict = {}
 
-    if "ceiling_mb" in kwargs and kwargs["ceiling_mb"] != config.core.ceiling_mb:
+    if "ceiling_mb" in kwargs or "eviction_target_ratio" in kwargs:
         updates["core"] = CoreConfig(
-            ceiling_mb=kwargs["ceiling_mb"],
+            ceiling_mb=kwargs.get("ceiling_mb", config.core.ceiling_mb),
             initial_capacity=config.core.initial_capacity,
             compact_threshold=config.core.compact_threshold,
             string_gc_threshold=config.core.string_gc_threshold,
+            eviction_target_ratio=kwargs.get("eviction_target_ratio", config.core.eviction_target_ratio),
             protected_kinds=config.core.protected_kinds,
         )
 
