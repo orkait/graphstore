@@ -11,3 +11,5 @@ logs/
 zen-graph-db/
 .worktrees/
 tests/fixtures/
+.agents/*
+.claude/*
