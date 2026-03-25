@@ -22,6 +22,7 @@ KNOWN_SIGNALS: frozenset = frozenset({
     "tombstone_ratio",
     "string_bloat",
     "recall_hit_rate",
+    "recall_misses",
     "avg_similarity",
     "eviction_count",
     "query_rate",
@@ -283,10 +284,11 @@ class EvolutionEngine:
             tombstone_ratio = 0.0
             string_bloat = 0.0
 
-        # Recall hit rate
+        # Recall hit rate + raw miss counter
         hits = gs._counters.get("recall_hits", 0)
         misses = gs._counters.get("recall_misses", 0)
         recall_hit_rate = hits / max(hits + misses, 1) if (hits + misses) > 0 else 1.0
+        recall_misses = misses
 
         # Avg similarity
         buf = gs._similarity_buffer
@@ -322,6 +324,7 @@ class EvolutionEngine:
             "tombstone_ratio": tombstone_ratio,
             "string_bloat": string_bloat,
             "recall_hit_rate": recall_hit_rate,
+            "recall_misses": recall_misses,
             "avg_similarity": avg_similarity,
             "eviction_count": eviction_count,
             "query_rate": query_rate,
@@ -498,8 +501,10 @@ class EvolutionEngine:
                 if all(_check_condition(c, signals) for c in rule.conditions):
                     pending.append((rule, list(rule.actions)))
 
-            # Phase 2: apply actions (conflict = first wins per param+kind)
+                # Phase 2: apply actions (conflict = first wins per param+kind)
             claimed: set[tuple[str, str]] = set()
+            run_queue: list[tuple[str, str]] = []  # (rule_name, cmd)
+
             for rule, actions in pending:
                 now = time.time()
                 prev_values = {}
@@ -524,8 +529,8 @@ class EvolutionEngine:
                     elif action.kind == "remove":
                         status = self._remove_from_param(action.param, action.value)
                     elif action.kind == "run":
-                        # Queued — don't execute during eval loop
-                        status = "queued"
+                        run_queue.append((rule.name, action.param))
+                        status = "pending"
                     else:
                         status = "skipped:unknown_action"
 
@@ -542,9 +547,34 @@ class EvolutionEngine:
                     "signals": dict(signals),
                     "actions": applied_actions,
                     "prev_values": prev_values,
-                    "status": "applied" if any(a["status"] == "applied" for a in applied_actions) else "skipped",
+                    "status": "pending",  # finalized after Phase 3
                 }
                 events.append(event)
+
+            # Phase 3: execute RUN commands
+            # Reentrancy guard (self._evaluating = True) is still active — prevents
+            # recursive evolution firing if a RUN action triggers _check_health.
+            for rule_name, cmd in run_queue:
+                try:
+                    self._gs._execute_internal(cmd)
+                    run_status = "applied"
+                    logger.debug("Evolution RUN '%s' executed (rule '%s')", cmd, rule_name)
+                except Exception as e:
+                    run_status = f"failed:{type(e).__name__}"
+                    logger.warning("Evolution RUN '%s' failed (rule '%s'): %s", cmd, rule_name, e)
+                for event in events:
+                    if event["rule_name"] == rule_name:
+                        for a in event["actions"]:
+                            if a["kind"] == "run" and a["param"] == cmd and a["status"] == "pending":
+                                a["status"] = run_status
+
+            # Finalize overall event status and log history (after all statuses are final)
+            for event in events:
+                event["status"] = (
+                    "applied"
+                    if any(a["status"] == "applied" for a in event["actions"])
+                    else "skipped"
+                )
                 self._log_history(event)
 
             # Attach events to graphstore for D4 feedback
