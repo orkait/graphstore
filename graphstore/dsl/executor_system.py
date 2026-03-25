@@ -82,6 +82,7 @@ class SystemExecutor:
         self._document_store = document_store
         self._retention = retention or {}
         self._cron = cron
+        self._eviction_target_ratio = 0.8
         self._start_time = time.time()
 
     def execute(self, ast) -> Result:
@@ -892,8 +893,8 @@ class SystemExecutor:
             # LIMIT overrides - evict exactly N nodes
             data = evict_by_count(self.store, q.limit.value, self._vector_store, self._document_store)
         else:
-            # Evict to 80% of ceiling
-            target = int(self.store._ceiling_bytes * 0.8)
+            # Evict to config-specified ratio of ceiling
+            target = int(self.store._ceiling_bytes * self._eviction_target_ratio)
             data = evict_by_bytes(self.store, target, self._vector_store, self._document_store)
             
         return Result(kind="ok", data=data, count=data["evicted"])
