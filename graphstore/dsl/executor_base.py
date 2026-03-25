@@ -27,13 +27,16 @@ from graphstore.dsl.filtering import FilteringMixin
 class ExecutorBase(VisibilityMixin, FilteringMixin):
     def __init__(self, store: CoreStore, schema: SchemaRegistry | None = None,
                  embedder=None, vector_store=None, document_store=None,
-                 ingest_root: str | None = None):
+                 ingest_root: str | None = None,
+                 ingestor_registry=None, chunker=None):
         self.store = store
         self.schema = schema or SchemaRegistry()
         self._embedder = embedder
         self._vector_store = vector_store
         self._document_store = document_store
         self._ingest_root = ingest_root
+        self._ingestor_registry = ingestor_registry
+        self._chunker = chunker
         self.cost_threshold = 100_000
         self._embedder_dirty = False
         self._fts_full_text = True
