@@ -148,6 +148,7 @@ class BatchRequest(BaseModel):
 class ConfigRequest(BaseModel):
     ceiling_mb: int | None = None
     cost_threshold: int | None = None
+    eviction_target_ratio: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +249,8 @@ def config(req: ConfigRequest):
         changes["ceiling_mb"] = req.ceiling_mb
     if req.cost_threshold is not None:
         changes["cost_threshold"] = req.cost_threshold
+    if req.eviction_target_ratio is not None:
+        changes["eviction_target_ratio"] = req.eviction_target_ratio
     
     if changes:
         store.update_runtime_config(changes)

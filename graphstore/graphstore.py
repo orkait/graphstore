@@ -182,6 +182,7 @@ class GraphStore:
                                                vector_store=self._vector_store,
                                                document_store=self._document_store,
                                                retention=retention_dict)
+        self._sys_executor._eviction_target_ratio = cfg.core.eviction_target_ratio
 
         # Cron scheduler (requires threaded mode for background execution)
         self._cron: CronScheduler | None = None
@@ -507,6 +508,8 @@ class GraphStore:
             self.ceiling_mb = changes["ceiling_mb"]
         if "cost_threshold" in changes:
             self.cost_threshold = changes["cost_threshold"]
+        if "eviction_target_ratio" in changes:
+            self._sys_executor._eviction_target_ratio = changes["eviction_target_ratio"]
             
         return Result(kind="ok", data={"updated": "runtime"}, count=1)
         
