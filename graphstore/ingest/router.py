@@ -16,6 +16,26 @@ EXTENSION_MAP = {
     "wav": "audio", "mp3": "audio", "ogg": "audio", "flac": "audio",
 }
 
+# Formats only docling can handle — added when docling is installed
+_DOCLING_EXCLUSIVE = {
+    "tex": "docling",           # LaTeX
+    "adoc": "docling",          # AsciiDoc
+    "tif": "docling",           # TIFF images
+    "tiff": "docling",
+    "bmp": "docling",           # BMP images
+    "m4a": "docling",           # audio (docling[asr])
+    "aac": "docling",
+    "mp4": "docling",           # video (docling[asr] + ffmpeg)
+    "avi": "docling",
+    "mov": "docling",
+}
+
+try:
+    import docling as _docling_check  # noqa
+    EXTENSION_MAP.update(_DOCLING_EXCLUSIVE)
+except ImportError:
+    pass
+
 SUPPORTED_EXTENSIONS = set(EXTENSION_MAP.keys())
 
 _ingestor_cache = {}
@@ -80,9 +100,18 @@ def ingest_file(file_path: str, using: str | None = None, **kwargs) -> IngestRes
 
 
 def list_ingestors() -> list[dict]:
+    _docling_formats = ["pdf", "docx", "pptx", "xlsx", "md", "html", "csv",
+                        "png", "jpg", "jpeg", "tiff", "tif", "bmp", "webp",
+                        "tex", "adoc", "m4a", "aac", "mp4", "avi", "mov"]
+    try:
+        import docling as _  # noqa
+        docling_available = True
+    except ImportError:
+        docling_available = False
+
     return [
         {"name": "markitdown", "formats": ["txt", "md", "html", "csv", "json", "xml", "docx", "pptx", "xlsx", "pdf", "zip", "png", "jpg"], "tier": 1},
         {"name": "pymupdf4llm", "formats": ["pdf"], "tier": 2},
-        {"name": "docling", "formats": ["pdf", "docx"], "tier": 3},
+        {"name": "docling", "formats": _docling_formats, "tier": 3, "available": docling_available},
         {"name": "audio", "formats": ["wav", "mp3", "ogg", "flac"], "tier": 4, "opt_in": True},
     ]

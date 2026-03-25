@@ -1,4 +1,5 @@
 """Tests for ingestion protocol and chunker."""
+import pytest
 from graphstore.ingest.base import Chunk, IngestResult, Ingestor, ExtractedImage
 from graphstore.ingest.chunker import chunk_by_heading, chunk_by_paragraph, chunk_fixed, _make_summary
 
@@ -138,15 +139,79 @@ class TestRouter:
         import pytest
         from graphstore.ingest.router import select_ingestor
         with pytest.raises(ValueError, match="Unsupported format"):
-            select_ingestor("video.mp4")
+            select_ingestor("file.xyz")
 
     def test_list_ingestors(self):
         from graphstore.ingest.router import list_ingestors
         ingestors = list_ingestors()
-        assert len(ingestors) == 4
         names = [i["name"] for i in ingestors]
         assert "markitdown" in names
         assert "audio" in names
+
+
+class TestRouterDoclingExtensions:
+    """When docling is installed, all formats it supports should be routable."""
+
+    @pytest.fixture(autouse=True)
+    def require_docling(self):
+        pytest.importorskip("docling")
+
+    def test_tex_routes_to_docling(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("paper.tex") == "docling"
+
+    def test_adoc_routes_to_docling(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("manual.adoc") == "docling"
+
+    def test_tiff_routes_to_docling(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("scan.tiff") == "docling"
+
+    def test_tif_routes_to_docling(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("scan.tif") == "docling"
+
+    def test_bmp_routes_to_docling(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("image.bmp") == "docling"
+
+    def test_m4a_routes_to_docling(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("audio.m4a") == "docling"
+
+    def test_aac_routes_to_docling(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("audio.aac") == "docling"
+
+    def test_mp4_routes_to_docling(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("video.mp4") == "docling"
+
+    def test_avi_routes_to_docling(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("video.avi") == "docling"
+
+    def test_mov_routes_to_docling(self):
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("video.mov") == "docling"
+
+    def test_docling_ingestor_supported_extensions_complete(self):
+        from graphstore.ingest.docling_ingestor import DoclingIngestor
+        exts = set(DoclingIngestor.supported_extensions)
+        assert "tex" in exts
+        assert "adoc" in exts
+        assert "tiff" in exts
+        assert "bmp" in exts
+        assert "m4a" in exts
+        assert "mp4" in exts
+
+    def test_existing_formats_unchanged(self):
+        """Docling presence should NOT change routing for already-handled formats."""
+        from graphstore.ingest.router import select_ingestor
+        assert select_ingestor("report.pdf") == "pymupdf4llm"
+        assert select_ingestor("doc.docx") == "markitdown"
+        assert select_ingestor("notes.txt") == "markitdown"
 
     def test_ingest_text_file(self, tmp_path):
         f = tmp_path / "test.txt"
