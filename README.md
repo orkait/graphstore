@@ -66,12 +66,16 @@ Core includes: numpy, scipy, lark, usearch, model2vec, croniter, msgspec (~90 MB
 # Higher quality embeddings (EmbeddingGemma-300M via ONNX)
 graphstore install-embedder embeddinggemma
 
-# Image understanding in documents (SmolVLM2 / Qwen3-VL via Ollama)
-graphstore install-vision smolvlm2
-graphstore install-vision qwen3-vl
-
 # Voice: speech-to-text + text-to-speech (Moonshine + Piper)
 graphstore install-voice
+```
+
+Vision requires [Ollama](https://ollama.com) running locally with the model pulled:
+
+```bash
+ollama pull smolvlm2:2.2b   # default vision model
+# or
+ollama pull qwen2.5vl:7b
 ```
 
 </details>
@@ -638,7 +642,7 @@ g = GraphStore(
 ```
 
 <details>
-<summary><strong>Full graphstore.json</strong> - 54 fields, all with defaults</summary>
+<summary><strong>Full graphstore.json</strong> - 48 fields, all with defaults</summary>
 
 ```json
 {
@@ -647,33 +651,46 @@ g = GraphStore(
     "initial_capacity": 1024,
     "compact_threshold": 0.2,
     "string_gc_threshold": 3.0,
+    "eviction_target_ratio": 0.8,
     "protected_kinds": ["schema", "config", "system"]
   },
   "vector": {
     "embedder": "default",
     "similarity_threshold": 0.85,
+    "duplicate_threshold": 0.95,
     "search_oversample": 5,
-    "model2vec_model": "minishlab/M2V_base_output"
+    "model2vec_model": "minishlab/M2V_base_output",
+    "model_cache_dir": null
   },
   "document": {
+    "fts_tokenizer": "porter unicode61",
     "chunk_max_size": 2000,
     "chunk_overlap": 50,
     "summary_max_length": 200,
     "fts_full_text": true,
-    "vision_model": "smolvlm2:2.2b"
+    "vision_model": "smolvlm2:2.2b",
+    "vision_base_url": "http://localhost:11434/v1",
+    "vision_max_tokens": 300
   },
   "dsl": {
     "cost_threshold": 100000,
     "plan_cache_size": 256,
+    "auto_optimize": false,
+    "optimize_interval": 500,
     "recall_decay": 0.7,
     "remember_weights": [0.30, 0.20, 0.15, 0.20, 0.15],
-    "auto_optimize": false,
-    "optimize_interval": 500
+    "cache_gc_threshold": 200
+  },
+  "vault": {
+    "enabled": false,
+    "path": null,
+    "auto_sync": true
   },
   "persistence": {
     "wal_hard_limit": 100000,
     "auto_checkpoint_threshold": 50000,
-    "log_retention_days": 7
+    "log_retention_days": 7,
+    "busy_timeout_ms": 5000
   },
   "retention": {
     "blob_warm_days": 30,
@@ -681,10 +698,19 @@ g = GraphStore(
     "blob_delete_days": 365
   },
   "server": {
+    "cors_origins": ["*"],
+    "ingest_root": null,
     "auth_token": null,
     "rate_limit_rpm": 120,
+    "rate_limit_window": 60,
     "max_query_length": 10000,
     "max_batch_size": 1000
+  },
+  "evolution": {
+    "similarity_buffer_size": 100,
+    "max_rules": 50,
+    "min_cooldown": 10,
+    "history_retention": 1000
   }
 }
 ```
