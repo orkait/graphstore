@@ -887,7 +887,7 @@ class SystemExecutor:
 
     def _evict(self, q: SysEvict) -> Result:
         """SYS EVICT: emergency eviction of oldest nodes to free memory."""
-        from graphstore.core.optimizer import evict_by_bytes, evict_by_count
+        from graphstore.core.optimizer import evict_oldest, evict_by_count
 
         if q.limit:
             # LIMIT overrides - evict exactly N nodes
@@ -895,7 +895,7 @@ class SystemExecutor:
         else:
             # Evict to config-specified ratio of ceiling
             target = int(self.store._ceiling_bytes * self._eviction_target_ratio)
-            data = evict_by_bytes(self.store, target, self._vector_store, self._document_store)
+            data = evict_oldest(self.store, target, self._vector_store, self._document_store)
             
         return Result(kind="ok", data=data, count=data["evicted"])
 

@@ -121,14 +121,17 @@ def merge_kwargs(config: GraphStoreConfig, **kwargs) -> GraphStoreConfig:
     updates: dict = {}
 
     if "ceiling_mb" in kwargs or "eviction_target_ratio" in kwargs:
-        updates["core"] = CoreConfig(
-            ceiling_mb=kwargs.get("ceiling_mb", config.core.ceiling_mb),
-            initial_capacity=config.core.initial_capacity,
-            compact_threshold=config.core.compact_threshold,
-            string_gc_threshold=config.core.string_gc_threshold,
-            eviction_target_ratio=kwargs.get("eviction_target_ratio", config.core.eviction_target_ratio),
-            protected_kinds=config.core.protected_kinds,
-        )
+        c_mb = kwargs.get("ceiling_mb", config.core.ceiling_mb)
+        e_ratio = kwargs.get("eviction_target_ratio", config.core.eviction_target_ratio)
+        if c_mb != config.core.ceiling_mb or e_ratio != config.core.eviction_target_ratio:
+            updates["core"] = CoreConfig(
+                ceiling_mb=c_mb,
+                initial_capacity=config.core.initial_capacity,
+                compact_threshold=config.core.compact_threshold,
+                string_gc_threshold=config.core.string_gc_threshold,
+                eviction_target_ratio=e_ratio,
+                protected_kinds=config.core.protected_kinds,
+            )
 
     if "embedder" in kwargs:
         emb = kwargs["embedder"]
