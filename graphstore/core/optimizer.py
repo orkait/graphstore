@@ -494,7 +494,7 @@ def _evict_nodes(store: CoreStore, slots_to_evict: list[int], vector_store=None,
     return evicted
 
 
-def evict_by_bytes(store: CoreStore, target_bytes: int, vector_store=None, document_store=None, protected_kinds: set | None = None) -> dict:
+def evict_oldest(store: CoreStore, target_bytes: int, vector_store=None, document_store=None, protected_kinds: set | None = None) -> dict:
     """Evict oldest non-protected nodes until memory usage is at or below target_bytes."""
     from graphstore.core.memory import measure
     

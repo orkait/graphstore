@@ -579,3 +579,42 @@ class SysCronList:
 @dataclass
 class SysCronRun:
     name: str
+
+
+# --- Evolution rule management (Layer 5: metacognitive memory) ---
+@dataclass
+class SysEvolveRule:
+    """SYS EVOLVE RULE "name" WHEN ... THEN ... COOLDOWN n PRIORITY n"""
+    name: str
+    conditions: list   # list of Condition-like dicts
+    actions: list      # list of Action-like dicts
+    cooldown: int = 60
+    priority: int = 5
+
+@dataclass
+class SysEvolveList:
+    pass
+
+@dataclass
+class SysEvolveShow:
+    name: str
+
+@dataclass
+class SysEvolveEnable:
+    name: str
+
+@dataclass
+class SysEvolveDisable:
+    name: str
+
+@dataclass
+class SysEvolveDelete:
+    name: str
+
+@dataclass
+class SysEvolveHistory:
+    limit: int = 10
+
+@dataclass
+class SysEvolveReset:
+    pass

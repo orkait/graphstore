@@ -222,6 +222,7 @@ system_query: "SYS" sys_command
             | sys_health | sys_optimize
             | sys_log | sys_cron
             | sys_evict
+            | sys_evolve
 
 sys_stats:      "STATS" STATS_TARGET?
 STATS_TARGET:   "NODES" | "EDGES" | "MEMORY" | "WAL"
@@ -292,6 +293,35 @@ cron_enable: "ENABLE" STRING
 cron_disable: "DISABLE" STRING
 cron_list: "LIST"
 cron_run: "RUN" STRING
+
+// --- Evolution rules (Layer 5: metacognitive memory) ---
+sys_evolve: "EVOLVE" evolve_command
+?evolve_command: evolve_rule | evolve_list | evolve_show | evolve_enable | evolve_disable | evolve_delete | evolve_history | evolve_reset
+
+evolve_rule: "RULE" STRING evolve_when_clause evolve_then_clause+ evolve_cooldown? evolve_priority?
+evolve_when_clause: "WHEN" evolve_condition ("AND" evolve_condition)*
+evolve_condition: IDENTIFIER EVOLVE_OP NUMBER
+evolve_then_clause: "THEN" evolve_action
+evolve_action: "SET" IDENTIFIER "=" evolve_value      -> evolve_action_set
+             | "ADJUST" IDENTIFIER "BY" NUMBER "UNTIL" NUMBER -> evolve_action_adjust_until
+             | "ADJUST" IDENTIFIER "BY" NUMBER         -> evolve_action_adjust
+             | "ADD" IDENTIFIER STRING                 -> evolve_action_add
+             | "REMOVE" IDENTIFIER STRING              -> evolve_action_remove
+             | "RUN" IDENTIFIER+                       -> evolve_action_run
+evolve_value: "[" NUMBER ("," NUMBER)* "]"             -> evolve_value_list
+            | NUMBER                                   -> evolve_value_scalar
+evolve_cooldown: "COOLDOWN" NUMBER
+evolve_priority: "PRIORITY" NUMBER
+
+EVOLVE_OP: ">=" | "<=" | "==" | "!=" | ">" | "<"
+
+evolve_list: "LIST"
+evolve_show: "SHOW" STRING
+evolve_enable: "ENABLE" STRING
+evolve_disable: "DISABLE" STRING
+evolve_delete: "DELETE" STRING
+evolve_history: "HISTORY" ("LIMIT" NUMBER)?
+evolve_reset: "RESET"
 
 // =============================================
 // TERMINALS

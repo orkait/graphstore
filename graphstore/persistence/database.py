@@ -61,6 +61,20 @@ def _create_tables(conn: sqlite3.Connection):
             error_count INTEGER DEFAULT 0,
             last_error TEXT
         );
+        CREATE TABLE IF NOT EXISTS evolution_rules (
+            name TEXT PRIMARY KEY,
+            rule_json TEXT NOT NULL,
+            created_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS evolution_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp REAL NOT NULL,
+            rule_name TEXT NOT NULL,
+            signals_json TEXT NOT NULL,
+            actions_json TEXT NOT NULL,
+            prev_values_json TEXT NOT NULL,
+            status TEXT NOT NULL
+        );
     """)
     _migrate_query_log(conn)
     conn.commit()

@@ -55,6 +55,14 @@ from graphstore.dsl.ast_nodes import (
     SysCronDisable,
     SysCronList,
     SysCronRun,
+    SysEvolveRule,
+    SysEvolveList,
+    SysEvolveShow,
+    SysEvolveEnable,
+    SysEvolveDisable,
+    SysEvolveDelete,
+    SysEvolveHistory,
+    SysEvolveReset,
     TraverseQuery,
 )
 from graphstore.dsl.cost_estimator import estimate_match_cost, estimate_traverse_cost
@@ -73,6 +81,7 @@ class SystemExecutor:
         document_store=None,
         retention: dict | None = None,
         cron=None,
+    evolution_engine=None,
     ):
         self.store = store
         self.schema = schema
@@ -82,6 +91,7 @@ class SystemExecutor:
         self._document_store = document_store
         self._retention = retention or {}
         self._cron = cron
+        self._evolution_engine = evolution_engine
         self._eviction_target_ratio = 0.8
         self._start_time = time.time()
 
@@ -129,6 +139,14 @@ class SystemExecutor:
             SysCronDisable: self._cron_disable,
             SysCronList: self._cron_list,
             SysCronRun: self._cron_run,
+            SysEvolveRule: self._evolve_rule,
+            SysEvolveList: self._evolve_list,
+            SysEvolveShow: self._evolve_show,
+            SysEvolveEnable: self._evolve_enable,
+            SysEvolveDisable: self._evolve_disable,
+            SysEvolveDelete: self._evolve_delete,
+            SysEvolveHistory: self._evolve_history,
+            SysEvolveReset: self._evolve_reset,
         }
         handler = handlers.get(type(ast))
         if handler is None:
@@ -887,7 +905,7 @@ class SystemExecutor:
 
     def _evict(self, q: SysEvict) -> Result:
         """SYS EVICT: emergency eviction of oldest nodes to free memory."""
-        from graphstore.core.optimizer import evict_by_bytes, evict_by_count
+        from graphstore.core.optimizer import evict_oldest, evict_by_count
 
         if q.limit:
             # LIMIT overrides - evict exactly N nodes
@@ -895,7 +913,7 @@ class SystemExecutor:
         else:
             # Evict to config-specified ratio of ceiling
             target = int(self.store._ceiling_bytes * self._eviction_target_ratio)
-            data = evict_by_bytes(self.store, target, self._vector_store, self._document_store)
+            data = evict_oldest(self.store, target, self._vector_store, self._document_store)
             
         return Result(kind="ok", data=data, count=data["evicted"])
 
@@ -974,3 +992,77 @@ class SystemExecutor:
             raise GraphStoreError("CRON not configured")
         self._cron.run_now(q.name)
         return Result(kind="ok", data={"triggered": q.name}, count=1)
+
+    # --- Evolution handlers ---
+
+    def _get_engine(self):
+        if self._evolution_engine is None:
+            raise GraphStoreError("Evolution engine not initialized")
+        return self._evolution_engine
+
+    def _evolve_rule(self, q: SysEvolveRule) -> Result:
+        from graphstore.evolve import EvolutionRule, Condition, Action
+        engine = self._get_engine()
+        rule = EvolutionRule(
+            name=q.name,
+            cooldown=q.cooldown,
+            priority=q.priority,
+        )
+        for c in q.conditions:
+            rule.conditions.append(Condition(
+                signal=c["signal"],
+                operator=c["operator"],
+                value=c["value"],
+            ))
+        for a in q.actions:
+            rule.actions.append(Action(
+                kind=a["kind"],
+                param=a["param"],
+                value=a.get("value"),
+                delta=a.get("delta", 0.0),
+                until=a.get("until"),
+            ))
+        err = engine.add_rule(rule)
+        if err:
+            return Result(kind="error", data=err, count=0)
+        return Result(kind="ok", data={"created": q.name}, count=1)
+
+    def _evolve_list(self, q: SysEvolveList) -> Result:
+        engine = self._get_engine()
+        rules = engine.list_rules()
+        return Result(kind="rules", data=rules, count=len(rules))
+
+    def _evolve_show(self, q: SysEvolveShow) -> Result:
+        engine = self._get_engine()
+        rule = engine.get_rule(q.name)
+        if rule is None:
+            return Result(kind="error", data=f"rule not found: '{q.name}'", count=0)
+        return Result(kind="rule", data=rule, count=1)
+
+    def _evolve_enable(self, q: SysEvolveEnable) -> Result:
+        engine = self._get_engine()
+        if not engine.enable_rule(q.name):
+            return Result(kind="error", data=f"rule not found: '{q.name}'", count=0)
+        return Result(kind="ok", data={"enabled": q.name}, count=1)
+
+    def _evolve_disable(self, q: SysEvolveDisable) -> Result:
+        engine = self._get_engine()
+        if not engine.disable_rule(q.name):
+            return Result(kind="error", data=f"rule not found: '{q.name}'", count=0)
+        return Result(kind="ok", data={"disabled": q.name}, count=1)
+
+    def _evolve_delete(self, q: SysEvolveDelete) -> Result:
+        engine = self._get_engine()
+        if not engine.delete_rule(q.name):
+            return Result(kind="error", data=f"rule not found: '{q.name}'", count=0)
+        return Result(kind="ok", data={"deleted": q.name}, count=1)
+
+    def _evolve_history(self, q: SysEvolveHistory) -> Result:
+        engine = self._get_engine()
+        entries = engine.history(limit=q.limit)
+        return Result(kind="history", data=entries, count=len(entries))
+
+    def _evolve_reset(self, q: SysEvolveReset) -> Result:
+        engine = self._get_engine()
+        engine.reset()
+        return Result(kind="ok", data={"reset": True}, count=0)

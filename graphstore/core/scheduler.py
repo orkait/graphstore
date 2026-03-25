@@ -11,7 +11,7 @@ class OptimizerScheduler:
     def __init__(self, store, vector_store, document_store,
                  auto_optimize: bool = False, optimize_interval: int = 500,
                  compact_threshold: float = 0.2, string_gc_threshold: float = 3.0,
-                 cache_gc_threshold: int = 200):
+                 cache_gc_threshold: int = 200, evolution_engine=None):
         self._store = store
         self._vector_store = vector_store
         self._document_store = document_store
@@ -23,6 +23,7 @@ class OptimizerScheduler:
         self._optimizing = False
         self._needs_optimize = False
         self._write_counter = 0
+        self._evolution_engine = evolution_engine
 
     @property
     def optimizing(self) -> bool:
@@ -67,6 +68,15 @@ class OptimizerScheduler:
             if check_ceiling_accurate(self._store, self._vector_store, self._store._ceiling_bytes):
                 from graphstore.core.optimizer import evict_oldest
                 target = int(self._store._ceiling_bytes * 0.8)
-                evict_oldest(self._store, self._vector_store, self._document_store, target_bytes=target)
+                evict_oldest(self._store, target, self._vector_store, self._document_store)
         except Exception as e:
             logger.debug("health check failed: %s", e)
+
+        # Evolution tick: evaluate rules if engine present and not re-entrant
+        engine = self._evolution_engine
+        if engine is not None and not engine._evaluating:
+            try:
+                signals = engine.compute_signals()
+                engine.evaluate(signals)
+            except Exception as e:
+                logger.warning("evolution tick failed: %s", e)
