@@ -30,12 +30,14 @@ uv run python benchmarks/longmemeval.py /tmp/longmemeval-data/longmemeval_s_clea
 
 Two strategies for loading corpus items into graphstore:
 
-- `flat` (default): `CREATE NODE` with the full session text as one blob — equivalent to raw ChromaDB ingestion; matches how competitor benchmarks work
-- `native`: `INGEST` pipeline — writes each session to a `.txt` file, graphstore auto-chunks by paragraph, embeds each chunk individually, populates FTS properly; this is how graphstore is designed to be used
+- `native` **(default)**: `INGEST` pipeline — auto-chunks each session by paragraph, embeds each chunk individually, populates FTS properly. This is how graphstore is designed to be used and reflects real production performance.
+- `flat`: `CREATE NODE` with the full session text as one blob — one vector per session. Use this as a **baseline comparison** to measure the chunking delta, or when content is already atomic (short facts, structured records).
+
+**Why native is the default:** flat mode stores entire conversations as a single vector (the session centroid). Facts buried inside long mixed-topic sessions get swamped by the dominant topic. On the LongMemEval `single-session-user` category, flat scores 59.4% vs native's 96.9% — a 37.5pp difference — because the answer is a buried fact inside an otherwise unrelated conversation. For topically coherent sessions, flat is marginally better (multi-session: 95.9% flat vs 94.2% native).
 
 ```bash
-# native ingest — uses graphstore's full pipeline
-uv run python benchmarks/longmemeval.py data/longmemeval_s_cleaned.json --ingest-mode native --mode remember --limit 20
+# flat — session-level baseline (for comparison only)
+uv run python benchmarks/longmemeval.py data/longmemeval_s_cleaned.json --ingest-mode flat --mode remember --limit 20
 ```
 
 ### Retrieval Modes

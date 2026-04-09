@@ -467,8 +467,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="GraphStore × LongMemEval benchmark")
     parser.add_argument("dataset")
     parser.add_argument("--mode", choices=["remember", "similar", "lexical", "hybrid"], default="remember")
-    parser.add_argument("--ingest-mode", choices=["flat", "native"], default="flat",
-                        help="flat: CREATE NODE (original); native: INGEST pipeline with auto-chunking")
+    parser.add_argument("--ingest-mode", choices=["flat", "native"], default="native",
+                        help="native: INGEST pipeline with auto-chunking (default); flat: CREATE NODE per session (baseline comparison only)")
     parser.add_argument("--embedder", default=None,
                         help=(
                             "Embedder to use. Options:\n"
