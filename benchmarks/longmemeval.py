@@ -11,6 +11,8 @@ from pathlib import Path
 
 from graphstore import GraphStore
 
+_EMBEDDER_UNSET = object()
+
 
 @dataclass(slots=True)
 class CorpusItem:
@@ -182,14 +184,15 @@ def _fuse_rows(*row_groups: list[dict], top_k: int) -> list[dict]:
 
 
 def _run_retrieval(gs: GraphStore, item_by_id: dict[str, CorpusItem], question: str, mode: str, top_k: int) -> list[dict]:
+    normalized_question = _normalize_lexical_query(question)
     if mode == "remember":
-        result = gs.execute(f'REMEMBER {_dsl_quote(question)} LIMIT {top_k}')
+        result = gs.execute(f'REMEMBER {_dsl_quote(normalized_question)} LIMIT {top_k}')
         return _result_rows(result, item_by_id)
     if mode == "similar":
         result = gs.execute(f'SIMILAR TO {_dsl_quote(question)} LIMIT {top_k}')
         return _result_rows(result, item_by_id)
     if mode == "lexical":
-        result = gs.execute(f'LEXICAL SEARCH {_dsl_quote(_normalize_lexical_query(question))} LIMIT {top_k}')
+        result = gs.execute(f'LEXICAL SEARCH {_dsl_quote(normalized_question)} LIMIT {top_k}')
         return _result_rows(result, item_by_id)
     if mode == "hybrid":
         similar = _result_rows(
@@ -197,7 +200,7 @@ def _run_retrieval(gs: GraphStore, item_by_id: dict[str, CorpusItem], question: 
             item_by_id,
         )
         lexical = _result_rows(
-            gs.execute(f'LEXICAL SEARCH {_dsl_quote(_normalize_lexical_query(question))} LIMIT {top_k * 3}'),
+            gs.execute(f'LEXICAL SEARCH {_dsl_quote(normalized_question)} LIMIT {top_k * 3}'),
             item_by_id,
         )
         return _fuse_rows(similar, lexical, top_k=top_k)
@@ -218,7 +221,7 @@ def run_benchmark(
     limit: int | None = None,
     include_abstention: bool = False,
     out_path: str | Path | None = None,
-    embedder=None,
+    embedder=_EMBEDDER_UNSET,
 ) -> dict:
     all_entries = load_longmemeval(dataset_path)
     entries = iter_scored_entries(
@@ -239,7 +242,10 @@ def run_benchmark(
         item_by_id = {item.corpus_id: item for item in items}
 
         with tempfile.TemporaryDirectory(prefix="graphstore-longmemeval-") as tempdir:
-            gs = GraphStore(path=tempdir, embedder=embedder)
+            if embedder is _EMBEDDER_UNSET:
+                gs = GraphStore(path=tempdir)
+            else:
+                gs = GraphStore(path=tempdir, embedder=embedder)
             try:
                 _register_benchmark_kind(gs)
                 for item in items:
