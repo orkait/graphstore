@@ -8,8 +8,10 @@ from graphstore.embedding.base import Embedder
 from benchmarks.longmemeval import (
     build_corpus,
     evaluate_retrieval,
+    iter_scored_entries,
     load_longmemeval,
     main,
+    run_benchmark,
     session_id_from_corpus_id,
 )
 
@@ -35,9 +37,11 @@ class MockEmbedder(Embedder):
     def _encode(self, texts):
         vectors = []
         for text in texts:
-            seed = hash(text) % (2**31)
-            rng = np.random.RandomState(seed)
-            vec = rng.randn(self.dims).astype(np.float32)
+            vec = np.zeros(self.dims, dtype=np.float32)
+            normalized = f"  {text.lower()}  "
+            for index in range(len(normalized) - 2):
+                trigram = normalized[index:index + 3]
+                vec[hash(trigram) % self.dims] += 1.0
             norm = np.linalg.norm(vec)
             if norm > 0:
                 vec /= norm
@@ -79,6 +83,12 @@ def test_evaluate_retrieval_scores_known_ranking():
     assert 0.0 < ndcg <= 1.0
 
 
+def test_abstention_entries_are_skipped_by_default():
+    entries = load_longmemeval(FIXTURE)
+    scored = iter_scored_entries(entries, include_abstention=False, limit=None)
+    assert [entry["question_id"] for entry in scored] == ["q1"]
+
+
 def test_cli_smoke_runs_lexical_mode(tmp_path):
     out_path = tmp_path / "results.jsonl"
     exit_code = main([
@@ -91,3 +101,35 @@ def test_cli_smoke_runs_lexical_mode(tmp_path):
     assert out_path.exists()
     lines = out_path.read_text().strip().splitlines()
     assert len(lines) == 1
+
+
+def test_run_benchmark_lexical_finds_answer_session(tmp_path):
+    out_path = tmp_path / "lexical.jsonl"
+    summary = run_benchmark(
+        dataset_path=FIXTURE,
+        mode="lexical",
+        granularity="session",
+        top_k=5,
+        limit=1,
+        include_abstention=False,
+        out_path=out_path,
+        embedder=None,
+    )
+    assert summary["scored_questions"] == 1
+    assert summary["metrics"]["session"]["recall_any@5"] == 1.0
+
+
+def test_run_benchmark_similar_works_with_mock_embedder(tmp_path):
+    out_path = tmp_path / "similar.jsonl"
+    summary = run_benchmark(
+        dataset_path=FIXTURE,
+        mode="similar",
+        granularity="session",
+        top_k=5,
+        limit=1,
+        include_abstention=False,
+        out_path=out_path,
+        embedder=MockEmbedder(),
+    )
+    assert summary["scored_questions"] == 1
+    assert summary["metrics"]["session"]["recall_any@5"] == 1.0
