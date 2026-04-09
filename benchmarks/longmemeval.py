@@ -467,8 +467,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="GraphStore × LongMemEval benchmark")
     parser.add_argument("dataset")
     parser.add_argument("--mode", choices=["remember", "similar", "lexical", "hybrid"], default="remember")
-    parser.add_argument("--ingest-mode", choices=["flat", "native"], default="native",
-                        help="native: INGEST pipeline with auto-chunking (default); flat: CREATE NODE per session (baseline comparison only)")
+    parser.add_argument("--ingest-mode", choices=["flat", "native"], default="flat",
+                        help="flat: CREATE NODE per session — 89.1%% R@5 overall (default); native: INGEST pipeline with auto-chunking — better on single-session-user (+15.6pp) but worse on single-session-preference (-30pp) and overall (-3.6pp R@5)")
     parser.add_argument("--embedder", default=None,
                         help=(
                             "Embedder to use. Options:\n"
