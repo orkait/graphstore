@@ -26,12 +26,24 @@ cd /mnt/storage/codespace/code/orkait/graphstore/graphstore
 uv run python benchmarks/longmemeval.py /tmp/longmemeval-data/longmemeval_s_cleaned.json --mode remember --out benchmarks/results_longmemeval_remember.jsonl
 ```
 
-### Modes
+### Ingest Modes
 
-- `remember`: graphstore hybrid retrieval
+Two strategies for loading corpus items into graphstore:
+
+- `flat` (default): `CREATE NODE` with the full session text as one blob — equivalent to raw ChromaDB ingestion; matches how competitor benchmarks work
+- `native`: `INGEST` pipeline — writes each session to a `.txt` file, graphstore auto-chunks by paragraph, embeds each chunk individually, populates FTS properly; this is how graphstore is designed to be used
+
+```bash
+# native ingest — uses graphstore's full pipeline
+uv run python benchmarks/longmemeval.py data/longmemeval_s_cleaned.json --ingest-mode native --mode remember --limit 20
+```
+
+### Retrieval Modes
+
+- `remember`: 5-signal fusion (vector + BM25 + recency + confidence + recall_freq)
 - `similar`: dense-only retrieval
 - `lexical`: BM25-only retrieval
-- `hybrid`: simple fusion baseline
+- `hybrid`: simple RRF fusion of similar + lexical
 
 ### Notes
 

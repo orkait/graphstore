@@ -29,8 +29,7 @@ class FilteringMixin:
             actual = data.get(expr.field)
             if actual is None:
                 return False
-            # Use cached compiled regex
-            if not hasattr(expr, '_compiled_re'):
+            if expr._compiled_re is None:
                 import re
                 parts = []
                 for ch in expr.pattern:
@@ -40,7 +39,7 @@ class FilteringMixin:
                         parts.append('.')
                     else:
                         parts.append(re.escape(ch))
-                expr._compiled_re = re.compile(''.join(parts))  # type: ignore[attr-defined]
+                expr._compiled_re = re.compile(''.join(parts))
             return bool(expr._compiled_re.fullmatch(str(actual)))
         elif isinstance(expr, InCondition):
             actual = data.get(expr.field)
@@ -146,14 +145,11 @@ class FilteringMixin:
         if isinstance(expr, Condition) and expr.op == "=" and expr.field != "kind":
             if expr.field in self.store._indexed_fields:
                 slots = self.store.query_by_index(expr.field, expr.value)
-                nodes = []
-                for slot in slots:
-                    node = self.store._materialize_slot(slot)
-                    if node is None:
-                        continue
-                    if kind_filter and node["kind"] != kind_filter:
-                        continue
-                    nodes.append(node)
+                if not slots:
+                    return []
+                nodes = self.store._materialize_bulk(np.array(slots, dtype=np.int32))
+                if kind_filter:
+                    nodes = [n for n in nodes if n["kind"] == kind_filter]
                 return nodes
 
         # Handle AND with an indexed equality: WHERE kind = "X" AND name = "Y"
@@ -162,26 +158,19 @@ class FilteringMixin:
                 if isinstance(op, Condition) and op.op == "=" and op.field != "kind":
                     if op.field in self.store._indexed_fields:
                         slots = self.store.query_by_index(op.field, op.value)
-                        # Build remaining expression excluding the indexed condition
                         remaining_ops = [o for o in expr.operands if o is not op]
-                        # Also strip kind (handled separately)
                         remaining_ops = [
                             o for o in remaining_ops
                             if not (isinstance(o, Condition) and o.field == "kind" and o.op == "=")
                         ]
-                        nodes = []
-                        for slot in slots:
-                            node = self.store._materialize_slot(slot)
-                            if node is None:
-                                continue
-                            if kind_filter and node["kind"] != kind_filter:
-                                continue
-                            # Apply remaining filters
-                            if remaining_ops:
-                                remaining_expr = remaining_ops[0] if len(remaining_ops) == 1 else AndExpr(operands=remaining_ops)
-                                if not self._eval_where(remaining_expr, node):
-                                    continue
-                            nodes.append(node)
+                        if not slots:
+                            return []
+                        nodes = self.store._materialize_bulk(np.array(slots, dtype=np.int32))
+                        if kind_filter:
+                            nodes = [n for n in nodes if n["kind"] == kind_filter]
+                        if remaining_ops:
+                            remaining_expr = remaining_ops[0] if len(remaining_ops) == 1 else AndExpr(operands=remaining_ops)
+                            nodes = [n for n in nodes if self._eval_where(remaining_expr, n)]
                         return nodes
 
         return None
@@ -356,12 +345,7 @@ class FilteringMixin:
         if col_mask is None:
             return None
         slots = np.nonzero(col_mask)[0]
-        nodes = []
-        for slot in slots:
-            node = self.store._materialize_slot(int(slot))
-            if node:
-                nodes.append(node)
-        return nodes
+        return self.store._materialize_bulk(slots)
 
     def _try_column_count(self, expr, kind_filter: str | None) -> int | None:
         """Try column-accelerated count. Returns count or None."""
@@ -508,11 +492,7 @@ class FilteringMixin:
 
     def _materialize_slots_filtered(self, slots: np.ndarray, predicate=None) -> list[dict]:
         """Materialize slot array into node dicts, optionally filtering by predicate."""
-        result = []
-        for s in slots:
-            node = self.store._materialize_slot(int(s))
-            if node is not None:
-                if predicate and not predicate(node):
-                    continue
-                result.append(node)
-        return result
+        nodes = self.store._materialize_bulk(slots)
+        if predicate is None:
+            return nodes
+        return [node for node in nodes if predicate(node)]

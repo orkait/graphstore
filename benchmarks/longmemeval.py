@@ -13,6 +13,65 @@ from graphstore import GraphStore
 
 _EMBEDDER_UNSET = object()
 
+# ---------------------------------------------------------------------------
+# Native-ingest helpers
+# ---------------------------------------------------------------------------
+
+def _corpus_id_from_node_id(node_id: str) -> str:
+    """Strip :chunk:N or :section:N suffix produced by INGEST to get corpus_id."""
+    for marker in (":chunk:", ":section:"):
+        if marker in node_id:
+            return node_id.split(marker, 1)[0]
+    return node_id
+
+
+def _safe_filename(corpus_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", corpus_id)
+
+
+def _format_session_for_ingest(item: CorpusItem) -> str:
+    """Format corpus text for graphstore INGEST.
+
+    Wraps the conversation in a minimal markdown structure so the heading
+    chunker produces one logical chunk for the whole session / turn.
+    Plain text (no headings) falls through to chunk_by_paragraph, which
+    splits on double newlines — also fine for conversations.
+    """
+    return item.text
+
+
+def _ingest_corpus_item(gs: GraphStore, item: CorpusItem, ingest_dir: Path) -> None:
+    """Write item text to a .txt file and INGEST through graphstore's native pipeline."""
+    txt_path = ingest_dir / f"{_safe_filename(item.corpus_id)}.txt"
+    txt_path.write_text(_format_session_for_ingest(item), encoding="utf-8")
+    gs.execute(
+        f'INGEST {_dsl_quote(str(txt_path))} '
+        f'AS {_dsl_quote(item.corpus_id)} '
+        f'KIND "conversation"'
+    )
+
+
+def _normalize_ranked_rows(rows: list[dict], item_by_id: dict[str, CorpusItem]) -> list[dict]:
+    """Map chunk/section node IDs back to corpus IDs and dedupe by corpus_id (first-seen wins)."""
+    seen: set[str] = set()
+    normalized: list[dict] = []
+    for row in rows:
+        corpus_id = _corpus_id_from_node_id(row["corpus_id"])
+        if corpus_id in seen:
+            continue
+        seen.add(corpus_id)
+        item = item_by_id.get(corpus_id)
+        if item is None:
+            continue
+        normalized.append({
+            **row,
+            "corpus_id": corpus_id,
+            "session_id": item.session_id,
+            "turn_id": item.turn_id,
+            "text_preview": item.text[:200],
+        })
+    return normalized
+
 
 @dataclass(slots=True)
 class CorpusItem:
@@ -42,15 +101,20 @@ def session_id_from_corpus_id(corpus_id: str) -> str:
 
 def build_corpus(entry: dict, granularity: str) -> list[CorpusItem]:
     items: list[CorpusItem] = []
+    seen_corpus_ids: set[str] = set()
     sessions = entry["haystack_sessions"]
     session_ids = entry["haystack_session_ids"]
     timestamps = entry["haystack_dates"]
     for session, session_id, timestamp in zip(sessions, session_ids, timestamps):
         if granularity == "session":
+            corpus_id = f"session:{session_id}"
+            if corpus_id in seen_corpus_ids:
+                continue
+            seen_corpus_ids.add(corpus_id)
             text = "\n".join(turn["content"] for turn in session)
             items.append(
                 CorpusItem(
-                    corpus_id=f"session:{session_id}",
+                    corpus_id=corpus_id,
                     session_id=session_id,
                     turn_id=None,
                     timestamp=timestamp,
@@ -61,9 +125,13 @@ def build_corpus(entry: dict, granularity: str) -> list[CorpusItem]:
         if granularity != "turn":
             raise ValueError(f"Unsupported granularity: {granularity}")
         for turn_index, turn in enumerate(session):
+            corpus_id = f"turn:{session_id}:{turn_index}"
+            if corpus_id in seen_corpus_ids:
+                continue
+            seen_corpus_ids.add(corpus_id)
             items.append(
                 CorpusItem(
-                    corpus_id=f"turn:{session_id}:{turn_index}",
+                    corpus_id=corpus_id,
                     session_id=session_id,
                     turn_id=turn_index,
                     timestamp=timestamp,
@@ -154,7 +222,10 @@ def _result_rows(result, item_by_id: dict[str, CorpusItem]) -> list[dict]:
     rows = []
     for node in result.data:
         corpus_id = node["id"]
-        item = item_by_id[corpus_id]
+        # Native ingest returns chunk/section node IDs — strip the suffix to get corpus_id.
+        item = item_by_id.get(corpus_id) or item_by_id.get(_corpus_id_from_node_id(corpus_id))
+        if item is None:
+            continue
         score = (
             node.get("_remember_score")
             or node.get("_similarity")
@@ -222,6 +293,7 @@ def run_benchmark(
     include_abstention: bool = False,
     out_path: str | Path | None = None,
     embedder=_EMBEDDER_UNSET,
+    ingest_mode: str = "flat",
 ) -> dict:
     all_entries = load_longmemeval(dataset_path)
     entries = iter_scored_entries(
@@ -242,15 +314,24 @@ def run_benchmark(
         item_by_id = {item.corpus_id: item for item in items}
 
         with tempfile.TemporaryDirectory(prefix="graphstore-longmemeval-") as tempdir:
+            tempdir_path = Path(tempdir)
             if embedder is _EMBEDDER_UNSET:
                 gs = GraphStore(path=tempdir)
             else:
                 gs = GraphStore(path=tempdir, embedder=embedder)
             try:
-                _register_benchmark_kind(gs)
-                for item in items:
-                    _create_benchmark_node(gs, item, question_id=entry["question_id"])
+                if ingest_mode == "native":
+                    ingest_dir = tempdir_path / "ingest_files"
+                    ingest_dir.mkdir()
+                    for item in items:
+                        _ingest_corpus_item(gs, item, ingest_dir)
+                else:
+                    _register_benchmark_kind(gs)
+                    for item in items:
+                        _create_benchmark_node(gs, item, question_id=entry["question_id"])
                 ranked_rows = _run_retrieval(gs, item_by_id, entry["question"], mode=mode, top_k=top_k)
+                if ingest_mode == "native":
+                    ranked_rows = _normalize_ranked_rows(ranked_rows, item_by_id)
             finally:
                 gs.close()
 
@@ -319,6 +400,7 @@ def run_benchmark(
     summary = {
         "dataset_path": str(dataset_path),
         "mode": mode,
+        "ingest_mode": ingest_mode,
         "granularity": granularity,
         "total_questions": len(all_entries),
         "scored_questions": len(entries),
@@ -348,10 +430,54 @@ def run_benchmark(
     return summary
 
 
+def _resolve_embedder(name: str | None):
+    """Resolve --embedder CLI arg to an Embedder instance or sentinel."""
+    if name is None or name == "default":
+        return _EMBEDDER_UNSET  # graphstore picks model2vec M2V_base_output
+
+    if name.startswith("model2vec:"):
+        model_id = name[len("model2vec:"):]
+        from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
+        print(f"[embedder] loading model2vec: {model_id}", flush=True)
+        return Model2VecEmbedder(model_name=model_id)
+
+    if name in ("embeddinggemma", "embeddinggemma-256"):
+        from graphstore.registry.installer import load_installed_embedder, install_embedder, is_installed
+        if not is_installed("embeddinggemma-300m"):
+            print("[embedder] embeddinggemma-300m not installed — running: graphstore install-embedder embeddinggemma-300m", flush=True)
+            install_embedder("embeddinggemma-300m")
+        print("[embedder] loading embeddinggemma-300m (256d Matryoshka)", flush=True)
+        return load_installed_embedder("embeddinggemma-300m", dims=256)
+
+    if name == "embeddinggemma-768":
+        from graphstore.registry.installer import load_installed_embedder, install_embedder, is_installed
+        if not is_installed("embeddinggemma-300m"):
+            print("[embedder] embeddinggemma-300m not installed — running: graphstore install-embedder embeddinggemma-300m", flush=True)
+            install_embedder("embeddinggemma-300m")
+        print("[embedder] loading embeddinggemma-300m (768d full)", flush=True)
+        return load_installed_embedder("embeddinggemma-300m", dims=768)
+
+    raise ValueError(
+        f"Unknown embedder: {name!r}. "
+        "Valid options: default, model2vec:<hf-model-id>, embeddinggemma, embeddinggemma-768"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="GraphStore × LongMemEval benchmark")
     parser.add_argument("dataset")
     parser.add_argument("--mode", choices=["remember", "similar", "lexical", "hybrid"], default="remember")
+    parser.add_argument("--ingest-mode", choices=["flat", "native"], default="flat",
+                        help="flat: CREATE NODE (original); native: INGEST pipeline with auto-chunking")
+    parser.add_argument("--embedder", default=None,
+                        help=(
+                            "Embedder to use. Options:\n"
+                            "  default                        — model2vec M2V_base_output (256d)\n"
+                            "  model2vec:<hf-id>              — any model2vec HuggingFace model\n"
+                            "                                   e.g. model2vec:minishlab/potion-retrieval-32M\n"
+                            "  embeddinggemma                 — EmbeddingGemma-300M ONNX (256d Matryoshka)\n"
+                            "  embeddinggemma-768             — EmbeddingGemma-300M ONNX (768d full)\n"
+                        ))
     parser.add_argument("--granularity", choices=["session", "turn"], default="session")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--top-k", type=int, default=10)
@@ -359,14 +485,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out")
     args = parser.parse_args(argv)
 
+    embedder = _resolve_embedder(args.embedder)
+
     summary = run_benchmark(
         dataset_path=args.dataset,
         mode=args.mode,
+        ingest_mode=args.ingest_mode,
         granularity=args.granularity,
         top_k=args.top_k,
         limit=args.limit,
         include_abstention=args.include_abstention,
         out_path=args.out,
+        embedder=embedder,
     )
     print(json.dumps(summary, indent=2))
     return 0

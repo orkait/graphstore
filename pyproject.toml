@@ -37,6 +37,9 @@ dependencies = [
     "pymupdf>=1.20",
     "msgspec>=0.18",
     "croniter>=6.0",
+    "fastapi>=0.135.1",
+    "httpx>=0.28.1",
+    "orjson>=3.11.8",
 ]
 
 [project.urls]

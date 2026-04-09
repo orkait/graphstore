@@ -71,6 +71,20 @@ def test_build_corpus_turn_keeps_session_mapping():
     assert session_id_from_corpus_id(items[1].corpus_id) == "sess_1"
 
 
+def test_build_corpus_dedupes_duplicate_session_ids():
+    entry = {
+        "haystack_sessions": [
+            [{"role": "user", "content": "same session"}],
+            [{"role": "user", "content": "same session"}],
+        ],
+        "haystack_session_ids": ["dup_1", "dup_1"],
+        "haystack_dates": ["2023/01/01 (Sun) 10:00", "2023/01/02 (Mon) 11:00"],
+    }
+    items = build_corpus(entry, granularity="session")
+    assert len(items) == 1
+    assert items[0].corpus_id == "session:dup_1"
+
+
 def test_evaluate_retrieval_scores_known_ranking():
     ranked_ids = ["sess_2", "sess_1", "sess_3"]
     recall_any, recall_all, ndcg = evaluate_retrieval(
