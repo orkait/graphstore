@@ -597,3 +597,95 @@ class TestMemoryCeiling:
         s.put_node("b", "t", {})
         with pytest.raises(CeilingExceeded):
             s.put_edge("a", "b", "rel")
+
+
+# ── TTL / retraction visibility in store-level methods ─────────────────────
+
+
+class TestLiveSlotsVisibility:
+    """_live_slots and _live_mask must honour TTL and retracted, not just tombstones."""
+
+    def _store_with_node(self, node_id="n1", kind="t", data=None):
+        s = CoreStore()
+        s.put_node(node_id, kind, data or {})
+        return s
+
+    def test_ttl_expired_node_hidden_in_get_all_nodes(self):
+        s = self._store_with_node()
+        # Set __expires_at__ to 1ms ago (already expired)
+        slot = s.id_to_slot[s.string_table.intern("n1")]
+        s.columns.set_reserved(slot, "__expires_at__", 1)  # epoch+1ms — long past
+        nodes = s.get_all_nodes()
+        assert nodes == [], "expired node must not appear in get_all_nodes"
+
+    def test_ttl_future_node_visible_in_get_all_nodes(self):
+        import time
+        s = self._store_with_node()
+        slot = s.id_to_slot[s.string_table.intern("n1")]
+        future_ms = int(time.time() * 1000) + 60_000  # 60 s from now
+        s.columns.set_reserved(slot, "__expires_at__", future_ms)
+        nodes = s.get_all_nodes()
+        assert len(nodes) == 1, "non-expired node must still appear"
+
+    def test_retracted_node_hidden_in_get_all_nodes(self):
+        s = self._store_with_node()
+        slot = s.id_to_slot[s.string_table.intern("n1")]
+        s.columns.set_reserved(slot, "__retracted__", 1)
+        nodes = s.get_all_nodes()
+        assert nodes == [], "retracted node must not appear in get_all_nodes"
+
+    def test_ttl_expired_excluded_from_count_nodes(self):
+        s = CoreStore()
+        s.put_node("a", "t", {})
+        s.put_node("b", "t", {})
+        slot = s.id_to_slot[s.string_table.intern("b")]
+        s.columns.set_reserved(slot, "__expires_at__", 1)
+        assert s.count_nodes() == 1
+
+    def test_retracted_excluded_from_count_nodes(self):
+        s = CoreStore()
+        s.put_node("a", "t", {})
+        s.put_node("b", "t", {})
+        slot = s.id_to_slot[s.string_table.intern("b")]
+        s.columns.set_reserved(slot, "__retracted__", 1)
+        assert s.count_nodes() == 1
+
+    def test_ttl_expired_excluded_from_query_node_ids(self):
+        s = CoreStore()
+        s.put_node("a", "t", {})
+        s.put_node("b", "t", {})
+        slot = s.id_to_slot[s.string_table.intern("b")]
+        s.columns.set_reserved(slot, "__expires_at__", 1)
+        ids = s.query_node_ids()
+        assert "b" not in ids
+        assert "a" in ids
+
+    def test_non_ttl_store_still_caches_live_slots(self):
+        """Without TTL columns the cache must be used (fast path)."""
+        s = CoreStore()
+        s.put_node("a", "t", {})
+        # First call populates cache
+        _ = s._live_slots()
+        version_before = s._live_version
+        # Second call with same version must hit cache
+        slots2 = s._live_slots()
+        assert s._live_version == version_before  # no mutation
+        assert s._live_slots_cache.get(None) is not None
+        assert len(slots2) == 1
+
+    def test_ttl_store_does_not_use_stale_cache(self):
+        """With TTL column present, cache must be bypassed so expiry is re-evaluated."""
+        import time
+        s = CoreStore()
+        future_ms = int(time.time() * 1000) + 60_000
+        s.put_node("a", "t", {})
+        slot = s.id_to_slot[s.string_table.intern("a")]
+        s.columns.set_reserved(slot, "__expires_at__", future_ms)
+        # First call
+        slots1 = s._live_slots()
+        assert len(slots1) == 1
+        # Manually expire the node without triggering _invalidate_live_cache
+        s.columns.set_reserved(slot, "__expires_at__", 1)
+        # Cache should NOT be used — node must now be absent
+        slots2 = s._live_slots()
+        assert len(slots2) == 0, "expired node leaked through cache"

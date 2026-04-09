@@ -12,7 +12,13 @@ import numpy as np
 
 from graphstore.core.edges import EdgeMatrices
 from graphstore.core.errors import GraphStoreError, NodeExists, NodeNotFound
-from graphstore.core.memory import DEFAULT_CEILING_BYTES, check_ceiling
+from graphstore.core.memory import (
+    BYTES_PER_NODE_ESTIMATE,
+    BYTES_PER_EDGE_ESTIMATE,
+    DEFAULT_CEILING_BYTES,
+    check_ceiling,
+    measure,
+)
 from graphstore.core.columns import ColumnStore
 from graphstore.core.strings import StringTable
 
@@ -60,6 +66,18 @@ class CoreStore:
         self._dirty_edges = True
         self._dirty_strings = True
 
+        # Live mask / live slots version cache — invalidated on every mutation
+        self._live_version: int = 0
+        self._live_mask_cache: dict[str | None, tuple[int, np.ndarray]] = {}
+        self._live_slots_cache: dict[str | None, tuple[int, np.ndarray]] = {}
+
+        # Self-calibrating ceiling estimate — updated every 1000 puts via
+        # _recalibrate_ceiling_estimate().  Starts at the static default and
+        # converges toward the real per-node footprint for this schema.
+        self._bytes_per_node_estimate: float = float(BYTES_PER_NODE_ESTIMATE)
+        self._bytes_per_edge_estimate: float = float(BYTES_PER_EDGE_ESTIMATE)
+        self._calibrate_at_count: int = 1000  # next node count that triggers recalibration
+
     # -- slot management -----------------------------------------------------
 
     def _alloc_slot(self) -> int:
@@ -73,6 +91,34 @@ class CoreStore:
         slot = self._next_slot
         self._next_slot += 1
         return slot
+
+    def _invalidate_live_cache(self) -> None:
+        """Increment write version so live mask/slots caches are rebuilt on next read."""
+        self._live_version += 1
+
+    def _recalibrate_ceiling_estimate(self) -> None:
+        """Update bytes-per-node estimate from a live measurement of this store.
+
+        Called every 1000 put_node operations.  Uses skip_csr=True to avoid
+        triggering an expensive CSR rebuild mid-write.  Vector store memory is
+        NOT included here because CoreStore has no reference to it — the
+        estimate therefore covers the core footprint only (arrays, columns,
+        string table, edge lists).  For schemas with no embedder this is
+        essentially exact; for schemas with embeddings the ceiling will be
+        somewhat conservative, which is acceptable (we prefer false-positives
+        over OOM).
+        """
+        if self._count < 100:
+            return
+        report = measure(self, vector_store=None, skip_csr=True)
+        core_bytes = report["core_total"]
+        self._bytes_per_node_estimate = core_bytes / self._count
+        raw_edge_count = sum(len(v) for v in self._edges_by_type.values())
+        if raw_edge_count > 0:
+            edge_bytes = report["edge_lists"] + report["edge_data_idx"]
+            self._bytes_per_edge_estimate = edge_bytes / raw_edge_count
+        # Schedule next calibration: double the interval up to 10k (amortised O(1))
+        self._calibrate_at_count = self._count + min(self._count, 10_000)
 
     def _grow(self):
         """Double array capacity."""
@@ -118,7 +164,11 @@ class CoreStore:
 
         # Check ceiling (use raw count to avoid triggering CSR rebuild)
         raw_edge_count = sum(len(v) for v in self._edges_by_type.values())
-        check_ceiling(self._count, raw_edge_count, 1, 0, self._ceiling_bytes)
+        check_ceiling(
+            self._count, raw_edge_count, 1, 0, self._ceiling_bytes,
+            bytes_per_node=int(self._bytes_per_node_estimate),
+            bytes_per_edge=int(self._bytes_per_edge_estimate),
+        )
 
         kind_id = self.string_table.intern(kind)
         slot = self._alloc_slot()
@@ -131,6 +181,7 @@ class CoreStore:
         self._dirty_nodes = True
         self._dirty_columns = True
         self._dirty_strings = True
+        self._invalidate_live_cache()
         now_ms = int(time.time() * 1000)
         self.columns.set_reserved(slot, "__created_at__", now_ms)
         self.columns.set_reserved(slot, "__updated_at__", now_ms)
@@ -140,6 +191,10 @@ class CoreStore:
             if field in data:
                 val = data[field]
                 self.secondary_indices[field].setdefault(val, []).append(slot)
+
+        # Recalibrate bytes-per-node estimate periodically
+        if self._count >= self._calibrate_at_count:
+            self._recalibrate_ceiling_estimate()
 
         return slot
 
@@ -231,6 +286,7 @@ class CoreStore:
         self._dirty_nodes = True
         self._dirty_columns = True
         self._dirty_edges = True
+        self._invalidate_live_cache()
 
         # Cascade-delete edges touching this node
         self._cascade_delete_edges(slot)
@@ -259,7 +315,11 @@ class CoreStore:
 
         # Check ceiling (use raw count to avoid triggering CSR rebuild)
         raw_edge_count = sum(len(v) for v in self._edges_by_type.values())
-        check_ceiling(self._count, raw_edge_count, 0, 1, self._ceiling_bytes)
+        check_ceiling(
+            self._count, raw_edge_count, 0, 1, self._ceiling_bytes,
+            bytes_per_node=int(self._bytes_per_node_estimate),
+            bytes_per_edge=int(self._bytes_per_edge_estimate),
+        )
 
         # Check duplicate - O(1) set lookup
         edge_key = (src_slot, tgt_slot, kind)
@@ -280,6 +340,7 @@ class CoreStore:
         self._edges_dirty = True
         self._dirty_edges = True
         self._dirty_strings = True
+        self._invalidate_live_cache()
 
     def delete_edge(self, source_id: str, target_id: str, kind: str):
         """Delete a specific edge."""
@@ -486,49 +547,73 @@ class CoreStore:
             mask = mask & ~(pres & (col == 1))
         return mask
 
+    def _has_time_sensitive_visibility(self) -> bool:
+        """True when TTL or retracted columns exist — prevents stale cache hits."""
+        return (
+            self.columns.has_column("__expires_at__")
+            or self.columns.has_column("__retracted__")
+        )
+
     def _live_slots(self, kind: str | None = None) -> np.ndarray:
-        """Return numpy array of live slot indices, optionally filtered by kind."""
+        """Return numpy array of live slot indices, optionally filtered by kind.
+
+        Includes tombstone, TTL-expiry, and retraction visibility. Results are
+        cached by mutation version UNLESS time-sensitive columns exist (TTL /
+        retracted), since those change visibility without a write.
+        """
         n = self._next_slot
         if n == 0:
             return np.empty(0, dtype=np.int32)
 
+        time_sensitive = self._has_time_sensitive_visibility()
+        if not time_sensitive:
+            cached = self._live_slots_cache.get(kind)
+            if cached is not None and cached[0] == self._live_version:
+                return cached[1]
+
         if kind and kind not in self.string_table:
             return np.empty(0, dtype=np.int32)
 
-        mask = self.node_ids[:n] >= 0
-
-        if self.node_tombstones:
-            tomb_arr = np.array(list(self.node_tombstones), dtype=np.int32)
-            tomb_mask = np.zeros(n, dtype=bool)
-            tomb_mask[tomb_arr[tomb_arr < n]] = True
-            mask &= ~tomb_mask
+        # Full visibility: tombstones + TTL + retracted
+        mask = self.compute_live_mask(n)
 
         if kind is not None:
             kind_id = self.string_table.intern(kind)
             mask &= self.node_kinds[:n] == kind_id
 
-        return np.nonzero(mask)[0]
+        slots = np.nonzero(mask)[0]
+        if not time_sensitive:
+            self._live_slots_cache[kind] = (self._live_version, slots)
+        return slots
 
     def _live_mask(self, kind: str | None = None) -> np.ndarray:
-        """Return boolean mask of live slots, optionally filtered by kind."""
+        """Return boolean mask of live slots, optionally filtered by kind.
+
+        Includes tombstone, TTL-expiry, and retraction visibility. Results are
+        cached by mutation version UNLESS time-sensitive columns exist.
+        """
         n = self._next_slot
         if n == 0:
             return np.empty(0, dtype=bool)
 
-        mask = self.node_ids[:n] >= 0
+        time_sensitive = self._has_time_sensitive_visibility()
+        if not time_sensitive:
+            cached = self._live_mask_cache.get(kind)
+            if cached is not None and cached[0] == self._live_version:
+                return cached[1]
 
-        if self.node_tombstones:
-            tomb_arr = np.array(list(self.node_tombstones), dtype=np.int32)
-            tomb_mask = np.zeros(n, dtype=bool)
-            tomb_mask[tomb_arr[tomb_arr < n]] = True
-            mask = mask & ~tomb_mask
+        # Full visibility: tombstones + TTL + retracted
+        mask = self.compute_live_mask(n)
 
         if kind is not None:
             if kind not in self.string_table:
-                return np.zeros(n, dtype=bool)
-            kind_id = self.string_table.intern(kind)
-            mask = mask & (self.node_kinds[:n] == kind_id)
+                mask = np.zeros(n, dtype=bool)
+            else:
+                kind_id = self.string_table.intern(kind)
+                mask = mask & (self.node_kinds[:n] == kind_id)
 
+        if not time_sensitive:
+            self._live_mask_cache[kind] = (self._live_version, mask)
         return mask
 
     def _materialize_slot(self, slot: int) -> dict | None:
@@ -560,6 +645,52 @@ class CoreStore:
                     d[field] = int(raw)
         return d
 
+    def _materialize_bulk(self, slots: np.ndarray) -> list[dict]:
+        """Vectorized bulk materialization: one numpy fancy-index op per column.
+
+        Replaces the per-slot Python loop in hot query paths. Column arrays are
+        read once across all slots (O(columns)) instead of once per slot
+        (O(slots * columns)).
+        """
+        if len(slots) == 0:
+            return []
+
+        id_to_str = self.string_table._id_to_str  # direct list: O(1) index, no call overhead
+        # .tolist() converts the whole numpy array to Python ints in one C call,
+        # cheaper than calling .item() per element inside the loop.
+        str_id_list = self.node_ids[slots].tolist()
+        kind_id_list = self.node_kinds[slots].tolist()
+        n = len(slots)
+
+        result: list[dict] = [
+            {"id": id_to_str[str_id_list[i]], "kind": id_to_str[kind_id_list[i]]}
+            for i in range(n)
+        ]
+
+        cols = self.columns._columns
+        pres = self.columns._presence
+        dtypes = self.columns._dtypes
+
+        for field, col in cols.items():
+            if field[0] == "_" and field[-1] == "_":
+                continue
+            dtype = dtypes[field]
+            field_pres = pres[field][slots]   # one numpy fancy-index op
+            if not field_pres.any():
+                continue
+            field_vals = col[slots]           # one numpy fancy-index op
+            present_idx = np.where(field_pres)[0]
+            if dtype == "int32_interned":
+                vals_list = field_vals.tolist()
+                for i in present_idx:
+                    result[i][field] = id_to_str[vals_list[i]]
+            else:  # float64 / int64 — .tolist() converts to native Python scalar
+                vals_list = field_vals.tolist()
+                for i in present_idx:
+                    result[i][field] = vals_list[i]
+
+        return result
+
     def get_all_nodes(self, kind: str | None = None, predicate=None) -> list[dict]:
         """Get all live nodes, optionally filtered by kind and/or predicate.
 
@@ -572,21 +703,14 @@ class CoreStore:
         if len(slots) == 0:
             return []
 
+        if predicate is None:
+            return self._materialize_bulk(slots)
+
         result = []
-        for slot in slots:
-            slot = int(slot)
-            if predicate is not None:
-                node = self._materialize_slot(slot)
-                if node is None:
-                    continue
-                raw = {k: v for k, v in node.items() if k not in ("id", "kind")}
-                if not predicate(raw):
-                    continue
+        for node in self._materialize_bulk(slots):
+            raw = {k: v for k, v in node.items() if k not in ("id", "kind")}
+            if predicate(raw):
                 result.append(node)
-            else:
-                node = self._materialize_slot(slot)
-                if node is not None:
-                    result.append(node)
         return result
 
     def count_nodes(self, kind: str | None = None, predicate=None) -> int:
@@ -600,14 +724,10 @@ class CoreStore:
         slots = self._live_slots(kind)
         if predicate is None:
             return len(slots)
-        count = 0
-        for slot in slots:
-            node = self._materialize_slot(int(slot))
-            if node is not None:
-                raw = {k: v for k, v in node.items() if k not in ("id", "kind")}
-                if predicate(raw):
-                    count += 1
-        return count
+        return sum(
+            1 for node in self._materialize_bulk(slots)
+            if predicate({k: v for k, v in node.items() if k not in ("id", "kind")})
+        )
 
     def query_node_ids(self, kind: str | None = None, predicate=None) -> list[str]:
         """Return node IDs matching criteria without full dict construction.
@@ -617,22 +737,14 @@ class CoreStore:
         slots = self._live_slots(kind)
         if len(slots) == 0:
             return []
-        result = []
-        for slot in slots:
-            slot = int(slot)
-            if predicate is not None:
-                node = self._materialize_slot(slot)
-                if node is None:
-                    continue
-                raw = {k: v for k, v in node.items() if k not in ("id", "kind")}
-                if not predicate(raw):
-                    continue
-                result.append(node["id"])
-            else:
-                str_id = int(self.node_ids[slot])
-                if str_id >= 0:
-                    result.append(self.string_table.lookup(str_id))
-        return result
+        if predicate is None:
+            id_to_str = self.string_table._id_to_str
+            return [id_to_str[s] for s in self.node_ids[slots].tolist() if s >= 0]
+        return [
+            node["id"]
+            for node in self._materialize_bulk(slots)
+            if predicate({k: v for k, v in node.items() if k not in ("id", "kind")})
+        ]
 
     # -- field operations ----------------------------------------------------
 

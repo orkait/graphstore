@@ -10,6 +10,7 @@ from graphstore.core.memory import (
     check_ceiling,
     estimate,
 )
+from graphstore.core.store import CoreStore
 
 
 # ── estimate() ───────────────────────────────────────────────────────────
@@ -141,3 +142,72 @@ class TestCheckCeiling:
             added_nodes=0,
             added_edges=0,
         )
+
+    def test_custom_bytes_per_node_overrides_static(self):
+        """Caller-supplied bytes_per_node replaces the static default."""
+        big_bpn = 10_000  # 10 KB / node — only 10 nodes fit in 100KB ceiling
+        with pytest.raises(CeilingExceeded):
+            check_ceiling(
+                current_nodes=0,
+                current_edges=0,
+                added_nodes=11,
+                added_edges=0,
+                ceiling_bytes=100_000,
+                bytes_per_node=big_bpn,
+            )
+        # 10 nodes should still fit
+        check_ceiling(
+            current_nodes=0,
+            current_edges=0,
+            added_nodes=10,
+            added_edges=0,
+            ceiling_bytes=100_000,
+            bytes_per_node=big_bpn,
+        )
+
+
+# ── self-calibrating estimate ─────────────────────────────────────────────
+
+class TestSelfCalibration:
+    def test_estimate_updates_after_1000_nodes(self):
+        """_bytes_per_node_estimate must update after the 1000th put_node."""
+        store = CoreStore(ceiling_bytes=512 * 1_000_000)
+        initial = store._bytes_per_node_estimate
+        for i in range(1001):
+            store.put_node(f"n{i}", "test", {"v": i})
+        # Estimate must have been recalibrated away from the static default
+        assert store._bytes_per_node_estimate != initial, (
+            "estimate should update after 1000 nodes"
+        )
+        # Must be a plausible positive value
+        assert store._bytes_per_node_estimate > 0
+
+    def test_calibrate_at_count_advances(self):
+        """Next calibration threshold must advance after each calibration."""
+        store = CoreStore(ceiling_bytes=512 * 1_000_000)
+        for i in range(1001):
+            store.put_node(f"n{i}", "test", {})
+        first_threshold = store._calibrate_at_count
+        assert first_threshold > 1000, "threshold should advance past 1000"
+
+    def test_ceiling_enforced_with_calibrated_estimate(self):
+        """A tight ceiling should be triggered based on calibrated estimate."""
+        # Bootstrap 1000 nodes so calibration fires
+        bootstrap = CoreStore(ceiling_bytes=512 * 1_000_000)
+        for i in range(1001):
+            bootstrap.put_node(f"n{i}", "test", {"value": i})
+        calibrated_bpn = int(bootstrap._bytes_per_node_estimate)
+
+        # Build a store whose ceiling is just under what 2000 more nodes would need
+        tight_ceiling = calibrated_bpn * 1000 - 1
+        store = CoreStore(ceiling_bytes=512 * 1_000_000)
+        store._bytes_per_node_estimate = float(calibrated_bpn)
+        store._calibrate_at_count = 10**9  # prevent further recalibration in this test
+        for i in range(1000):
+            store.put_node(f"n{i}", "test", {})
+        with pytest.raises(CeilingExceeded):
+            check_ceiling(
+                store._count, 0, 1000, 0,
+                ceiling_bytes=tight_ceiling,
+                bytes_per_node=calibrated_bpn,
+            )

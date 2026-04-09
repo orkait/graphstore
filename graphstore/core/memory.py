@@ -19,8 +19,13 @@ def estimate(node_count: int, edge_count: int) -> int:
     return (node_count * BYTES_PER_NODE_ESTIMATE) + (edge_count * BYTES_PER_EDGE_ESTIMATE)
 
 
-def measure(store, vector_store=None, document_store=None) -> dict:
-    """Measure actual memory usage of all components. Returns detailed breakdown."""
+def measure(store, vector_store=None, document_store=None, skip_csr: bool = False) -> dict:
+    """Measure actual memory usage of all components. Returns detailed breakdown.
+
+    Args:
+        skip_csr: If True, skip CSR matrix measurement to avoid triggering an
+                  expensive rebuild.  Use this on the hot calibration path.
+    """
     report = {}
 
     # Node arrays
@@ -54,9 +59,9 @@ def measure(store, vector_store=None, document_store=None) -> dict:
         edge_idx_bytes += len(idx) * 80  # dict entry overhead
     report["edge_data_idx"] = edge_idx_bytes
 
-    # CSR matrices
+    # CSR matrices (skipped on calibration path to avoid expensive rebuild)
     csr_bytes = 0
-    if hasattr(store, '_edge_matrices'):
+    if not skip_csr and hasattr(store, '_edge_matrices'):
         store._ensure_edges_built()
         for etype, m in store._edge_matrices._typed.items():
             csr_bytes += m.data.nbytes + m.indices.nbytes + m.indptr.nbytes
@@ -104,16 +109,23 @@ def check_ceiling(
     added_nodes: int,
     added_edges: int,
     ceiling_bytes: int = DEFAULT_CEILING_BYTES,
+    bytes_per_node: int | None = None,
+    bytes_per_edge: int | None = None,
 ) -> None:
     """Check if adding nodes/edges would exceed memory ceiling.
 
-    Uses quick estimate for hot-path performance. Accurate measurement
-    happens in SYS HEALTH and auto-optimize health checks.
+    Uses quick estimate for hot-path performance. Pass ``bytes_per_node`` /
+    ``bytes_per_edge`` to override the static defaults with a self-calibrated
+    value (see CoreStore._recalibrate_ceiling_estimate).  Accurate full
+    measurement still happens in SYS HEALTH and auto-optimize health checks.
     """
-    projected = estimate(current_nodes + added_nodes, current_edges + added_edges)
+    bpn = bytes_per_node if bytes_per_node is not None else BYTES_PER_NODE_ESTIMATE
+    bpe = bytes_per_edge if bytes_per_edge is not None else BYTES_PER_EDGE_ESTIMATE
+    projected = (current_nodes + added_nodes) * bpn + (current_edges + added_edges) * bpe
     if projected > ceiling_bytes:
+        current_mb = (current_nodes * bpn + current_edges * bpe) // 1_000_000
         raise CeilingExceeded(
-            current_mb=estimate(current_nodes, current_edges) // 1_000_000,
+            current_mb=current_mb,
             ceiling_mb=ceiling_bytes // 1_000_000,
             operation=f"add {added_nodes} nodes, {added_edges} edges",
         )

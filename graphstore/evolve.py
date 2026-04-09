@@ -195,21 +195,22 @@ class EvolutionEngine:
         if rule.cooldown < self._config.min_cooldown:
             rule.cooldown = self._config.min_cooldown
 
-        # Conflict detection: warn if another enabled rule targets same param
-        existing_params = set()
-        for er in self._rules.values():
-            if er.enabled:
-                for a in er.actions:
-                    existing_params.add((a.kind, a.param))
-
+        # Conflict detection: warn only when same param + same priority — that is
+        # a genuinely unresolvable conflict (execution order becomes insertion-
+        # dependent). Different priorities on the same param is intentional design;
+        # the priority system resolves it at runtime.
         for action in rule.actions:
-            key = (action.kind, action.param)
-            if key in existing_params:
-                warnings.warn(
-                    f"Rule '{rule.name}': conflict with existing rule targeting param '{action.param}' via '{action.kind}'",
-                    UserWarning, stacklevel=3,
-                )
-                break
+            for er in self._rules.values():
+                if not er.enabled or er.priority != rule.priority:
+                    continue
+                for ea in er.actions:
+                    if ea.kind == action.kind and ea.param == action.param:
+                        warnings.warn(
+                            f"Rule '{rule.name}': unresolvable conflict with rule '{er.name}' —"
+                            f" both target param '{action.param}' via '{action.kind}' at priority {rule.priority}",
+                            UserWarning, stacklevel=3,
+                        )
+                        break
 
         self._rules[rule.name] = rule
         self._persist_rule(rule)

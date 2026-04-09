@@ -352,26 +352,27 @@ def test_frozen_signals():
 
 
 def test_conflict_detection_at_create():
-    """Test 12: Creating a conflicting rule issues a warning."""
+    """Test 12: Same param + same priority is unresolvable — must warn at creation."""
     db = GraphStore(ceiling_mb=100, embedder=None)
+    # Both rules: same param, same priority (default 5) — unresolvable conflict
     db.execute(
         'SYS EVOLVE RULE "r1" WHEN memory_pct > 80 THEN SET eviction_target_ratio = 0.6 COOLDOWN 60'
     )
 
-    # Second rule targeting same param should warn
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         db.execute(
             'SYS EVOLVE RULE "r2" WHEN memory_pct > 90 THEN SET eviction_target_ratio = 0.5 COOLDOWN 60'
         )
-        # Check for conflict warning (may be in result.data or in Python warnings)
-        conflict_warned = any("conflict" in str(warning.message).lower() for warning in w)
-        # Also accept conflict info returned in result meta or data
-        # The key invariant is that BOTH rules are stored (create succeeds)
-        lst = db.execute("SYS EVOLVE LIST")
-        names = [r["name"] for r in lst.data] if isinstance(lst.data, list) else []
-        assert "r1" in names
-        assert "r2" in names
+        assert any("conflict" in str(warning.message).lower() for warning in w), (
+            "same param + same priority must emit a conflict warning"
+        )
+
+    # Both rules must still be stored (warning does not block creation)
+    lst = db.execute("SYS EVOLVE LIST")
+    names = [r["name"] for r in lst.data] if isinstance(lst.data, list) else []
+    assert "r1" in names
+    assert "r2" in names
 
 
 def test_conflict_runtime_highest_wins():

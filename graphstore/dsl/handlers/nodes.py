@@ -98,14 +98,10 @@ class NodeHandlers:
                 fallback_predicate,
             )
             if col_sorted_slots is not None:
-                result = []
-                for s in col_sorted_slots:
-                    node = self.store._materialize_slot(int(s))
-                    if node is not None:
-                        if fallback_predicate and not fallback_predicate(node):
-                            continue
-                        result.append(node)
-                return Result(kind="nodes", data=result, count=len(result))
+                nodes = self.store._materialize_bulk(col_sorted_slots)
+                if fallback_predicate:
+                    nodes = [n for n in nodes if fallback_predicate(n)]
+                return Result(kind="nodes", data=nodes, count=len(nodes))
             else:
                 nodes = self._materialize_slots_filtered(slots, fallback_predicate)
                 nodes.sort(
@@ -123,11 +119,7 @@ class NodeHandlers:
                 slots = slots[q.offset.value:]
             if q.limit:
                 slots = slots[:q.limit.value]
-            result = []
-            for s in slots:
-                node = self.store._materialize_slot(int(s))
-                if node is not None:
-                    result.append(node)
+            result = self.store._materialize_bulk(slots)
         else:
             result = self._materialize_slots_filtered(slots, fallback_predicate)
             if q.offset:
