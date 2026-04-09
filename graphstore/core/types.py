@@ -2,12 +2,12 @@
 
 from dataclasses import dataclass, field
 from typing import Any, TypeAlias
-import json
+import orjson
 
 NodeData: TypeAlias = dict[str, Any]
 
 
-@dataclass
+@dataclass(slots=True)
 class Edge:
     source: str
     target: str
@@ -15,7 +15,7 @@ class Edge:
     data: dict = field(default_factory=dict)
 
 
-@dataclass
+@dataclass(slots=True)
 class Result:
     kind: str              # "node", "nodes", "edges", "path", "paths", "match",
                            # "subgraph", "distance", "stats", "plan", "schema",
@@ -38,5 +38,5 @@ class Result:
         return d
 
     def to_json(self) -> str:
-        """Compact JSON string."""
-        return json.dumps(self.to_dict(), default=str)
+        """Compact JSON string (Rust-backed via orjson)."""
+        return orjson.dumps(self.to_dict(), default=str, option=orjson.OPT_NON_STR_KEYS).decode()

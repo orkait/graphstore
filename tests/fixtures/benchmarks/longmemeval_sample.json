@@ -1,0 +1,38 @@
+[
+  {
+    "question_id": "q1",
+    "question_type": "single-session-user",
+    "question": "Which city did I move to last year?",
+    "answer": "Seattle",
+    "question_date": "2024/01/10 (Wed) 09:00",
+    "haystack_session_ids": ["sess_1", "sess_2"],
+    "haystack_dates": ["2023/06/01 (Thu) 10:00", "2023/11/03 (Fri) 17:30"],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "I moved to Seattle last year."},
+        {"role": "assistant", "content": "Seattle sounds like a great move."}
+      ],
+      [
+        {"role": "user", "content": "I bought a new guitar yesterday."},
+        {"role": "assistant", "content": "A new guitar is exciting."}
+      ]
+    ],
+    "answer_session_ids": ["sess_1"]
+  },
+  {
+    "question_id": "q2_abs",
+    "question_type": "abstention",
+    "question": "What was the name of my spaceship?",
+    "answer": "unknown",
+    "question_date": "2024/01/11 (Thu) 09:00",
+    "haystack_session_ids": ["sess_3"],
+    "haystack_dates": ["2023/06/02 (Fri) 11:00"],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "I spent the afternoon gardening."},
+        {"role": "assistant", "content": "Gardening sounds relaxing."}
+      ]
+    ],
+    "answer_session_ids": []
+  }
+]
