@@ -43,6 +43,12 @@ class ExecutorBase(VisibilityMixin, FilteringMixin):
         self._vision_model = "smolvlm2:2.2b"
         self._vision_base_url = "http://localhost:11434/v1"
         self._vision_max_tokens = 300
+        # Deferred embedding mode: when True, CREATE NODE queues (slot, text)
+        # pairs into _pending_embeddings instead of embedding synchronously.
+        # Flushed via flush_pending_embeddings() or when batch_size is reached.
+        self._defer_embeddings: bool = False
+        self._pending_embeddings: list[tuple[int, str]] = []
+        self._embed_batch_size: int = 64
 
     def execute(self, ast) -> Result:
         """Execute a parsed AST node and return a Result."""

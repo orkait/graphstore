@@ -4,6 +4,7 @@ import os
 import time
 import sqlite3
 import logging
+from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -409,6 +410,39 @@ class GraphStore:
     def execute_batch(self, queries: list[str]) -> list[Result]:
         """Execute multiple queries. Each is independent (not transactional)."""
         return [self.execute(q) for q in queries]
+
+    @contextmanager
+    def deferred_embeddings(self, batch_size: int = 64):
+        """Defer vector embeddings during CREATE NODE, flushing in batches.
+
+        While inside this context, write queries that would trigger embedding
+        (CREATE NODE with schema EMBED field, or with DOCUMENT clause) append
+        their (slot, text) pairs to a pending queue instead of calling the
+        embedder per-node. The queue is auto-flushed when `batch_size` is
+        reached, and any remaining pending pairs are flushed on context exit.
+
+        This is a ~4-10x speedup on transformer embedders (EmbeddingGemma,
+        Harrier, bge-*, etc.) where per-call overhead dominates. For static
+        embedders (model2vec) it's roughly neutral.
+
+        Example::
+
+            with gs.deferred_embeddings(batch_size=128):
+                for item in items:
+                    gs.execute(f'CREATE NODE "{item.id}" text = "{item.text}" DOCUMENT "{item.text}"')
+            # All embeddings flushed here.
+        """
+        executor = self._executor
+        prev_defer = executor._defer_embeddings
+        prev_batch_size = executor._embed_batch_size
+        executor._defer_embeddings = True
+        executor._embed_batch_size = batch_size
+        try:
+            yield
+            executor.flush_pending_embeddings()
+        finally:
+            executor._defer_embeddings = prev_defer
+            executor._embed_batch_size = prev_batch_size
 
     def submit_background(self, query: str) -> "Future":
         """Submit a background query (low priority). Only available in threaded mode.

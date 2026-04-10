@@ -37,50 +37,65 @@ class MutationHandlers:
         content = "|".join(parts)
         return hashlib.sha256(content.encode()).hexdigest()[:12]
 
-    def _handle_vector(self, slot: int, kind: str, data: dict, explicit_vector: list[float] | None):
-        """Handle explicit VECTOR clause or auto-embed from schema EMBED field."""
+    def _handle_vector(self, slot: int, kind: str, data: dict, explicit_vector: list[float] | None) -> bool:
+        """Handle explicit VECTOR clause or auto-embed from schema EMBED field.
+
+        Returns True if a vector was stored or queued for this slot.
+        """
         if explicit_vector is not None and self._vector_store is not None:
             vec = np.array(explicit_vector, dtype=np.float32)
             self._vector_store.add(slot, vec)
-        elif explicit_vector is not None and self._vector_store is None:
+            return True
+        if explicit_vector is not None and self._vector_store is None:
             if hasattr(self, '_ensure_vector_store_cb') and self._ensure_vector_store_cb:
                 vec = np.array(explicit_vector, dtype=np.float32)
                 self._ensure_vector_store_cb(len(vec))
                 self._vector_store.add(slot, vec)
-        elif self._embedder and self._vector_store is not None:
-            self._try_auto_embed(slot, kind, data)
-        elif self._embedder and self._vector_store is None:
+                return True
+            return False
+        if self._embedder:
             kind_def = self.schema.describe_node_kind(kind)
             if kind_def and kind_def.get("embed_field"):
                 embed_field = kind_def["embed_field"]
                 text = data.get(embed_field)
                 if text and isinstance(text, str):
-                    if hasattr(self, '_ensure_vector_store_cb') and self._ensure_vector_store_cb:
-                        self._ensure_vector_store_cb(self._embedder.dims)
-                        vec = self._embedder.encode_documents([text])[0]
-                        self._vector_store.add(slot, vec)
+                    return self._embed_and_store(slot, text)
+        return False
 
-    def _try_auto_embed(self, slot: int, kind: str, data: dict):
+    def _try_auto_embed(self, slot: int, kind: str, data: dict) -> bool:
         """Auto-embed if schema has EMBED field defined for this kind."""
         kind_def = self.schema.describe_node_kind(kind)
         if kind_def and kind_def.get("embed_field"):
             embed_field = kind_def["embed_field"]
             text = data.get(embed_field)
             if text and isinstance(text, str):
-                vec = self._embedder.encode_documents([text])[0]
-                self._vector_store.add(slot, vec)
+                return self._embed_and_store(slot, text)
+        return False
 
-    def _embed_and_store(self, slot: int, text: str) -> None:
-        """Embed text and store vector at slot. Handles lazy vector store init."""
+    def _embed_and_store(self, slot: int, text: str) -> bool:
+        """Embed text and store vector at slot.
+
+        In deferred mode (set via deferred_embeddings context), appends to
+        pending queue and auto-flushes when the batch size is reached.
+        Otherwise embeds immediately. Handles lazy vector store init.
+
+        Returns True if the embedding was stored or queued.
+        """
         if not self._embedder:
-            return
-        if self._vector_store is not None:
-            vec = self._embedder.encode_documents([text])[0]
-            self._vector_store.add(slot, vec)
-        elif hasattr(self, '_ensure_vector_store_cb') and self._ensure_vector_store_cb:
-            vec = self._embedder.encode_documents([text])[0]
-            self._ensure_vector_store_cb(len(vec))
-            self._vector_store.add(slot, vec)
+            return False
+        if self._vector_store is None:
+            if hasattr(self, '_ensure_vector_store_cb') and self._ensure_vector_store_cb:
+                self._ensure_vector_store_cb(self._embedder.dims)
+            else:
+                return False
+        if getattr(self, "_defer_embeddings", False):
+            self._pending_embeddings.append((slot, text))
+            if len(self._pending_embeddings) >= self._embed_batch_size:
+                self.flush_pending_embeddings()
+            return True
+        vec = self._embedder.encode_documents([text])[0]
+        self._vector_store.add(slot, vec)
+        return True
 
     def _batch_embed_and_store(self, items: list[tuple[int, str]]) -> None:
         """Batch-embed multiple (slot, text) pairs in one model call."""
@@ -95,6 +110,14 @@ class MutationHandlers:
         vecs = self._embedder.encode_documents(list(texts))
         for slot, vec in zip(slots, vecs):
             self._vector_store.add(slot, vec)
+
+    def flush_pending_embeddings(self) -> None:
+        """Flush any pending embeddings queued in deferred mode."""
+        pending = getattr(self, "_pending_embeddings", None)
+        if not pending:
+            return
+        self._batch_embed_and_store(pending)
+        pending.clear()
 
     def _collect_doc_children(self, doc_id: str) -> list[tuple[str, int]]:
         """Collect all (node_id, slot) pairs for a document's children.
@@ -141,11 +164,13 @@ class MutationHandlers:
             self.store.columns.set_reserved(slot, "__context__", self.store._active_context)
         str_id = self.store.string_table.intern(node_id)
         slot = self.store.id_to_slot[str_id]
-        self._handle_vector(slot, kind, data, q.vector)
+        embedded = self._handle_vector(slot, kind, data, q.vector)
         if q.document and self._document_store:
             self._document_store.put_document(slot, q.document.encode("utf-8"), "text/plain")
-            # Also embed the document text if no explicit vector and embedder available
-            if q.vector is None and self._embedder:
+            # Fallback: embed the document text only if nothing was embedded yet
+            # (no explicit VECTOR, no schema EMBED field). Avoids double-embedding
+            # when both schema EMBED and DOCUMENT point to the same text.
+            if not embedded and q.vector is None and self._embedder:
                 self._embed_and_store(slot, q.document)
         node = self.store.get_node(node_id)
         return Result(kind="node", data=node, count=1)

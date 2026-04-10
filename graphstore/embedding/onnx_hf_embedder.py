@@ -10,7 +10,8 @@ class OnnxHFEmbedder(Embedder):
     """HuggingFace ONNX model embedder. No torch required.
 
     Uses `tokenizers` for tokenization and `onnxruntime` for inference.
-    Supports asymmetric query/document prefixes and Matryoshka truncation.
+    Supports asymmetric query/document prefixes, Matryoshka truncation,
+    and both mean and last-token pooling (for encoder vs decoder models).
     """
 
     def __init__(
@@ -20,6 +21,8 @@ class OnnxHFEmbedder(Embedder):
         query_prefix: str = "",
         doc_prefix_template: str = "",
         max_length: int = 512,
+        pooling_mode: str = "mean",
+        onnx_file: str | None = None,
     ):
         try:
             import onnxruntime as ort
@@ -30,11 +33,17 @@ class OnnxHFEmbedder(Embedder):
                 "Install with: graphstore install-embedder embeddinggemma"
             ) from e
 
+        if pooling_mode not in ("mean", "last_token"):
+            raise ValueError(
+                f"pooling_mode must be 'mean' or 'last_token', got {pooling_mode!r}"
+            )
+
         model_dir = Path(model_dir)
         self._output_dims = output_dims
         self._query_prefix = query_prefix
         self._doc_prefix_template = doc_prefix_template
         self._max_length = max_length
+        self._pooling_mode = pooling_mode
 
         # Load tokenizer
         tok_path = model_dir / "tokenizer.json"
@@ -44,16 +53,23 @@ class OnnxHFEmbedder(Embedder):
         self._tokenizer.enable_padding(pad_id=0)
         self._tokenizer.enable_truncation(max_length=max_length)
 
-        # Load ONNX model
-        onnx_files = list(model_dir.glob("*.onnx"))
-        if not onnx_files:
-            onnx_dir = model_dir / "onnx"
-            if onnx_dir.exists():
-                onnx_files = list(onnx_dir.glob("*.onnx"))
-        if not onnx_files:
-            raise FileNotFoundError(f"No .onnx file found in {model_dir}")
+        # Load ONNX model — prefer explicit file from manifest if provided.
+        if onnx_file:
+            candidate = model_dir / onnx_file
+            if not candidate.exists():
+                raise FileNotFoundError(f"ONNX file not found: {candidate}")
+            onnx_path = candidate
+        else:
+            onnx_files = list(model_dir.glob("*.onnx"))
+            if not onnx_files:
+                onnx_dir = model_dir / "onnx"
+                if onnx_dir.exists():
+                    onnx_files = list(onnx_dir.glob("*.onnx"))
+            if not onnx_files:
+                raise FileNotFoundError(f"No .onnx file found in {model_dir}")
+            onnx_path = onnx_files[0]
 
-        self._session = ort.InferenceSession(str(onnx_files[0]))
+        self._session = ort.InferenceSession(str(onnx_path))
 
         # Detect output dims from a test run
         test_enc = self._tokenizer.encode("test")
@@ -105,9 +121,16 @@ class OnnxHFEmbedder(Embedder):
         })
         embeddings = outputs[0]  # (batch, seq_len, hidden_dim)
 
-        # Mean pooling
-        mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
-        pooled = (embeddings * mask_expanded).sum(axis=1) / mask_expanded.sum(axis=1)
+        if self._pooling_mode == "last_token":
+            # Take embedding at index of last non-padding token per row.
+            # For decoder-only models (Qwen3, Gemma3-decoder, Harrier).
+            last_idx = attention_mask.sum(axis=1) - 1  # (batch,)
+            batch_idx = np.arange(embeddings.shape[0])
+            pooled = embeddings[batch_idx, last_idx]
+        else:
+            # Mean pooling over non-padding tokens (encoder models).
+            mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
+            pooled = (embeddings * mask_expanded).sum(axis=1) / mask_expanded.sum(axis=1)
 
         # Matryoshka truncation + renormalize
         if self._output_dims and self._output_dims < pooled.shape[1]:

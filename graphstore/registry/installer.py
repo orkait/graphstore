@@ -81,6 +81,10 @@ def install_embedder(name: str, variant: str | None = None) -> Path:
 
     # 3. Write manifest
     import json
+    # Record the primary .onnx file so the loader picks the right variant when
+    # multiple variants have been installed into the same directory.
+    onnx_files = [f for f in variant_info["files"] if f.endswith(".onnx")]
+    primary_onnx = onnx_files[0] if onnx_files else variant_info["files"][0]
     manifest = {
         "name": name,
         "variant": variant,
@@ -89,6 +93,8 @@ def install_embedder(name: str, variant: str | None = None) -> Path:
         "max_length": info["max_length"],
         "query_prefix": info["query_prefix"],
         "doc_prefix_template": info["doc_prefix_template"],
+        "pooling": info.get("pooling", "mean"),
+        "onnx_file": primary_onnx,
     }
     (model_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
@@ -123,6 +129,8 @@ def load_installed_embedder(name: str, dims: int | None = None):
         query_prefix=manifest.get("query_prefix", ""),
         doc_prefix_template=manifest.get("doc_prefix_template", ""),
         max_length=manifest.get("max_length", 512),
+        pooling_mode=manifest.get("pooling", "mean"),
+        onnx_file=manifest.get("onnx_file"),
     )
 
 

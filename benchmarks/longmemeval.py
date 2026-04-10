@@ -327,8 +327,12 @@ def run_benchmark(
                         _ingest_corpus_item(gs, item, ingest_dir)
                 else:
                     _register_benchmark_kind(gs)
-                    for item in items:
-                        _create_benchmark_node(gs, item, question_id=entry["question_id"])
+                    # Defer embeddings and flush in batches — critical for
+                    # transformer embedders (EmbeddingGemma, Harrier) where
+                    # per-call inference overhead dominates.
+                    with gs.deferred_embeddings(batch_size=64):
+                        for item in items:
+                            _create_benchmark_node(gs, item, question_id=entry["question_id"])
                 ranked_rows = _run_retrieval(gs, item_by_id, entry["question"], mode=mode, top_k=top_k)
                 if ingest_mode == "native":
                     ranked_rows = _normalize_ranked_rows(ranked_rows, item_by_id)
@@ -457,9 +461,17 @@ def _resolve_embedder(name: str | None):
         print("[embedder] loading embeddinggemma-300m (768d full)", flush=True)
         return load_installed_embedder("embeddinggemma-300m", dims=768)
 
+    if name in ("harrier", "harrier-0.6b"):
+        from graphstore.registry.installer import load_installed_embedder, install_embedder, is_installed
+        if not is_installed("harrier-oss-v1-0.6b"):
+            print("[embedder] harrier-oss-v1-0.6b not installed — running: graphstore install-embedder harrier-oss-v1-0.6b", flush=True)
+            install_embedder("harrier-oss-v1-0.6b")
+        print("[embedder] loading harrier-oss-v1-0.6b (1024d, last-token pooling)", flush=True)
+        return load_installed_embedder("harrier-oss-v1-0.6b", dims=1024)
+
     raise ValueError(
         f"Unknown embedder: {name!r}. "
-        "Valid options: default, model2vec:<hf-model-id>, embeddinggemma, embeddinggemma-768"
+        "Valid options: default, model2vec:<hf-model-id>, embeddinggemma, embeddinggemma-768, harrier"
     )
 
 
@@ -477,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
                             "                                   e.g. model2vec:minishlab/potion-retrieval-32M\n"
                             "  embeddinggemma                 — EmbeddingGemma-300M ONNX (256d Matryoshka)\n"
                             "  embeddinggemma-768             — EmbeddingGemma-300M ONNX (768d full)\n"
+                            "  harrier                        — Microsoft Harrier-OSS-v1 0.6B ONNX (1024d, MTEB 69.0)\n"
                         ))
     parser.add_argument("--granularity", choices=["session", "turn"], default="session")
     parser.add_argument("--limit", type=int)
