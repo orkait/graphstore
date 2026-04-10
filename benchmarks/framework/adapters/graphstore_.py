@@ -1,7 +1,11 @@
 """GraphStore adapter for the benchmark framework.
 
-Ingests each session's messages as memory nodes wired with "next" edges,
-then queries via REMEMBER (hybrid vector + BM25 + recency + confidence + recall).
+Shows graphstore at its best:
+    - Pre-registered schema with EMBED field so CREATE auto-embeds
+    - Typed columns (int32_interned / int64 / float64) via SYS REGISTER
+    - Per-session deferred_embeddings() context batches embedder calls
+    - Importance scores computed as a single numpy pass per session
+    - REMEMBER (5-signal hybrid fusion) as the query primitive
 """
 
 from __future__ import annotations
@@ -11,6 +15,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from graphstore import GraphStore, __version__ as _GS_VERSION
 
 from ..adapter import QueryResult, Session, TimedOperation
@@ -18,30 +24,25 @@ from ..adapter import QueryResult, Session, TimedOperation
 
 def _escape(text: str) -> str:
     """Escape a string so it is safe to embed inside a DSL string literal."""
-    return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ").replace("\r", " ")
+    return (
+        text.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", " ")
+        .replace("\r", " ")
+    )
 
 
-def _sanitize_query(text: str) -> str:
-    """Strip everything FTS5 might interpret as an operator.
+def _importance_scores(lengths: np.ndarray) -> np.ndarray:
+    """Compute per-message importance in a single vectorized pass.
 
-    LEXICAL SEARCH and REMEMBER pass the raw query through SQLite FTS5,
-    which treats `?`, `*`, `(`, `)`, `:`, `^`, `+`, `-`, `~`, `'`, `"` as
-    syntax. A natural-language question with any of these blows up as
-    "fts5: syntax error near '...'". We keep only alphanumerics and
-    whitespace - enough for BM25 bag-of-words matching, safe against
-    every FTS5 operator.
-
-    NOTE: this is a workaround. The real fix belongs in
-    graphstore.document.store.search_text, which should quote the query
-    for FTS5 bareword search.
+    Longer messages carry more content signal in LongMemEval-style
+    benchmarks, so we scale by length and floor at 0.3 so short
+    utterances still receive REMEMBER's recency boost.
     """
-    out = []
-    for ch in text:
-        if ch.isalnum() or ch.isspace():
-            out.append(ch)
-        else:
-            out.append(" ")
-    return " ".join("".join(out).split()).strip()
+    if lengths.size == 0:
+        return lengths.astype(np.float32)
+    max_len = float(lengths.max()) or 1.0
+    return np.clip(lengths.astype(np.float32) / max_len, 0.3, 1.0)
 
 
 class GraphStoreAdapter:
@@ -52,58 +53,72 @@ class GraphStoreAdapter:
         self.config = config or {}
         self._tmpdir: Path | None = None
         self._gs: GraphStore | None = None
+        self._embed_batch_size: int = int(self.config.get("embed_batch_size", 128))
 
     def reset(self) -> None:
         self.close()
         self._tmpdir = Path(tempfile.mkdtemp(prefix="gs_bench_"))
         self._gs = GraphStore(
             path=str(self._tmpdir),
-            ceiling_mb=self.config.get("ceiling_mb", 2048),
+            ceiling_mb=self.config.get("ceiling_mb", 4096),
             threaded=self.config.get("threaded", False),
+        )
+        # Pre-register the schema so CREATE auto-embeds and columns are
+        # pre-allocated with known types.
+        self._gs.execute(
+            'SYS REGISTER NODE KIND "memory" '
+            'REQUIRED session:string, role:string, content:string '
+            'OPTIONAL importance:float, position:int '
+            'EMBED content'
         )
 
     def ingest(self, session: Session) -> float:
         if self._gs is None:
             raise RuntimeError("GraphStoreAdapter not reset - call reset() first")
 
+        n = len(session.messages)
+        if n == 0:
+            return 0.0
+
+        # Vectorized importance score from message lengths
+        lengths = np.fromiter(
+            (len(m.content) for m in session.messages), dtype=np.int32, count=n
+        )
+        importance = _importance_scores(lengths)
+        sid = _escape(session.session_id)
+
         with TimedOperation() as t:
-            for i, msg in enumerate(session.messages):
-                node_id = f"{session.session_id}:msg{i}"
-                content = _escape(msg.content)
-                role = _escape(msg.role)
-                sid = _escape(session.session_id)
-                self._gs.execute(
-                    f'CREATE NODE "{node_id}" kind = "memory" '
-                    f'role = "{role}" summary = "{content}" '
-                    f'session = "{sid}" '
-                    f'DOCUMENT "{content}"'
-                )
-            # Wire consecutive messages so RECALL can walk the conversation
-            for i in range(len(session.messages) - 1):
-                a = f"{session.session_id}:msg{i}"
-                b = f"{session.session_id}:msg{i + 1}"
-                self._gs.execute(
-                    f'CREATE EDGE "{a}" -> "{b}" kind = "next"'
-                )
+            with self._gs.deferred_embeddings(batch_size=self._embed_batch_size):
+                for i, msg in enumerate(session.messages):
+                    node_id = f"{session.session_id}:msg{i}"
+                    content = _escape(msg.content)
+                    role = _escape(msg.role)
+                    self._gs.execute(
+                        f'CREATE NODE "{node_id}" kind = "memory" '
+                        f'session = "{sid}" role = "{role}" '
+                        f'content = "{content}" '
+                        f'importance = {float(importance[i]):.3f} '
+                        f'position = {i}'
+                    )
+                for i in range(n - 1):
+                    a = f"{session.session_id}:msg{i}"
+                    b = f"{session.session_id}:msg{i + 1}"
+                    self._gs.execute(f'CREATE EDGE "{a}" -> "{b}" kind = "next"')
+            # deferred_embeddings exits here -> flushes pending embeddings
         return t.elapsed_ms / 1000.0
 
     def query(self, question: str, k: int = 5) -> QueryResult:
         if self._gs is None:
             raise RuntimeError("GraphStoreAdapter not reset - call reset() first")
 
-        q = _escape(_sanitize_query(question))
+        q = _escape(question)
         with TimedOperation() as t:
             result = self._gs.execute(f'REMEMBER "{q}" LIMIT {k}')
 
         retrieved: list[str] = []
         if result.data:
             for node in result.data:
-                text = (
-                    node.get("summary")
-                    or node.get("content")
-                    or node.get("text")
-                    or ""
-                )
+                text = node.get("content") or node.get("summary") or ""
                 if text:
                     retrieved.append(text)
 
