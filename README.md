@@ -20,6 +20,14 @@ It is designed for agent frameworks, LLM applications, and research tools that n
 
 ---
 
+## 🏗️ Six Engines
+
+<div align="center">
+<img src="assets/engines.svg" alt="graphstore six engines architecture" width="100%">
+</div>
+
+---
+
 ## 📦 Installation
 
 **Requires Python 3.10 or higher.**
