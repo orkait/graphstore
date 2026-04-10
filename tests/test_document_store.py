@@ -122,6 +122,52 @@ class TestBulkOps:
         assert s["image_count"] == 1
 
 
+class TestSearchText:
+    """Regression tests for FTS5 query sanitization."""
+
+    def _seed(self, doc_store):
+        doc_store.put_summary(1, "I live in Tokyo and work as a data scientist", doc_slot=0)
+        doc_store.put_summary(2, "My favorite food is tonkotsu ramen", doc_slot=0)
+        doc_store.put_summary(3, "I adopted a cat named Miso", doc_slot=0)
+        doc_store.put_summary(4, "Planning a trip to Hokkaido in December", doc_slot=0)
+
+    def test_question_with_question_mark(self, doc_store):
+        self._seed(doc_store)
+        hits = doc_store.search_text("Where does the user live?", limit=5)
+        assert 1 in {s for s, _ in hits}
+
+    def test_question_with_apostrophe(self, doc_store):
+        self._seed(doc_store)
+        hits = doc_store.search_text("What is the user's favorite food?", limit=5)
+        assert 2 in {s for s, _ in hits}
+
+    def test_query_with_double_quotes(self, doc_store):
+        self._seed(doc_store)
+        hits = doc_store.search_text('Did the user say "Tokyo"?', limit=5)
+        assert 1 in {s for s, _ in hits}
+
+    def test_query_with_fts5_operators(self, doc_store):
+        self._seed(doc_store)
+        hits = doc_store.search_text("cat* (Miso) ^ +adopted -dog ~test", limit=5)
+        assert 3 in {s for s, _ in hits}
+
+    def test_empty_query_returns_empty(self, doc_store):
+        self._seed(doc_store)
+        assert doc_store.search_text("", limit=5) == []
+        assert doc_store.search_text("   ", limit=5) == []
+
+    def test_operator_only_query_returns_empty(self, doc_store):
+        self._seed(doc_store)
+        assert doc_store.search_text("?*^()", limit=5) == []
+
+    def test_natural_question_returns_hits(self, doc_store):
+        self._seed(doc_store)
+        hits = doc_store.search_text("Where is the user planning to travel?", limit=5)
+        assert hits, "expected at least one hit for a natural-language question"
+        slots = {s for s, _ in hits}
+        assert 4 in slots
+
+
 class TestTempFile:
     def test_temp_mode_works(self, temp_doc_store):
         temp_doc_store.put_document(0, b"temp data", "text/plain")
