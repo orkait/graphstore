@@ -11,7 +11,8 @@ class OptimizerScheduler:
     def __init__(self, store, vector_store, document_store,
                  auto_optimize: bool = False, optimize_interval: int = 500,
                  compact_threshold: float = 0.2, string_gc_threshold: float = 3.0,
-                 cache_gc_threshold: int = 200, evolution_engine=None):
+                 cache_gc_threshold: int = 200, evolution_engine=None,
+                 schema=None, conn=None):
         self._store = store
         self._vector_store = vector_store
         self._document_store = document_store
@@ -24,6 +25,8 @@ class OptimizerScheduler:
         self._needs_optimize = False
         self._write_counter = 0
         self._evolution_engine = evolution_engine
+        self._schema = schema
+        self._conn = conn
 
     @property
     def optimizing(self) -> bool:
@@ -42,7 +45,10 @@ class OptimizerScheduler:
         self._optimizing = True
         try:
             from graphstore.core.optimizer import optimize_all
-            optimize_all(self._store, self._vector_store, self._document_store)
+            optimize_all(
+                self._store, self._vector_store, self._document_store,
+                schema=self._schema, conn=self._conn,
+            )
         except Exception as e:
             logger.debug("auto-optimize failed: %s", e)
         finally:

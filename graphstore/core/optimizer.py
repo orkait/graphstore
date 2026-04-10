@@ -391,18 +391,75 @@ def clear_caches(store: CoreStore) -> dict:
     return {"cleared": True}
 
 
-def optimize_all(store: CoreStore, vector_store=None, document_store=None) -> dict:
+def compact_tombstones_safe(
+    store: CoreStore,
+    schema,
+    conn,
+    vector_store=None,
+    document_store=None,
+) -> dict:
+    """Crash-safe compact_tombstones: pre/post checkpoint + sentinel sandwich.
+
+    On crash mid-compaction, deserializer.load() re-runs compact in-memory
+    from the pre-compaction blobs; GraphStore.__init__ finishes DocStore
+    orphan cleanup and clears the sentinel.
+    """
+    if conn is None:
+        return compact_tombstones(store, vector_store, document_store)
+    if not store.node_tombstones:
+        return {"compacted": 0}
+
+    from graphstore.persistence.serializer import checkpoint as _checkpoint
+    import json, time
+
+    # Phase 1: flush pre-compaction state
+    _checkpoint(store, schema, conn, force=True)
+
+    # Phase 2: mark sentinel
+    n = store._next_slot
+    live_count = n - len(store.node_tombstones)
+    conn.execute(
+        "INSERT OR REPLACE INTO metadata VALUES ('compaction_sentinel', ?)",
+        (json.dumps({"ts": time.time(), "pre_next_slot": n, "pre_live_count": live_count}),),
+    )
+    conn.commit()
+
+    # Phase 3: compact
+    result = compact_tombstones(store, vector_store, document_store)
+
+    # Phase 4: flush post state + clear sentinel
+    _checkpoint(store, schema, conn, force=True)
+    conn.execute("DELETE FROM metadata WHERE key = 'compaction_sentinel'")
+    conn.commit()
+
+    return result
+
+
+def optimize_all(
+    store: CoreStore,
+    vector_store=None,
+    document_store=None,
+    schema=None,
+    conn=None,
+) -> dict:
     """Run all 6 optimization operations in safe order.
 
-    Short-circuits on the first failure: once compact_tombstones or
-    gc_strings breaks mid-run, the store may be in a half-remapped state
-    and running subsequent passes on it just compounds the damage.
-    Returns the results collected so far plus {"error": "..."} so the
-    caller knows which step died.
+    Short-circuits on the first failure; returns results so far plus
+    {"error": "..."}. When schema and conn are both provided the compact
+    step routes through compact_tombstones_safe.
     """
+    if conn is not None and schema is not None:
+        compact_step = lambda: compact_tombstones_safe(
+            store, schema, conn, vector_store, document_store
+        )
+    else:
+        compact_step = lambda: compact_tombstones(
+            store, vector_store, document_store
+        )
+
     results: dict = {}
     steps: list[tuple[str, callable]] = [
-        ("compact", lambda: compact_tombstones(store, vector_store, document_store)),
+        ("compact", compact_step),
         ("strings", lambda: gc_strings(store)),
         ("edges",   lambda: defrag_edges(store)),
         ("vectors", lambda: cleanup_vectors(store, vector_store)),

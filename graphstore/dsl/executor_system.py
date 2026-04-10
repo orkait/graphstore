@@ -713,12 +713,7 @@ class SystemExecutor:
         )
 
     def _reembed(self, q: SysReembed) -> Result:
-        """SYS REEMBED: re-embed all summaries with current embedder, replace vectors.
-
-        Collects (slot, text) pairs in one pass and calls encode_documents()
-        once. Per-slot encoding was untenable for transformer embedders
-        (minutes per 10k nodes) — batching cuts that to a single model call.
-        """
+        """SYS REEMBED: re-embed all summaries with current embedder."""
         if not self._embedder:
             raise GraphStoreError("No embedder configured")
 
@@ -890,14 +885,20 @@ class SystemExecutor:
     def _optimize(self, q: SysOptimize) -> Result:
         """SYS OPTIMIZE: run optimization operations under exclusive lock."""
         from graphstore.core.optimizer import (
-            optimize_all, compact_tombstones, gc_strings,
-            defrag_edges, cleanup_vectors, sweep_orphans, clear_caches,
+            optimize_all, compact_tombstones, compact_tombstones_safe,
+            gc_strings, defrag_edges, cleanup_vectors, sweep_orphans, clear_caches,
         )
         target = q.target
         if target is None:
-            data = optimize_all(self.store, self._vector_store, self._document_store)
+            data = optimize_all(
+                self.store, self._vector_store, self._document_store,
+                schema=self.schema, conn=self.conn,
+            )
         elif target == "COMPACT":
-            data = compact_tombstones(self.store, self._vector_store, self._document_store)
+            data = compact_tombstones_safe(
+                self.store, self.schema, self.conn,
+                self._vector_store, self._document_store,
+            )
         elif target == "STRINGS":
             data = gc_strings(self.store)
         elif target == "EDGES":

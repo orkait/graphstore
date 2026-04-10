@@ -269,8 +269,6 @@ class IntelligenceHandlers:
             self.store.node_ids[:saved_next_slot] = saved_node_ids
             self.store.node_kinds[:saved_next_slot] = saved_node_kinds
             self.store._rebuild_edges()
-            # Bump live version so any cached masks/slots recompute — we
-            # just swapped tombstones and retracted state out from under them.
             self.store._invalidate_live_cache()
             self.store._tombstone_mask_cache = None
 

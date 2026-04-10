@@ -181,6 +181,24 @@ class GraphStore:
             doc_db = None  # DocumentStore uses temp file
         self._document_store = DocumentStore(doc_db, fts_tokenizer=cfg.document.fts_tokenizer)
 
+        # Compaction sentinel recovery Phase 2: DocStore orphan cleanup.
+        if self._conn is not None:
+            _sentinel_row = self._conn.execute(
+                "SELECT value FROM metadata WHERE key='compaction_sentinel'"
+            ).fetchone()
+            if _sentinel_row is not None:
+                import numpy as _np
+                _n = self._store._next_slot
+                _live = self._store.compute_live_mask(_n)
+                _live_slots = set(int(s) for s in _np.nonzero(_live)[0])
+                try:
+                    self._document_store.orphan_cleanup(_live_slots)
+                except Exception as _e:
+                    logger.warning("compaction recovery orphan cleanup failed: %s", _e)
+                self._conn.execute("DELETE FROM metadata WHERE key='compaction_sentinel'")
+                self._conn.commit()
+                logger.warning("compaction sentinel recovery complete")
+
         # Embedder dirty flag (set when SYS SET EMBEDDER changes the embedder)
         self._embedder_dirty = False
 
@@ -242,6 +260,8 @@ class GraphStore:
             compact_threshold=cfg.core.compact_threshold,
             string_gc_threshold=cfg.core.string_gc_threshold,
             cache_gc_threshold=cfg.dsl.cache_gc_threshold,
+            schema=self._schema,
+            conn=self._conn,
         )
 
         # Vault: markdown note system
@@ -443,10 +463,6 @@ class GraphStore:
         finally:
             executor._defer_embeddings = prev_defer
             executor._embed_batch_size = prev_batch_size
-            # Drop any orphaned entries — on the happy path flush already
-            # emptied the queue, but an exception inside the with-block
-            # would leave stale (slot, text) pairs whose slots may now
-            # belong to different nodes after tombstone reuse.
             executor._pending_embeddings.clear()
 
     def submit_background(self, query: str) -> "Future":
@@ -548,9 +564,9 @@ class GraphStore:
         self._wal.update_vector_store(self._vector_store)
         
         self._optimizer._store = self._store
+        self._optimizer._schema = self._schema
         self._optimizer.sync_vector_store(self._vector_store)
 
-        # Update vault refs if configured — otherwise they hold the dead CoreStore
         if self._vault_executor is not None:
             self._vault_executor._store = self._store
             self._vault_executor._vector_store = self._vector_store
@@ -559,7 +575,6 @@ class GraphStore:
             self._vault_sync._schema = self._schema
             self._vault_sync._vector_store = self._vector_store
 
-        # Reset runtime counters and buffers so evolution signals aren't stale
         import collections
         self._counters = {
             "execute_ok": 0,

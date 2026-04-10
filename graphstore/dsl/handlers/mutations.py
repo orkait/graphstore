@@ -357,10 +357,6 @@ class MutationHandlers:
             if fp.name in self.store._indexed_fields:
                 self.store.add_index(fp.name)
 
-        # Auto re-embed nodes whose embed field changed.
-        # Collect all (slot, text) pairs first so we issue one batched
-        # encode_documents call instead of N per-node calls — the per-call
-        # latency dominates on transformer embedders.
         if self._embedder and self._vector_store is not None:
             updated_fields = {fp.name for fp in q.fields}
             reembed_batch: list[tuple[int, str]] = []
@@ -392,10 +388,7 @@ class MutationHandlers:
     def _merge(self, q: MergeStmt) -> Result:
         """MERGE NODE src INTO tgt: copy fields, rewire edges, tombstone source.
 
-        Snapshots columns/edges/tombstones/id_to_slot before mutating so the
-        whole merge rolls back atomically on any failure. Mirrors _batch's
-        rollback discipline — previously a partial failure could leave
-        edges rewired but source not deleted (or vice versa).
+        Snapshotted for atomic rollback on failure.
         """
         if q.source_id not in self.store.string_table:
             raise NodeNotFound(q.source_id)
@@ -411,10 +404,6 @@ class MutationHandlers:
         if tgt_slot is None or tgt_slot in self.store.node_tombstones:
             raise NodeNotFound(q.target_id)
 
-        # Snapshot state that _merge mutates. Keep these small/fast — we only
-        # need to cover what we actually change (columns presence/data at
-        # src/tgt slots, the edge lists, and the node-level bookkeeping that
-        # delete_node touches).
         saved_edges = {k: list(v) for k, v in self.store._edges_by_type.items()}
         saved_edge_keys = set(self.store._edge_keys)
         saved_columns = self.store.columns.snapshot_arrays()
