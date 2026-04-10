@@ -2,8 +2,15 @@
 
 import pytest
 from graphstore.core.store import CoreStore
+from graphstore.core.schema import SchemaRegistry
+from graphstore.core.runtime import RuntimeState
 from graphstore.dsl.parser import parse
 from graphstore.dsl.executor import Executor
+from graphstore.dsl.executor_system import SystemExecutor
+
+
+def _make_runtime(store):
+    return RuntimeState(store=store, schema=SchemaRegistry())
 
 
 @pytest.fixture
@@ -15,7 +22,7 @@ def graph():
     store.put_node("fn3", "function", {"name": "parse", "line": 5, "score": 200})
     store.put_node("cls1", "class", {"name": "App", "line": 20, "score": 75})
     store.put_node("cls2", "class", {"name": "Base", "line": 1, "score": 25})
-    return Executor(store)
+    return Executor(_make_runtime(store))
 
 
 def execute(executor, query):
@@ -129,7 +136,7 @@ class TestBatchRollbackColumns:
     def test_rollback_restores_columns(self):
         store = CoreStore()
         store.put_node("n1", "fn", {"score": 10})
-        executor = Executor(store)
+        executor = Executor(_make_runtime(store))
 
         with pytest.raises(BatchRollback):
             execute(executor, '''BEGIN
@@ -148,8 +155,7 @@ class TestSysRebuildColumns:
         store = CoreStore()
         store.put_node("n1", "fn", {"score": 42})
         store.add_index("score")
-        schema = SchemaRegistry()
-        sys_exec = SystemExecutor(store, schema)
+        sys_exec = SystemExecutor(_make_runtime(store))
 
         # Corrupt secondary indices
         store.secondary_indices["score"] = {}
@@ -172,8 +178,7 @@ class TestColumnMemoryStats:
     def test_stats_includes_column_memory(self):
         store = CoreStore()
         store.put_node("n1", "fn", {"score": 42})
-        schema = SchemaRegistry()
-        sys_exec = SystemExecutor(store, schema)
+        sys_exec = SystemExecutor(_make_runtime(store))
 
         ast = parse("SYS STATS MEMORY")
         r = sys_exec.execute(ast)

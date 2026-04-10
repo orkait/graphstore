@@ -5,6 +5,7 @@ import pytest
 
 from graphstore.core.store import CoreStore
 from graphstore.core.schema import SchemaRegistry
+from graphstore.core.runtime import RuntimeState
 from graphstore.dsl.parser import parse
 from graphstore.dsl.executor_system import SystemExecutor
 from graphstore.persistence.database import open_database
@@ -33,7 +34,8 @@ def setup_with_db(tmp_path, setup):
 
 def execute_sys(store, schema, query, conn=None):
     ast = parse(query)
-    executor = SystemExecutor(store, schema, conn)
+    runtime = RuntimeState(store=store, schema=schema, conn=conn)
+    executor = SystemExecutor(runtime)
     return executor.execute(ast)
 
 
@@ -388,7 +390,7 @@ class TestQueryLog:
 class TestUnknownCommand:
     def test_unknown_raises(self, setup):
         store, schema = setup
-        executor = SystemExecutor(store, schema)
+        executor = SystemExecutor(RuntimeState(store=store, schema=schema))
         with pytest.raises(GraphStoreError, match="Unknown system command"):
             executor.execute("not an AST node")
 
@@ -398,9 +400,10 @@ def test_executor_base_split_integrity():
     from graphstore.dsl.executor import Executor
     from graphstore.core.store import CoreStore
     from graphstore.core.schema import SchemaRegistry
+    from graphstore.core.runtime import RuntimeState
     store = CoreStore()
     schema = SchemaRegistry()
-    ex = Executor(store, schema)
+    ex = Executor(RuntimeState(store=store, schema=schema))
     # VisibilityMixin
     assert hasattr(ex, '_compute_live_mask')
     assert hasattr(ex, '_resolve_slot')

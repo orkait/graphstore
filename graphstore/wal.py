@@ -1,13 +1,13 @@
 """Write-Ahead Log management for graphstore persistence."""
 
 import time
-import sqlite3
 import logging
 
 logger = logging.getLogger(__name__)
 _event_logger = logging.getLogger("graphstore.events")
 
 from graphstore.core.errors import GraphStoreError
+from graphstore.core.runtime import RuntimeState
 from graphstore.dsl.parser import parse
 from graphstore.dsl import ast_nodes
 from graphstore.persistence.serializer import checkpoint as _checkpoint_fn
@@ -16,17 +16,30 @@ from graphstore.persistence.serializer import checkpoint as _checkpoint_fn
 class WALManager:
     """Manages WAL append, replay, auto-checkpoint, and query log rotation."""
 
-    def __init__(self, conn: sqlite3.Connection | None, store, schema,
-                 executor, wal_hard_limit: int, auto_checkpoint_threshold: int,
+    def __init__(self, runtime: RuntimeState, executor,
+                 wal_hard_limit: int, auto_checkpoint_threshold: int,
                  log_retention_days: int):
-        self._conn = conn
-        self._store = store
-        self._schema = schema
+        self._runtime = runtime
         self._executor = executor
         self._wal_hard_limit = wal_hard_limit
         self._auto_checkpoint_threshold = auto_checkpoint_threshold
         self._log_retention_days = log_retention_days
-        self._vector_store = None  # set lazily via update_vector_store()
+
+    @property
+    def _conn(self):
+        return self._runtime.conn
+
+    @property
+    def _store(self):
+        return self._runtime.store
+
+    @property
+    def _schema(self):
+        return self._runtime.schema
+
+    @property
+    def _vector_store(self):
+        return self._runtime.vector_store
 
     @property
     def pending_count(self) -> int:
@@ -35,10 +48,6 @@ class WALManager:
             return 0
         row = self._conn.execute("SELECT COUNT(*) FROM wal").fetchone()
         return row[0] if row else 0
-
-    def update_vector_store(self, vs) -> None:
-        """Keep vector store reference in sync (lazily created in GraphStore)."""
-        self._vector_store = vs
 
     def append(self, statement: str) -> None:
         conn = self._conn

@@ -2,19 +2,19 @@
 
 import logging
 
+from graphstore.core.runtime import RuntimeState
+
 logger = logging.getLogger(__name__)
 
 
 class OptimizerScheduler:
     """Tracks write pressure and triggers optimization at safe points."""
 
-    def __init__(self, store, vector_store, document_store,
+    def __init__(self, runtime: RuntimeState,
                  auto_optimize: bool = False, optimize_interval: int = 500,
                  compact_threshold: float = 0.2, string_gc_threshold: float = 3.0,
                  cache_gc_threshold: int = 200, evolution_engine=None):
-        self._store = store
-        self._vector_store = vector_store
-        self._document_store = document_store
+        self._runtime = runtime
         self._auto_optimize = auto_optimize
         self._optimize_interval = optimize_interval
         self._compact_threshold = compact_threshold
@@ -24,6 +24,26 @@ class OptimizerScheduler:
         self._needs_optimize = False
         self._write_counter = 0
         self._evolution_engine = evolution_engine
+
+    @property
+    def _store(self):
+        return self._runtime.store
+
+    @property
+    def _vector_store(self):
+        return self._runtime.vector_store
+
+    @property
+    def _document_store(self):
+        return self._runtime.document_store
+
+    @property
+    def _schema(self):
+        return self._runtime.schema
+
+    @property
+    def _conn(self):
+        return self._runtime.conn
 
     @property
     def optimizing(self) -> bool:
@@ -42,16 +62,15 @@ class OptimizerScheduler:
         self._optimizing = True
         try:
             from graphstore.core.optimizer import optimize_all
-            optimize_all(self._store, self._vector_store, self._document_store)
+            optimize_all(
+                self._store, self._vector_store, self._document_store,
+                schema=self._schema, conn=self._conn,
+            )
         except Exception as e:
             logger.debug("auto-optimize failed: %s", e)
         finally:
             self._optimizing = False
             self._needs_optimize = False
-
-    def sync_vector_store(self, vector_store) -> None:
-        """Update vector store reference (may change after lazy init or rollback)."""
-        self._vector_store = vector_store
 
     def _check_health(self) -> None:
         """Lightweight health check - sets _needs_optimize if pressure detected."""

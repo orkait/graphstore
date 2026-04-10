@@ -2,6 +2,8 @@
 
 import pytest
 from graphstore.core.store import CoreStore
+from graphstore.core.schema import SchemaRegistry
+from graphstore.core.runtime import RuntimeState
 from graphstore.dsl.parser import parse
 from graphstore.dsl.executor import Executor
 
@@ -32,7 +34,7 @@ def graph():
     store.put_edge("cls_app", "cls_base", "extends")
     store.put_edge("fn_main", "cls_app", "uses")
 
-    return Executor(store)
+    return Executor(RuntimeState(store=store, schema=SchemaRegistry()))
 
 
 def execute(executor, query):

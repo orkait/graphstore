@@ -2,6 +2,8 @@
 
 import pytest
 from graphstore.core.store import CoreStore
+from graphstore.core.schema import SchemaRegistry
+from graphstore.core.runtime import RuntimeState
 from graphstore.dsl.parser import parse
 from graphstore.dsl.executor import Executor
 from graphstore.core.errors import NodeExists, NodeNotFound, BatchRollback
@@ -11,7 +13,7 @@ from graphstore.core.errors import NodeExists, NodeNotFound, BatchRollback
 def executor():
     """Create an executor with a fresh store."""
     store = CoreStore()
-    return Executor(store)
+    return Executor(RuntimeState(store=store, schema=SchemaRegistry()))
 
 
 def execute(executor, query):
