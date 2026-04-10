@@ -122,6 +122,67 @@ class TestBulkOps:
         assert s["image_count"] == 1
 
 
+class TestSearchText:
+    """Regression tests for FTS5 query sanitization.
+
+    Before the sanitizer was added, natural-language questions containing
+    FTS5 operator characters (? ' " * : ^ + - ~) raised
+    sqlite3.OperationalError: fts5: syntax error near '...'.
+    """
+
+    def _seed(self, doc_store):
+        doc_store.put_summary(1, "I live in Tokyo and work as a data scientist", doc_slot=0)
+        doc_store.put_summary(2, "My favorite food is tonkotsu ramen", doc_slot=0)
+        doc_store.put_summary(3, "I adopted a cat named Miso", doc_slot=0)
+        doc_store.put_summary(4, "Planning a trip to Hokkaido in December", doc_slot=0)
+
+    def test_question_with_question_mark(self, doc_store):
+        self._seed(doc_store)
+        hits = doc_store.search_text("Where does the user live?", limit=5)
+        slots = {s for s, _ in hits}
+        assert 1 in slots, f"expected slot 1 for 'Where does the user live?', got {slots}"
+
+    def test_question_with_apostrophe(self, doc_store):
+        self._seed(doc_store)
+        hits = doc_store.search_text("What is the user's favorite food?", limit=5)
+        slots = {s for s, _ in hits}
+        assert 2 in slots, f"expected slot 2 for 'favorite food', got {slots}"
+
+    def test_query_with_double_quotes(self, doc_store):
+        self._seed(doc_store)
+        # Double quotes inside a natural-language query must not crash
+        hits = doc_store.search_text('Did the user say "Tokyo"?', limit=5)
+        slots = {s for s, _ in hits}
+        assert 1 in slots
+
+    def test_query_with_fts5_operators(self, doc_store):
+        self._seed(doc_store)
+        # `*`, `:`, `^`, `+`, `-`, `~`, `()` are all FTS5 syntax
+        hits = doc_store.search_text("cat* (Miso) ^ +adopted -dog ~test", limit=5)
+        slots = {s for s, _ in hits}
+        assert 3 in slots
+
+    def test_empty_query_returns_empty(self, doc_store):
+        self._seed(doc_store)
+        assert doc_store.search_text("", limit=5) == []
+        assert doc_store.search_text("   ", limit=5) == []
+
+    def test_operator_only_query_returns_empty(self, doc_store):
+        self._seed(doc_store)
+        # A query with no word characters sanitizes to an empty MATCH
+        # expression. Return empty rather than raising.
+        assert doc_store.search_text("?*^()", limit=5) == []
+
+    def test_multi_word_question_ranks_best_match_first(self, doc_store):
+        self._seed(doc_store)
+        hits = doc_store.search_text("Where is the user planning to travel?", limit=5)
+        assert hits, "expected at least one hit"
+        # All tokens are implicit AND, so the Hokkaido summary is the only
+        # one that contains all content words ("planning", "travel").
+        top_slot = hits[0][0]
+        assert top_slot == 4
+
+
 class TestTempFile:
     def test_temp_mode_works(self, temp_doc_store):
         temp_doc_store.put_document(0, b"temp data", "text/plain")

@@ -14,6 +14,22 @@ This framework fixes the variables:
 - **Reproducible.** Every run writes a config snapshot, a raw JSON result, a CSV, and a Markdown leaderboard.
 - **Run five times, report median.** The framework supports single runs today; a `run_all.py` multi-run driver is on the roadmap.
 
+## Every system runs in its "best" mode
+
+Agent memory systems are not just key-value stores. Each one ships with a recommended ingestion pipeline, query primitive, and tuning knobs that make a real difference to quality and speed. Benchmarking a system in its dumbest mode is as misleading as benchmarking it in someone else's.
+
+This framework's ground rule is: **every adapter uses the ingestion pattern the system's docs recommend for agent memory.** No minimal pass-through, no lowest-common-denominator schemas.
+
+For graphstore specifically, the adapter uses:
+
+- **Schema pre-registration** — `SYS REGISTER NODE KIND "memory" REQUIRED session:string, role:string, content:string OPTIONAL importance:float, position:int EMBED content`. This pre-allocates typed columns (int32_interned / int64 / float64), validates writes, and tells graphstore which field to auto-embed. Without this, CREATE would infer column types lazily on first write — a real throughput hit at scale.
+- **Deferred embeddings** — ingestion is wrapped in `gs.deferred_embeddings(batch_size=128)` so the embedder is called in batches instead of per-node. This is a 4-10x speedup on transformer embedders.
+- **Hybrid retrieval via REMEMBER** — graphstore's 5-signal fusion (vector + BM25 + recency + confidence + recall frequency) is the query primitive, not bare `SIMILAR TO`.
+- **Vectorized importance scoring** — per-message importance is computed in a single numpy pass over content lengths, feeding REMEMBER's confidence weight.
+- **CSR lazy rebuild** — edges are accumulated raw during ingestion; the CSR sparse matrix is only built on the first read, avoiding a rebuild per-edge.
+
+When you write a new adapter, apply the same principle: use the features the system's maintainers tell you to use.
+
 ## Supported systems
 
 | System | Status | Notes |
