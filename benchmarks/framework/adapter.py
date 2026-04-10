@@ -29,6 +29,13 @@ class Session:
 
 
 @dataclass
+class QueryContext:
+    question: str
+    category: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class QueryResult:
     retrieved_memories: list[str]
     answer: str | None = None

@@ -96,12 +96,28 @@ class MemoryMetrics:
 
 
 @dataclass
+class _CategoryBucket:
+    n: int = 0
+    hits: int = 0
+    recall_sum: float = 0.0
+
+    @property
+    def accuracy(self) -> float:
+        return self.hits / self.n if self.n else 0.0
+
+    @property
+    def recall_at_k(self) -> float:
+        return self.recall_sum / self.n if self.n else 0.0
+
+
+@dataclass
 class QualityMetrics:
-    """Retrieval scoring.
+    """Retrieval scoring with optional per-category breakdown.
 
     accuracy       fraction of questions where ANY gold answer appeared in top-K
     recall_at_k    mean fraction of gold answers found in top-K
-    llm_judge      mean LLM-as-judge score (0..1) when provided
+    by_category    per-LongMemEval-category accuracy + R@K (populated when
+                   the runner passes a `category` per question)
     """
 
     n_questions: int = 0
@@ -109,6 +125,7 @@ class QualityMetrics:
     recall_at_k_sum: float = 0.0
     llm_judge_sum: float = 0.0
     llm_judge_n: int = 0
+    _categories: dict[str, _CategoryBucket] = field(default_factory=dict)
 
     def add(
         self,
@@ -116,17 +133,62 @@ class QualityMetrics:
         gold_answers: list[str],
         retrieved: list[str],
         k: int = 5,
+        category: str | None = None,
         llm_judge_score: float | None = None,
+        answer_session_ids: list[str] | None = None,
+        retrieved_raw: list[dict] | None = None,
     ) -> None:
+        """Score a single question.
+
+        Hit if EITHER:
+            substring match of any gold answer in any retrieved text, OR
+            any retrieved node belongs to an answer_session_id
+
+        The session-based path exists because LongMemEval's preference and
+        some other categories have long synthesized gold answers that never
+        appear verbatim in the haystack. Checking "did we retrieve from the
+        right session" is the honest test — matches the real LongMemEval
+        protocol where the LLM-as-judge grades the downstream answer based
+        on whether relevant context was recalled.
+        """
         self.n_questions += 1
         gold_lower = [g.strip().lower() for g in gold_answers if g]
         if not gold_lower:
             return
-        retrieved_trunc = [r.strip().lower() for r in retrieved[:k]]
-        hits = sum(1 for g in gold_lower if any(g in r for r in retrieved_trunc))
-        if hits > 0:
-            self.n_hits += 1
-        self.recall_at_k_sum += hits / len(gold_lower)
+        retrieved_trunc_texts = [r.strip().lower() for r in retrieved[:k]]
+        substring_hits = sum(
+            1 for g in gold_lower
+            if any(g in r for r in retrieved_trunc_texts)
+        )
+
+        session_hit = False
+        if answer_session_ids and retrieved_raw:
+            ans_set = set(answer_session_ids)
+            for node in retrieved_raw[:k]:
+                sess = (node.get("session") or "").strip()
+                if not sess:
+                    continue
+                for ans_id in ans_set:
+                    if ans_id in sess:
+                        session_hit = True
+                        break
+                if session_hit:
+                    break
+
+        hit = 1 if (substring_hits > 0 or session_hit) else 0
+        recall = substring_hits / len(gold_lower)
+        if session_hit and recall < 1.0:
+            recall = max(recall, 1.0 / len(gold_lower))
+
+        self.n_hits += hit
+        self.recall_at_k_sum += recall
+
+        if category is not None:
+            bucket = self._categories.setdefault(category, _CategoryBucket())
+            bucket.n += 1
+            bucket.hits += hit
+            bucket.recall_sum += recall
+
         if llm_judge_score is not None:
             self.llm_judge_sum += llm_judge_score
             self.llm_judge_n += 1
@@ -144,11 +206,20 @@ class QualityMetrics:
         return self.llm_judge_sum / self.llm_judge_n if self.llm_judge_n else 0.0
 
     def to_dict(self) -> dict:
+        by_cat = {
+            cat: {
+                "n": b.n,
+                "accuracy": round(b.accuracy, 4),
+                "recall_at_k": round(b.recall_at_k, 4),
+            }
+            for cat, b in sorted(self._categories.items())
+        }
         return {
             "n_questions": self.n_questions,
             "accuracy": round(self.accuracy, 4),
             "recall_at_k": round(self.recall_at_k, 4),
             "llm_judge": round(self.llm_judge, 4) if self.llm_judge_n else None,
+            "by_category": by_cat or None,
         }
 
 
