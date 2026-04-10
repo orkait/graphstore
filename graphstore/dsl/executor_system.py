@@ -713,7 +713,12 @@ class SystemExecutor:
         )
 
     def _reembed(self, q: SysReembed) -> Result:
-        """SYS REEMBED: re-embed all summaries with current embedder, replace vectors."""
+        """SYS REEMBED: re-embed all summaries with current embedder, replace vectors.
+
+        Collects (slot, text) pairs in one pass and calls encode_documents()
+        once. Per-slot encoding was untenable for transformer embedders
+        (minutes per 10k nodes) — batching cuts that to a single model call.
+        """
         if not self._embedder:
             raise GraphStoreError("No embedder configured")
 
@@ -725,24 +730,28 @@ class SystemExecutor:
         n = store._next_slot
         live = store.compute_live_mask(n)
 
-        reembedded = 0
-        for slot in range(n):
-            if not live[slot]:
-                continue
-            # Try to get summary text from columns
-            text = None
-            if store.columns.has_column("summary") and store.columns._presence["summary"][slot]:
-                raw = store.columns._columns["summary"][slot]
-                dtype = store.columns._dtypes["summary"]
-                if dtype == "int32_interned":
-                    text = store.string_table.lookup(int(raw))
-            if text:
-                vec = self._embedder.encode_documents([text])[0]
+        pairs: list[tuple[int, str]] = []
+        if store.columns.has_column("summary"):
+            col_info = store.columns.get_column("summary", n)
+            if col_info is not None:
+                col_data, col_pres, col_dtype = col_info
+                if col_dtype == "int32_interned":
+                    lookup = store.string_table.lookup
+                    for slot in range(n):
+                        if not live[slot] or not col_pres[slot]:
+                            continue
+                        text = lookup(int(col_data[slot]))
+                        if text:
+                            pairs.append((slot, text))
+
+        if pairs:
+            texts = [t for _, t in pairs]
+            vecs = self._embedder.encode_documents(texts)
+            for (slot, _), vec in zip(pairs, vecs):
                 vs.add(slot, vec)
-                reembedded += 1
 
         # Clear dirty flag on the GraphStore (set by caller after return)
-        return Result(kind="ok", data={"reembedded": reembedded}, count=reembedded)
+        return Result(kind="ok", data={"reembedded": len(pairs)}, count=len(pairs))
 
     def _status(self, q: SysStatus) -> Result:
         """SYS STATUS: comprehensive system state."""

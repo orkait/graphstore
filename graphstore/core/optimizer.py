@@ -392,14 +392,29 @@ def clear_caches(store: CoreStore) -> dict:
 
 
 def optimize_all(store: CoreStore, vector_store=None, document_store=None) -> dict:
-    """Run all 6 optimization operations in safe order."""
-    results = {}
-    results["compact"] = compact_tombstones(store, vector_store, document_store)
-    results["strings"] = gc_strings(store)
-    results["edges"] = defrag_edges(store)
-    results["vectors"] = cleanup_vectors(store, vector_store)
-    results["blobs"] = sweep_orphans(store, document_store)
-    results["cache"] = clear_caches(store)
+    """Run all 6 optimization operations in safe order.
+
+    Short-circuits on the first failure: once compact_tombstones or
+    gc_strings breaks mid-run, the store may be in a half-remapped state
+    and running subsequent passes on it just compounds the damage.
+    Returns the results collected so far plus {"error": "..."} so the
+    caller knows which step died.
+    """
+    results: dict = {}
+    steps: list[tuple[str, callable]] = [
+        ("compact", lambda: compact_tombstones(store, vector_store, document_store)),
+        ("strings", lambda: gc_strings(store)),
+        ("edges",   lambda: defrag_edges(store)),
+        ("vectors", lambda: cleanup_vectors(store, vector_store)),
+        ("blobs",   lambda: sweep_orphans(store, document_store)),
+        ("cache",   lambda: clear_caches(store)),
+    ]
+    for name, op in steps:
+        try:
+            results[name] = op()
+        except Exception as e:
+            results["error"] = f"{name}: {type(e).__name__}: {e}"
+            break
     return results
 
 

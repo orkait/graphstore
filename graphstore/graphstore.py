@@ -443,6 +443,11 @@ class GraphStore:
         finally:
             executor._defer_embeddings = prev_defer
             executor._embed_batch_size = prev_batch_size
+            # Drop any orphaned entries — on the happy path flush already
+            # emptied the queue, but an exception inside the with-block
+            # would leave stale (slot, text) pairs whose slots may now
+            # belong to different nodes after tombstone reuse.
+            executor._pending_embeddings.clear()
 
     def submit_background(self, query: str) -> "Future":
         """Submit a background query (low priority). Only available in threaded mode.
@@ -544,7 +549,31 @@ class GraphStore:
         
         self._optimizer._store = self._store
         self._optimizer.sync_vector_store(self._vector_store)
-        
+
+        # Update vault refs if configured — otherwise they hold the dead CoreStore
+        if self._vault_executor is not None:
+            self._vault_executor._store = self._store
+            self._vault_executor._vector_store = self._vector_store
+        if self._vault_sync is not None:
+            self._vault_sync._store = self._store
+            self._vault_sync._schema = self._schema
+            self._vault_sync._vector_store = self._vector_store
+
+        # Reset runtime counters and buffers so evolution signals aren't stale
+        import collections
+        self._counters = {
+            "execute_ok": 0,
+            "execute_err": 0,
+            "recall_hits": 0,
+            "recall_misses": 0,
+            "eviction_total": 0,
+        }
+        self._similarity_buffer = collections.deque(
+            maxlen=self._config.evolution.similarity_buffer_size
+        )
+        self._last_evolution_events.clear()
+        self._start_time = time.time()
+
         self.discard_trace()
         self._embedder_dirty = False
         return Result(kind="ok", data={"reset": "memory"}, count=0)
@@ -572,8 +601,12 @@ class GraphStore:
                 doc_conn.execute("DELETE FROM images")
                 doc_conn.execute("DELETE FROM doc_metadata")
                 doc_conn.commit()
-                
+
         self.reset_memory()
+        # reset_memory creates a fresh CoreStore whose dirty flags start True;
+        # since we just wiped SQLite there is nothing to flush, so clear them
+        # now to avoid a no-op checkpoint write on the next close().
+        self._store.reset_dirty_flags()
         return Result(kind="ok", data={"reset": "store"}, count=0)
         
     def reset_session(self) -> Result:
