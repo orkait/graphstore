@@ -17,3 +17,9 @@ zen-graph-db/
 # Benchmark datasets and model weights, kept locally, never committed.
 # See benchmarking.md for download instructions.
 models/
+
+# Transient benchmark artifacts from prior exploration (pre-framework).
+benchmarks/*.log
+benchmarks/results_*.jsonl
+benchmarks/results_*.summary.json
+benchmarks/mempalace-results/
