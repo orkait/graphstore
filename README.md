@@ -407,19 +407,25 @@ REST API: `GET /api/logs?tag=intelligence&limit=20`
 </details>
 
 <details>
-<summary><strong>Thread Safety</strong> - multi-agent access via command queue</summary>
+<summary><strong>Thread Safety</strong> - single-writer engine, thread-safe submission queue</summary>
+
+**GraphStore is single-writer by design.** The storage engine (numpy slot allocation, CSR edge matrices, tombstone set, dirty-flag tracking) assumes one writer at a time. There is no MVCC, no row-level locking, and no concurrent execution. `SYS OPTIMIZE` additionally takes an exclusive lock that blocks other `execute()` calls for the duration of the compaction.
+
+`threaded=True` gives you a **thread-safe submission queue**, not concurrent execution. Multiple caller threads can share one GraphStore instance; every `execute()` call is serialized through a single daemon worker that drains a priority queue (interactive > background).
 
 ```python
 gs = GraphStore(path="./brain", threaded=True)
 
-# Multiple agents can call execute() from different threads
-# All serialized through a priority queue (interactive > background)
+# Multiple caller threads can share this instance.
+# All commands are serialized through one worker thread.
 result = gs.execute('RECALL FROM "cue" DEPTH 3')  # blocks, returns Result
 
-# Background maintenance doesn't block interactive queries
+# Background maintenance queues behind interactive queries.
 future = gs.submit_background('SYS OPTIMIZE')
 future = gs.submit_background('SYS CONNECT')
 ```
+
+With `threaded=False` (the default), the caller is responsible for never calling `execute()` from multiple threads. There is no implicit lock. If you need multi-thread submission, opt in via `threaded=True`.
 
 </details>
 
