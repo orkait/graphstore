@@ -13,3 +13,7 @@ zen-graph-db/
 # tests/fixtures/ is now tracked (text/images directly, PDF/voice via Git LFS)
 .agents/*
 .claude/*
+
+# Benchmark datasets and model weights, kept locally, never committed.
+# See benchmarking.md for download instructions.
+models/
