@@ -5,13 +5,10 @@ for stats, schema management, query logs, WAL, and diagnostics.
 """
 
 import time
-import sqlite3
 import logging
 
-from graphstore.core.store import CoreStore
-
 logger = logging.getLogger(__name__)
-from graphstore.core.schema import SchemaRegistry
+from graphstore.core.runtime import RuntimeState
 from graphstore.core.types import Result
 import numpy as np
 
@@ -73,27 +70,41 @@ from graphstore.core.errors import GraphStoreError, NodeNotFound
 class SystemExecutor:
     def __init__(
         self,
-        store: CoreStore,
-        schema: SchemaRegistry,
-        conn: sqlite3.Connection | None = None,
-        embedder=None,
-        vector_store=None,
-        document_store=None,
+        runtime: RuntimeState,
         retention: dict | None = None,
         cron=None,
-    evolution_engine=None,
+        evolution_engine=None,
     ):
-        self.store = store
-        self.schema = schema
-        self.conn = conn
-        self._embedder = embedder
-        self._vector_store = vector_store
-        self._document_store = document_store
+        self._runtime = runtime
         self._retention = retention or {}
         self._cron = cron
         self._evolution_engine = evolution_engine
         self._eviction_target_ratio = 0.8
         self._start_time = time.time()
+
+    @property
+    def store(self):
+        return self._runtime.store
+
+    @property
+    def schema(self):
+        return self._runtime.schema
+
+    @property
+    def conn(self):
+        return self._runtime.conn
+
+    @property
+    def _vector_store(self):
+        return self._runtime.vector_store
+
+    @property
+    def _document_store(self):
+        return self._runtime.document_store
+
+    @property
+    def _embedder(self):
+        return self._runtime.embedder
 
     def execute(self, ast) -> Result:
         start = time.perf_counter_ns()
@@ -600,15 +611,16 @@ class SystemExecutor:
         store._count = snap["count"]
         store._active_context = snap.get("active_context")
 
-        # Restore vector state
+        # Restore vector state — mutate the runtime container so every
+        # component sees the new VectorStore through their shared ref.
         if snap.get("vector_index") is not None:
             from graphstore.vector.store import VectorStore
             vs = VectorStore(dims=snap["vector_dims"], capacity=store._capacity)
             vs.load(snap["vector_index"])
             vs._has_vector[:len(snap["vector_presence"])] = snap["vector_presence"]
-            self._vector_store = vs
+            self._runtime.vector_store = vs
         else:
-            self._vector_store = None
+            self._runtime.vector_store = None
 
         # Rebuild derived state
         store._rebuild_edges()
@@ -713,7 +725,7 @@ class SystemExecutor:
         )
 
     def _reembed(self, q: SysReembed) -> Result:
-        """SYS REEMBED: re-embed all summaries with current embedder, replace vectors."""
+        """SYS REEMBED: re-embed all summaries with current embedder."""
         if not self._embedder:
             raise GraphStoreError("No embedder configured")
 
@@ -725,24 +737,28 @@ class SystemExecutor:
         n = store._next_slot
         live = store.compute_live_mask(n)
 
-        reembedded = 0
-        for slot in range(n):
-            if not live[slot]:
-                continue
-            # Try to get summary text from columns
-            text = None
-            if store.columns.has_column("summary") and store.columns._presence["summary"][slot]:
-                raw = store.columns._columns["summary"][slot]
-                dtype = store.columns._dtypes["summary"]
-                if dtype == "int32_interned":
-                    text = store.string_table.lookup(int(raw))
-            if text:
-                vec = self._embedder.encode_documents([text])[0]
+        pairs: list[tuple[int, str]] = []
+        if store.columns.has_column("summary"):
+            col_info = store.columns.get_column("summary", n)
+            if col_info is not None:
+                col_data, col_pres, col_dtype = col_info
+                if col_dtype == "int32_interned":
+                    lookup = store.string_table.lookup
+                    for slot in range(n):
+                        if not live[slot] or not col_pres[slot]:
+                            continue
+                        text = lookup(int(col_data[slot]))
+                        if text:
+                            pairs.append((slot, text))
+
+        if pairs:
+            texts = [t for _, t in pairs]
+            vecs = self._embedder.encode_documents(texts)
+            for (slot, _), vec in zip(pairs, vecs):
                 vs.add(slot, vec)
-                reembedded += 1
 
         # Clear dirty flag on the GraphStore (set by caller after return)
-        return Result(kind="ok", data={"reembedded": reembedded}, count=reembedded)
+        return Result(kind="ok", data={"reembedded": len(pairs)}, count=len(pairs))
 
     def _status(self, q: SysStatus) -> Result:
         """SYS STATUS: comprehensive system state."""
@@ -881,14 +897,20 @@ class SystemExecutor:
     def _optimize(self, q: SysOptimize) -> Result:
         """SYS OPTIMIZE: run optimization operations under exclusive lock."""
         from graphstore.core.optimizer import (
-            optimize_all, compact_tombstones, gc_strings,
-            defrag_edges, cleanup_vectors, sweep_orphans, clear_caches,
+            optimize_all, compact_tombstones, compact_tombstones_safe,
+            gc_strings, defrag_edges, cleanup_vectors, sweep_orphans, clear_caches,
         )
         target = q.target
         if target is None:
-            data = optimize_all(self.store, self._vector_store, self._document_store)
+            data = optimize_all(
+                self.store, self._vector_store, self._document_store,
+                schema=self.schema, conn=self.conn,
+            )
         elif target == "COMPACT":
-            data = compact_tombstones(self.store, self._vector_store, self._document_store)
+            data = compact_tombstones_safe(
+                self.store, self.schema, self.conn,
+                self._vector_store, self._document_store,
+            )
         elif target == "STRINGS":
             data = gc_strings(self.store)
         elif target == "EDGES":

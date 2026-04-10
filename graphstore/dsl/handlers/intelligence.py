@@ -269,6 +269,8 @@ class IntelligenceHandlers:
             self.store.node_ids[:saved_next_slot] = saved_node_ids
             self.store.node_kinds[:saved_next_slot] = saved_node_kinds
             self.store._rebuild_edges()
+            self.store._invalidate_live_cache()
+            self.store._tombstone_mask_cache = None
 
     @handles(RememberQuery)
     def _remember(self, q: RememberQuery) -> Result:

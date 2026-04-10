@@ -111,7 +111,7 @@ def test_wal_recovery(tmp_path):
     # Simulate a crash: close the sqlite connection directly and
     # prevent close() from doing a full checkpoint.
     g._conn.close()
-    g._conn = None
+    g._runtime.conn = None
 
     # Reopen — the constructor should replay the WAL
     with GraphStore(path=db_path) as g2:

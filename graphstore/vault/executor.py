@@ -16,12 +16,22 @@ from graphstore.dsl.ast_nodes import (
 
 
 class VaultExecutor:
-    def __init__(self, vault_manager, vault_sync, store, embedder=None, vector_store=None):
+    def __init__(self, vault_manager, vault_sync, runtime):
         self._manager = vault_manager
         self._sync = vault_sync
-        self._store = store
-        self._embedder = embedder
-        self._vector_store = vector_store
+        self._runtime = runtime
+
+    @property
+    def _store(self):
+        return self._runtime.store
+
+    @property
+    def _embedder(self):
+        return self._runtime.embedder
+
+    @property
+    def _vector_store(self):
+        return self._runtime.vector_store
 
     def dispatch(self, ast) -> Result:
         handlers = {
@@ -127,7 +137,7 @@ class VaultExecutor:
 
         if q.where:
             from graphstore.dsl.executor_base import ExecutorBase
-            base = ExecutorBase(self._store)
+            base = ExecutorBase(self._runtime)
             nodes = [n for n in nodes if base._eval_where(q.where.expr, n)]
 
         if q.order:

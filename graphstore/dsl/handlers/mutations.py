@@ -357,9 +357,9 @@ class MutationHandlers:
             if fp.name in self.store._indexed_fields:
                 self.store.add_index(fp.name)
 
-        # Auto re-embed nodes whose embed field changed
         if self._embedder and self._vector_store is not None:
             updated_fields = {fp.name for fp in q.fields}
+            reembed_batch: list[tuple[int, str]] = []
             for slot_idx in matching_slots:
                 slot = int(slot_idx)
                 node = self.store._materialize_slot(slot)
@@ -372,8 +372,9 @@ class MutationHandlers:
                     if embed_field in updated_fields:
                         text = node.get(embed_field)
                         if text and isinstance(text, str):
-                            vec = self._embedder.encode_documents([text])[0]
-                            self._vector_store.add(slot, vec)
+                            reembed_batch.append((slot, text))
+            if reembed_batch:
+                self._batch_embed_and_store(reembed_batch)
 
         updated = len(matching_slots)
         return Result(kind="ok", data={"updated": updated}, count=updated)
@@ -385,7 +386,10 @@ class MutationHandlers:
 
     @handles(MergeStmt, write=True)
     def _merge(self, q: MergeStmt) -> Result:
-        """MERGE NODE src INTO tgt: copy fields, rewire edges, tombstone source."""
+        """MERGE NODE src INTO tgt: copy fields, rewire edges, tombstone source.
+
+        Snapshotted for atomic rollback on failure.
+        """
         if q.source_id not in self.store.string_table:
             raise NodeNotFound(q.source_id)
         src_str = self.store.string_table.intern(q.source_id)
@@ -400,68 +404,92 @@ class MutationHandlers:
         if tgt_slot is None or tgt_slot in self.store.node_tombstones:
             raise NodeNotFound(q.target_id)
 
-        fields_merged = 0
-        for field in list(self.store.columns._columns.keys()):
-            if field.startswith("__") and field.endswith("__"):
-                continue
-            if not self.store.columns._presence[field][src_slot]:
-                continue
-            if self.store.columns._presence[field][tgt_slot]:
-                continue
-            dtype = self.store.columns._dtypes[field]
-            raw = self.store.columns._columns[field][src_slot]
-            self.store.columns._columns[field][tgt_slot] = raw
-            self.store.columns._presence[field][tgt_slot] = True
-            fields_merged += 1
+        saved_edges = {k: list(v) for k, v in self.store._edges_by_type.items()}
+        saved_edge_keys = set(self.store._edge_keys)
+        saved_columns = self.store.columns.snapshot_arrays()
+        saved_tombstones = set(self.store.node_tombstones)
+        saved_id_to_slot = dict(self.store.id_to_slot)
+        saved_count = self.store._count
+        saved_next_slot = self.store._next_slot
+        saved_node_ids = self.store.node_ids[: self.store._next_slot].copy()
+        saved_node_kinds = self.store.node_kinds[: self.store._next_slot].copy()
 
-        edges_rewired = 0
-        for etype in list(self.store._edges_by_type.keys()):
-            new_edges = []
-            for s, t, d in self.store._edges_by_type[etype]:
-                if s == src_slot:
-                    new_edges.append((tgt_slot, t, d))
-                    edges_rewired += 1
-                elif t == src_slot:
-                    new_edges.append((s, tgt_slot, d))
-                    edges_rewired += 1
-                else:
-                    new_edges.append((s, t, d))
-            self.store._edges_by_type[etype] = new_edges
+        try:
+            fields_merged = 0
+            for field in list(self.store.columns._columns.keys()):
+                if field.startswith("__") and field.endswith("__"):
+                    continue
+                if not self.store.columns._presence[field][src_slot]:
+                    continue
+                if self.store.columns._presence[field][tgt_slot]:
+                    continue
+                dtype = self.store.columns._dtypes[field]
+                raw = self.store.columns._columns[field][src_slot]
+                self.store.columns._columns[field][tgt_slot] = raw
+                self.store.columns._presence[field][tgt_slot] = True
+                fields_merged += 1
 
-        for etype in list(self.store._edges_by_type.keys()):
-            seen = set()
-            deduped = []
-            for s, t, d in self.store._edges_by_type[etype]:
-                key = (s, t)
-                if key not in seen:
-                    seen.add(key)
-                    deduped.append((s, t, d))
-            self.store._edges_by_type[etype] = deduped
-            if not deduped:
-                del self.store._edges_by_type[etype]
+            edges_rewired = 0
+            for etype in list(self.store._edges_by_type.keys()):
+                new_edges = []
+                for s, t, d in self.store._edges_by_type[etype]:
+                    if s == src_slot:
+                        new_edges.append((tgt_slot, t, d))
+                        edges_rewired += 1
+                    elif t == src_slot:
+                        new_edges.append((s, tgt_slot, d))
+                        edges_rewired += 1
+                    else:
+                        new_edges.append((s, t, d))
+                self.store._edges_by_type[etype] = new_edges
 
-        self.store._edge_keys = {
-            (s, t, k)
-            for k, edges in self.store._edges_by_type.items()
-            for s, t, _d in edges
-        }
-        self.store._edges_dirty = True
-        self.store._ensure_edges_built()
+            for etype in list(self.store._edges_by_type.keys()):
+                seen = set()
+                deduped = []
+                for s, t, d in self.store._edges_by_type[etype]:
+                    key = (s, t)
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append((s, t, d))
+                self.store._edges_by_type[etype] = deduped
+                if not deduped:
+                    del self.store._edges_by_type[etype]
 
-        self.store.delete_node(q.source_id)
+            self.store._edge_keys = {
+                (s, t, k)
+                for k, edges in self.store._edges_by_type.items()
+                for s, t, _d in edges
+            }
+            self.store._edges_dirty = True
+            self.store._ensure_edges_built()
 
-        now_ms = int(time.time() * 1000)
-        self.store.columns.set_reserved(tgt_slot, "__updated_at__", now_ms)
+            self.store.delete_node(q.source_id)
 
-        return Result(
-            kind="ok",
-            data={
-                "merged_into": q.target_id,
-                "fields_merged": fields_merged,
-                "edges_rewired": edges_rewired,
-            },
-            count=1,
-        )
+            now_ms = int(time.time() * 1000)
+            self.store.columns.set_reserved(tgt_slot, "__updated_at__", now_ms)
+
+            return Result(
+                kind="ok",
+                data={
+                    "merged_into": q.target_id,
+                    "fields_merged": fields_merged,
+                    "edges_rewired": edges_rewired,
+                },
+                count=1,
+            )
+        except Exception:
+            # Roll back every surface we touched — mirrors _batch.
+            self.store._edges_by_type = saved_edges
+            self.store._edge_keys = saved_edge_keys
+            self.store.node_tombstones = saved_tombstones
+            self.store.id_to_slot = saved_id_to_slot
+            self.store._count = saved_count
+            self.store._next_slot = saved_next_slot
+            self.store.node_ids[:saved_next_slot] = saved_node_ids
+            self.store.node_kinds[:saved_next_slot] = saved_node_kinds
+            self.store.columns.restore_arrays(saved_columns)
+            self.store._rebuild_edges()
+            raise
 
     @handles(ForgetNode, write=True)
     def _forget(self, q: ForgetNode) -> Result:
