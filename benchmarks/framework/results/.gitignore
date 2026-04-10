@@ -1,0 +1,7 @@
+# Transient benchmark outputs - kept locally, not committed.
+# Runs are timestamped per invocation and shouldn't pollute the repo.
+*.json
+*.csv
+*.md
+!.gitignore
+!.gitkeep
