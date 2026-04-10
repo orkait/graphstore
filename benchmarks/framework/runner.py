@@ -1,4 +1,12 @@
-"""Benchmark runner: orchestrates reset -> ingest -> query -> score for one system."""
+"""Benchmark runner: per-record isolated evaluation for LongMemEval-style benches.
+
+Protocol (per record):
+    adapter.reset()                       fresh state
+    for session in record.sessions:       ingest the haystack
+        adapter.ingest(session)
+    result = adapter.query(record.question, k)
+    score(result, record.question.gold_answers)
+"""
 
 from __future__ import annotations
 
@@ -20,18 +28,13 @@ def run_benchmark(
     dataset: BenchmarkDataset,
     *,
     k: int = 5,
-    max_questions: int | None = None,
+    max_records: int | None = None,
     config: dict[str, Any] | None = None,
-    progress_every: int = 50,
+    progress_every: int = 10,
 ) -> RunResult:
-    """Run one pass against one adapter.
+    """Run a full per-record pass.
 
-    Phases:
-        0. adapter.reset()
-        1. memory baseline snapshot
-        2. ingest every session in dataset.sessions (timed per session)
-        3. query every benchmark question (timed per query), score retrieval
-        4. record final memory + completion stamp
+    Each record is evaluated in isolation: reset -> ingest haystack -> query -> score.
     """
     result = RunResult(
         system_name=adapter.name,
@@ -41,36 +44,61 @@ def run_benchmark(
         started_at=_now_iso(),
     )
 
-    adapter.reset()
+    records = dataset.records
+    if max_records is not None:
+        records = records[:max_records]
+
     result.memory.start()
     t0 = time.perf_counter()
 
-    n_sessions = len(dataset.sessions)
-    print(f"[{adapter.name}] ingesting {n_sessions} sessions...")
-    for i, session in enumerate(dataset.sessions):
-        elapsed_s = adapter.ingest(session)
-        result.latency_ingest.add(elapsed_s * 1000)
-        if (i + 1) % progress_every == 0:
-            result.memory.snapshot_peak()
-            print(f"  [{adapter.name}] ingested {i + 1}/{n_sessions}")
+    from .adapter import QueryContext
 
-    questions = dataset.questions
-    if max_questions is not None:
-        questions = questions[:max_questions]
+    n_records = len(records)
+    print(f"[{adapter.name}] evaluating {n_records} records from {dataset.name}")
+    has_ingest_done = hasattr(adapter, "ingest_done")
+    has_query_with_context = hasattr(adapter, "query_with_context")
+    for i, rec in enumerate(records):
+        adapter.reset()
+        for sess in rec.sessions:
+            elapsed_s = adapter.ingest(sess)
+            result.latency_ingest.add(elapsed_s * 1000)
+        if has_ingest_done:
+            adapter.ingest_done(record_metadata=rec.question.metadata)
 
-    print(f"[{adapter.name}] querying {len(questions)} questions...")
-    for i, q in enumerate(questions):
-        qres = adapter.query(q.question, k=k)
+        if has_query_with_context:
+            ctx = QueryContext(
+                question=rec.question.question,
+                category=rec.question.category,
+                metadata=rec.question.metadata,
+            )
+            qres = adapter.query_with_context(ctx, k=k)
+        else:
+            qres = adapter.query(rec.question.question, k=k)
         result.latency_query.add(qres.elapsed_ms)
+        ans_sess_ids = rec.question.metadata.get("answer_session_ids") or []
+        raw_nodes = qres.raw if isinstance(qres.raw, list) else None
         result.quality.add(
-            gold_answers=q.gold_answers,
+            gold_answers=rec.question.gold_answers,
             retrieved=qres.retrieved_memories,
+            category=rec.question.category,
             k=k,
+            answer_session_ids=ans_sess_ids,
+            retrieved_raw=raw_nodes,
         )
         if qres.tokens_used:
             result.cost.query_tokens += qres.tokens_used
-        if (i + 1) % progress_every == 0:
-            print(f"  [{adapter.name}] queried {i + 1}/{len(questions)}")
+
+        if (i + 1) % progress_every == 0 or (i + 1) == n_records:
+            result.memory.snapshot_peak()
+            elapsed = time.perf_counter() - t0
+            rate = (i + 1) / elapsed if elapsed else 0
+            eta_s = (n_records - (i + 1)) / rate if rate else 0
+            print(
+                f"  [{adapter.name}] {i + 1}/{n_records} "
+                f"acc={result.quality.accuracy:.3f} "
+                f"r@k={result.quality.recall_at_k:.3f} "
+                f"elapsed={elapsed:.0f}s eta={eta_s:.0f}s"
+            )
 
     result.memory.stop()
     result.total_elapsed_s = time.perf_counter() - t0

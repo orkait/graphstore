@@ -70,12 +70,16 @@ class OnnxHFEmbedder(Embedder):
             onnx_path = onnx_files[0]
 
         self._session = ort.InferenceSession(str(onnx_path))
+        self._input_names = {i.name for i in self._session.get_inputs()}
+        self._needs_token_type_ids = "token_type_ids" in self._input_names
 
-        # Detect output dims from a test run
         test_enc = self._tokenizer.encode("test")
         test_ids = np.array([[test_enc.ids[0]]], dtype=np.int64)
         test_mask = np.array([[1]], dtype=np.int64)
-        test_out = self._session.run(None, {"input_ids": test_ids, "attention_mask": test_mask})
+        test_feed = {"input_ids": test_ids, "attention_mask": test_mask}
+        if self._needs_token_type_ids:
+            test_feed["token_type_ids"] = np.zeros((1, 1), dtype=np.int64)
+        test_out = self._session.run(None, test_feed)
         self._base_dims = test_out[0].shape[-1]
         if self._output_dims is None:
             self._output_dims = self._base_dims
@@ -115,10 +119,13 @@ class OnnxHFEmbedder(Embedder):
             input_ids[i, :len(e.ids)] = e.ids
             attention_mask[i, :len(e.attention_mask)] = e.attention_mask
 
-        outputs = self._session.run(None, {
+        feed = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
-        })
+        }
+        if self._needs_token_type_ids:
+            feed["token_type_ids"] = np.zeros_like(input_ids)
+        outputs = self._session.run(None, feed)
         embeddings = outputs[0]  # (batch, seq_len, hidden_dim)
 
         if self._pooling_mode == "last_token":

@@ -21,11 +21,7 @@ def _sanitize_fts5_query(query: str) -> str:
 
     Extracts ``\\w+`` tokens, drops uppercase reserved keywords, lowercases
     for the porter+unicode61 stemmer, and joins with ``OR`` so BM25 ranks
-    by ANY content word. Implicit AND would demand every token (including
-    stopwords) appear in the stored text, which is too strict for real
-    natural-language retrieval.
-
-    Returns "" when no tokens remain; callers should treat this as no-hits.
+    by ANY content word.
     """
     tokens = [
         t.lower()
@@ -153,15 +149,7 @@ class DocumentStore:
 
     # --- Full-text search ---
     def search_text(self, query: str, limit: int = 10) -> list[tuple[int, float]]:
-        """BM25 full-text search over summaries. Returns [(slot, bm25_score), ...].
-
-        The query is sanitized through _sanitize_fts5_query before being
-        passed to FTS5. This strips FTS5 operator characters from
-        natural-language questions (``?``, ``'``, ``"``, ``*``, ``:``, etc.)
-        so they do not raise ``sqlite3.OperationalError: fts5: syntax error``.
-
-        Returns an empty list if the sanitized query has no word tokens.
-        """
+        """BM25 full-text search over summaries. Returns [(slot, bm25_score), ...]."""
         safe_query = _sanitize_fts5_query(query)
         if not safe_query:
             return []

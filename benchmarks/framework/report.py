@@ -109,4 +109,34 @@ def write_markdown(results: Iterable[RunResult], out_path: str | Path) -> None:
         )
     lines.append("")
 
+    has_categories = any(r.quality._categories for r in results_list)
+    if has_categories:
+        lines.append("## Quality by category")
+        lines.append("")
+        all_cats: set[str] = set()
+        for r in results_list:
+            all_cats.update(r.quality._categories.keys())
+        sorted_cats = sorted(all_cats)
+        header = "| Category | n | " + " | ".join(
+            f"{r.system_name} acc / R@K" for r in results_list
+        ) + " |"
+        sep = "|---|---|" + "|".join(["---"] * len(results_list)) + "|"
+        lines.append(header)
+        lines.append(sep)
+        for cat in sorted_cats:
+            n = next(
+                (r.quality._categories[cat].n for r in results_list
+                 if cat in r.quality._categories),
+                0,
+            )
+            cells = []
+            for r in results_list:
+                b = r.quality._categories.get(cat)
+                if b:
+                    cells.append(f"{b.accuracy:.3f} / {b.recall_at_k:.3f}")
+                else:
+                    cells.append("-")
+            lines.append(f"| {cat} | {n} | " + " | ".join(cells) + " |")
+        lines.append("")
+
     out.write_text("\n".join(lines) + "\n")
