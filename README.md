@@ -670,7 +670,10 @@ graphstore/
 │   ├── parser.py             # Parser + LRU cache
 │   ├── transformer.py        # Parse tree → AST
 │   ├── ast_nodes.py          # 70+ AST node types
-│   ├── executor_base.py      # Shared: live_mask, eval_where, column filters
+│   ├── tagger.py             # Auto-tag AST for the log layer (read/write/intelligence/...)
+│   ├── visibility.py         # VisibilityMixin: tombstone / TTL / retracted / context filter
+│   ├── filtering.py          # FilteringMixin: eval_where + numpy column acceleration
+│   ├── executor_base.py      # Shared init, properties, and execute() entry point
 │   ├── handlers/             # Auto-dispatch handler mixins
 │   │   ├── nodes.py          # NODE, NODES, COUNT
 │   │   ├── edges.py          # EDGES, CREATE/DELETE EDGE
