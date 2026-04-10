@@ -1,0 +1,31 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/cache/hf \
+    FASTEMBED_CACHE_PATH=/cache/fastembed
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /repo
+COPY pyproject.toml /repo/pyproject.toml
+RUN pip install \
+        "numpy>=1.24" "scipy>=1.10" "lark>=1.1" "usearch>=2.0" \
+        "model2vec>=0.4" "msgspec>=0.18" "croniter>=6.0" "orjson>=3.11.8" \
+        "pyyaml>=6.0" "markitdown>=0.1" "pymupdf4llm>=0.1" "pymupdf>=1.20" \
+        "fastapi>=0.135.1" "httpx>=0.28.1" \
+        "fastembed>=0.8" "psutil>=5.9"
+
+COPY graphstore /repo/graphstore
+COPY benchmarks /repo/benchmarks
+
+ENV PYTHONPATH=/repo
+
+ENTRYPOINT ["python", "-m", "benchmarks.framework.docker_runner"]
+CMD ["--system", "graphstore", "--dataset", "longmemeval", "--variant", "s"]
