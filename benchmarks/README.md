@@ -67,28 +67,37 @@ uv run python benchmarks/longmemeval.py data/longmemeval_s_cleaned.json --ingest
 - `lexical`: BM25-only retrieval
 - `hybrid`: simple RRF fusion of similar + lexical
 
-**Signal contribution (flat ingest, full run):**
+**REMEMBER vs SIMILAR depends on embedder strength:**
 
-| Mode | R@5 |
-|------|-----|
-| remember (5-signal fusion) | **89.1%** |
-| similar (pure vector) | ~70.0% |
+| Embedder | REMEMBER R@5 | SIMILAR R@5 | Winner |
+|----------|-------------|-------------|--------|
+| model2vec (weak) | **89.1%** | ~70.0% | REMEMBER (+19pp, BM25 compensates) |
+| MiniLM-L6-v2 (strong) | 92.1% | **93.4%** | SIMILAR (+1.3pp) |
 
-BM25 fusion in REMEMBER contributes approximately +19pp over pure vector retrieval with the default model2vec embedder.
+With a weak embedder, BM25 fusion in REMEMBER adds ~19pp over pure vector. With a strong embedder, REMEMBER's fusion *hurts* — the recency/confidence/recall_freq signals are uniform noise on the LongMemEval benchmark (every session has the same recency, no confidence data, no recall history), diluting the vector signal. **For benchmarks with a modern encoder, use `--mode similar`.**
 
 ### Embedder Options
 
 GraphStore's benchmark harness supports multiple embedders via `--embedder`:
 
-| Flag | Model | Dims | Kind | Status |
-|------|-------|------|------|--------|
-| `default` | model2vec `M2V_base_output` | 256 | static distilled | fast, low memory, recommended default |
-| `embeddinggemma` | Google EmbeddingGemma-300M | 256 (Matryoshka) | encoder, mean pooling | slow on CPU (~67 sec/question, long sessions) |
-| `embeddinggemma-768` | Google EmbeddingGemma-300M | 768 | encoder, mean pooling | slower, better quality |
-| `harrier` | Microsoft Harrier-OSS-v1 0.6B | 1024 | decoder, last-token pooling | registered but **blocked** — ONNX export uses `com.microsoft.GroupQueryAttention` with 11 inputs, requires `onnxruntime-genai` |
+| Flag | Model | Dims | Kind | Notes |
+|------|-------|------|------|-------|
+| `default` | model2vec `M2V_base_output` | 256 | static distilled | instant (no inference), ~232 KB install, baseline quality |
+| `minilm-l6` | sentence-transformers/all-MiniLM-L6-v2 | 384 | encoder, mean pooling | via fastembed; matches MemPalace's MiniLM |
+| `bge-small` / `bge-base` / `bge-large` | BAAI bge-en-v1.5 | 384 / 768 / 1024 | encoder, mean pooling | via fastembed |
+| `mxbai-large` | mixedbread-ai/mxbai-embed-large-v1 | 1024 | encoder, mean pooling | via fastembed |
+| `snowflake-l` / `snowflake-m` | snowflake/arctic-embed | 1024 / 768 | encoder, mean pooling | via fastembed |
+| `jina-v2` | jinaai/jina-embeddings-v2-base-en | 768 | encoder | via fastembed, 8k context |
+| `nomic-v1.5` | nomic-ai/nomic-embed-text-v1.5 | 768 | encoder | via fastembed, 8k context |
+| `embeddinggemma` | Google EmbeddingGemma-300M | 256 (Matryoshka) | encoder, mean pooling | slow on CPU (~67 sec/question) |
+| `embeddinggemma-768` | Google EmbeddingGemma-300M | 768 | encoder, mean pooling | slower, higher quality |
+| `harrier` | Microsoft Harrier-OSS-v1 0.6B | 1024 | decoder, last-token pooling | **blocked** — needs `onnxruntime-genai` + re-export via model builder (torch) |
+| `fastembed:<hf-id>` | any fastembed-supported model | varies | — | use the HF ID directly |
 | `model2vec:<hf-id>` | any model2vec HF model | varies | static distilled | e.g. `model2vec:minishlab/potion-retrieval-32M` |
 
-**Why the default is model2vec:** it's instant (no transformer inference, just table lookup), matches MemPalace's MiniLM quality when combined with REMEMBER's BM25 fusion (89.1% vs 96.6% R@5), and doesn't need GPUs or large model downloads.
+**Why the default is model2vec:** it's instant (no transformer inference, just a table lookup), ~232 KB on disk, and graphstore's REMEMBER fusion compensates for the weaker embedding quality. For maximum retrieval quality, use `--embedder minilm-l6` (or any fastembed model) with `--mode similar`.
+
+**Install:** `pip install graphstore[fastembed]` to unlock the fastembed models. Core install without fastembed stays at ~60 MB; with fastembed ~82 MB.
 
 ### Ingest Performance (batched embedding)
 
@@ -121,6 +130,56 @@ with gs.deferred_embeddings(batch_size=64):
 For static embedders (model2vec) it's roughly neutral. For transformer
 embedders (EmbeddingGemma, bge-*, e5-*, Harrier once runtime support lands)
 it's the difference between viable and infeasible on CPU.
+
+### Session Document Format
+
+For `--granularity session`, each document embeds **only the user turns** from
+the haystack session, joined with `\n`. Assistant responses are filtered out
+because they contain chatter and rephrasing that dilute the vector signal
+against LongMemEval's user-question-grounded ground truth. This matches
+MemPalace's benchmark convention and closed a measured ~3pp R@5 gap.
+
+If the dataset carries no `role` labels (some older cleaned dumps), the
+harness falls back to embedding all turns so it stays functional.
+
+### MemPalace Comparison (apples-to-apples)
+
+MemPalace publishes **96.6% R@5** on LongMemEval using MiniLM-L6-v2 + ChromaDB
+pure vector search. GraphStore's results after this PR:
+
+| # | Config | R@5 | R@10 | nDCG@10 | elapsed |
+|---|--------|-----|------|---------|---------|
+| 1 | model2vec + REMEMBER + all turns | 89.1% | 93.2% | 78.4% | 180 s |
+| 2 | **MiniLM + REMEMBER + all turns** | 92.1% | 95.3% | 82.9% | 390 s |
+| 3 | **MiniLM + SIMILAR + all turns** | 93.4% | 97.0% | 84.0% | 315 s |
+| 4 | **MiniLM + SIMILAR + user-turns only** ⭐ | **94.7%** | **98.1%** | **87.2%** | **258 s** |
+| | MemPalace (reported) | 96.6% | n/a | n/a | n/a |
+
+**Gap to MemPalace: 1.9pp R@5.** On R@10 we're at 98.1% — likely matching them
+since R@5 is their headline number and they don't publish R@10.
+
+**Per-type R@10 (MiniLM + SIMILAR + user-turns):**
+
+| Type | R@10 |
+|------|------|
+| knowledge-update | **100.0%** |
+| multi-session | 99.2% |
+| single-session-user | 98.4% |
+| temporal-reasoning | 96.9% |
+| single-session-preference | 96.7% |
+| single-session-assistant | 96.4% |
+
+**Reproduce:**
+
+```bash
+# The configuration that hits 94.7% R@5 / 98.1% R@10:
+pip install graphstore[fastembed]
+uv run python benchmarks/longmemeval.py \
+  /tmp/longmemeval-data/longmemeval_s_cleaned.json \
+  --embedder minilm-l6 \
+  --mode similar \
+  --ingest-mode flat
+```
 
 ### Notes
 
