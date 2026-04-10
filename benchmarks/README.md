@@ -76,6 +76,52 @@ uv run python benchmarks/longmemeval.py data/longmemeval_s_cleaned.json --ingest
 
 BM25 fusion in REMEMBER contributes approximately +19pp over pure vector retrieval with the default model2vec embedder.
 
+### Embedder Options
+
+GraphStore's benchmark harness supports multiple embedders via `--embedder`:
+
+| Flag | Model | Dims | Kind | Status |
+|------|-------|------|------|--------|
+| `default` | model2vec `M2V_base_output` | 256 | static distilled | fast, low memory, recommended default |
+| `embeddinggemma` | Google EmbeddingGemma-300M | 256 (Matryoshka) | encoder, mean pooling | slow on CPU (~67 sec/question, long sessions) |
+| `embeddinggemma-768` | Google EmbeddingGemma-300M | 768 | encoder, mean pooling | slower, better quality |
+| `harrier` | Microsoft Harrier-OSS-v1 0.6B | 1024 | decoder, last-token pooling | registered but **blocked** — ONNX export uses `com.microsoft.GroupQueryAttention` with 11 inputs, requires `onnxruntime-genai` |
+| `model2vec:<hf-id>` | any model2vec HF model | varies | static distilled | e.g. `model2vec:minishlab/potion-retrieval-32M` |
+
+**Why the default is model2vec:** it's instant (no transformer inference, just table lookup), matches MemPalace's MiniLM quality when combined with REMEMBER's BM25 fusion (89.1% vs 96.6% R@5), and doesn't need GPUs or large model downloads.
+
+### Ingest Performance (batched embedding)
+
+The `flat` ingest path uses `GraphStore.deferred_embeddings()` to batch vector
+computations. Within the context, CREATE NODE queues `(slot, text)` pairs in a
+pending buffer and flushes them in one `encode_documents()` call when either
+the batch size is reached or the context exits. This is a ~1.5-2x speedup for
+transformer embedders and also fixes a double-embedding bug where `CREATE NODE`
+with both schema `EMBED` and `DOCUMENT` clauses previously embedded the same
+text twice.
+
+**Measured speedup (model2vec default, full 500-question run):**
+
+| Version | elapsed | R@5 | R@10 |
+|---------|---------|-----|------|
+| pre-fix (double embed, unbatched) | 397 sec | 89.1% | 93.2% |
+| post-fix (single embed, batched)  | **180 sec** | **89.1%** | **93.2%** |
+
+Same scores, **2.2x faster**. The double-embedding fix alone accounts for most
+of the model2vec speedup since model2vec has negligible per-call overhead.
+Transformer embedders get an additional win from batching.
+
+```python
+with gs.deferred_embeddings(batch_size=64):
+    for item in items:
+        gs.execute(f'CREATE NODE "{item.id}" text = "{item.text}" DOCUMENT "{item.text}"')
+# All embeddings flushed here.
+```
+
+For static embedders (model2vec) it's roughly neutral. For transformer
+embedders (EmbeddingGemma, bge-*, e5-*, Harrier once runtime support lands)
+it's the difference between viable and infeasible on CPU.
+
 ### Notes
 
 - v1 is retrieval-only. It does not run answer generation.
