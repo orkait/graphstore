@@ -624,14 +624,16 @@ For deeper tuning, drop a `graphstore.json` file next to your persistence direct
 
 ---
 
-## 🎮 Playground
+## 🎮 Playground (experimental)
 
-A local web UI for exploring your graph interactively - CodeMirror editor, React Flow visualization, and stacked query results.
+A local web UI for exploring your graph interactively - CodeMirror editor, React Flow visualization, stacked query results.
 
 ```bash
 pip install "graphstore[playground]"
 graphstore playground
 ```
+
+The playground currently supports the core DSL (reads, writes, traversals, semantic search). Newer features (evolution rules, cron, vault, voice, document ingest) are not yet surfaced in the UI - use the Python API for those.
 
 ---
 
