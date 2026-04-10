@@ -17,23 +17,17 @@ def _compile_like_pattern(pattern: str):
             parts.append(re.escape(ch))
     return re.compile(''.join(parts))
 
-from graphstore.core.schema import SchemaRegistry
-from graphstore.core.store import CoreStore
+from graphstore.core.runtime import RuntimeState
 from graphstore.core.types import Result
 from graphstore.dsl.visibility import VisibilityMixin
 from graphstore.dsl.filtering import FilteringMixin
 
 
 class ExecutorBase(VisibilityMixin, FilteringMixin):
-    def __init__(self, store: CoreStore, schema: SchemaRegistry | None = None,
-                 embedder=None, vector_store=None, document_store=None,
+    def __init__(self, runtime: RuntimeState,
                  ingest_root: str | None = None,
                  ingestor_registry=None, chunker=None):
-        self.store = store
-        self.schema = schema or SchemaRegistry()
-        self._embedder = embedder
-        self._vector_store = vector_store
-        self._document_store = document_store
+        self._runtime = runtime
         self._ingest_root = ingest_root
         self._ingestor_registry = ingestor_registry
         self._chunker = chunker
@@ -43,12 +37,29 @@ class ExecutorBase(VisibilityMixin, FilteringMixin):
         self._vision_model = "smolvlm2:2.2b"
         self._vision_base_url = "http://localhost:11434/v1"
         self._vision_max_tokens = 300
-        # Deferred embedding mode: when True, CREATE NODE queues (slot, text)
-        # pairs into _pending_embeddings instead of embedding synchronously.
-        # Flushed via flush_pending_embeddings() or when batch_size is reached.
         self._defer_embeddings: bool = False
         self._pending_embeddings: list[tuple[int, str]] = []
         self._embed_batch_size: int = 64
+
+    @property
+    def store(self):
+        return self._runtime.store
+
+    @property
+    def schema(self):
+        return self._runtime.schema
+
+    @property
+    def _vector_store(self):
+        return self._runtime.vector_store
+
+    @property
+    def _document_store(self):
+        return self._runtime.document_store
+
+    @property
+    def _embedder(self):
+        return self._runtime.embedder
 
     def execute(self, ast) -> Result:
         """Execute a parsed AST node and return a Result."""

@@ -5,13 +5,10 @@ for stats, schema management, query logs, WAL, and diagnostics.
 """
 
 import time
-import sqlite3
 import logging
 
-from graphstore.core.store import CoreStore
-
 logger = logging.getLogger(__name__)
-from graphstore.core.schema import SchemaRegistry
+from graphstore.core.runtime import RuntimeState
 from graphstore.core.types import Result
 import numpy as np
 
@@ -73,27 +70,41 @@ from graphstore.core.errors import GraphStoreError, NodeNotFound
 class SystemExecutor:
     def __init__(
         self,
-        store: CoreStore,
-        schema: SchemaRegistry,
-        conn: sqlite3.Connection | None = None,
-        embedder=None,
-        vector_store=None,
-        document_store=None,
+        runtime: RuntimeState,
         retention: dict | None = None,
         cron=None,
-    evolution_engine=None,
+        evolution_engine=None,
     ):
-        self.store = store
-        self.schema = schema
-        self.conn = conn
-        self._embedder = embedder
-        self._vector_store = vector_store
-        self._document_store = document_store
+        self._runtime = runtime
         self._retention = retention or {}
         self._cron = cron
         self._evolution_engine = evolution_engine
         self._eviction_target_ratio = 0.8
         self._start_time = time.time()
+
+    @property
+    def store(self):
+        return self._runtime.store
+
+    @property
+    def schema(self):
+        return self._runtime.schema
+
+    @property
+    def conn(self):
+        return self._runtime.conn
+
+    @property
+    def _vector_store(self):
+        return self._runtime.vector_store
+
+    @property
+    def _document_store(self):
+        return self._runtime.document_store
+
+    @property
+    def _embedder(self):
+        return self._runtime.embedder
 
     def execute(self, ast) -> Result:
         start = time.perf_counter_ns()
@@ -600,15 +611,16 @@ class SystemExecutor:
         store._count = snap["count"]
         store._active_context = snap.get("active_context")
 
-        # Restore vector state
+        # Restore vector state — mutate the runtime container so every
+        # component sees the new VectorStore through their shared ref.
         if snap.get("vector_index") is not None:
             from graphstore.vector.store import VectorStore
             vs = VectorStore(dims=snap["vector_dims"], capacity=store._capacity)
             vs.load(snap["vector_index"])
             vs._has_vector[:len(snap["vector_presence"])] = snap["vector_presence"]
-            self._vector_store = vs
+            self._runtime.vector_store = vs
         else:
-            self._vector_store = None
+            self._runtime.vector_store = None
 
         # Rebuild derived state
         store._rebuild_edges()

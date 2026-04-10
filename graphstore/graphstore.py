@@ -92,7 +92,6 @@ class GraphStore:
         self._ceiling_bytes = cfg.core.ceiling_mb * 1_000_000
         self._allow_system = allow_system_queries
         self._ingest_root = cfg.server.ingest_root
-        self._conn: sqlite3.Connection | None = None
         self._stt = None
         self._tts = None
 
@@ -114,20 +113,20 @@ class GraphStore:
             except ImportError:
                 pass
 
-        # Initialize embedder
+        # Initialize embedder (local; placed into RuntimeState below)
         emb_cfg = cfg.vector.embedder
         if embedder is not self._UNSET and embedder is not None and not isinstance(embedder, str):
-            self._embedder = embedder  # custom Embedder instance
+            _embedder = embedder
         elif emb_cfg == "none":
-            self._embedder = None
+            _embedder = None
         elif emb_cfg in ("default", "model2vec"):
             try:
                 from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
-                self._embedder = Model2VecEmbedder(model_name=cfg.vector.model2vec_model)
+                _embedder = Model2VecEmbedder(model_name=cfg.vector.model2vec_model)
             except Exception:
-                self._embedder = None
+                _embedder = None
         else:
-            self._embedder = None
+            _embedder = None
 
         # Wire model cache directory from config
         if cfg.vector.model_cache_dir:
@@ -152,61 +151,61 @@ class GraphStore:
         # Custom chunker (None → handler uses chunk_by_heading from chunker.py)
         self._chunker = chunker
 
-        # Vector store (lazy init on first vector operation)
-        self._vector_store = None
-
-        # Initialize store
+        # Store / schema / conn / vector_store — local vars folded into RuntimeState below
         p = self._path
+        _vector_store = None
         if p is not None:
             p.mkdir(parents=True, exist_ok=True)
             db_file = p / "graphstore.db"
-            self._conn = open_database(db_file, busy_timeout_ms=cfg.persistence.busy_timeout_ms)
-
-            # Try to load existing data
-            self._store, self._schema = _load_fn(self._conn)
-            self._store._ceiling_bytes = self._ceiling_bytes
-            # Restore vector store from persisted state
-            if hasattr(self._store, 'vectors') and self._store.vectors is not None:
-                self._vector_store = self._store.vectors
+            _conn = open_database(db_file, busy_timeout_ms=cfg.persistence.busy_timeout_ms)
+            _store, _schema = _load_fn(_conn)
+            _store._ceiling_bytes = self._ceiling_bytes
+            if hasattr(_store, 'vectors') and _store.vectors is not None:
+                _vector_store = _store.vectors
         else:
-            self._store = CoreStore(ceiling_bytes=self._ceiling_bytes,
-                                    capacity=cfg.core.initial_capacity)
-            self._schema = SchemaRegistry()
+            _conn = None
+            _store = CoreStore(ceiling_bytes=self._ceiling_bytes,
+                               capacity=cfg.core.initial_capacity)
+            _schema = SchemaRegistry()
 
         # DocumentStore: separate SQLite, always on disk
         from graphstore.document.store import DocumentStore
         if p is not None:
             doc_db = os.path.join(str(p), "documents.db")
         else:
-            doc_db = None  # DocumentStore uses temp file
-        self._document_store = DocumentStore(doc_db, fts_tokenizer=cfg.document.fts_tokenizer)
+            doc_db = None
+        _document_store = DocumentStore(doc_db, fts_tokenizer=cfg.document.fts_tokenizer)
+
+        # Single shared container for cross-component refs
+        from graphstore.core.runtime import RuntimeState
+        self._runtime = RuntimeState(
+            store=_store, schema=_schema,
+            vector_store=_vector_store, document_store=_document_store,
+            embedder=_embedder, conn=_conn,
+        )
 
         # Compaction sentinel recovery Phase 2: DocStore orphan cleanup.
-        if self._conn is not None:
-            _sentinel_row = self._conn.execute(
+        if self._runtime.conn is not None:
+            _sentinel_row = self._runtime.conn.execute(
                 "SELECT value FROM metadata WHERE key='compaction_sentinel'"
             ).fetchone()
             if _sentinel_row is not None:
                 import numpy as _np
-                _n = self._store._next_slot
-                _live = self._store.compute_live_mask(_n)
+                _n = self._runtime.store._next_slot
+                _live = self._runtime.store.compute_live_mask(_n)
                 _live_slots = set(int(s) for s in _np.nonzero(_live)[0])
                 try:
-                    self._document_store.orphan_cleanup(_live_slots)
+                    self._runtime.document_store.orphan_cleanup(_live_slots)
                 except Exception as _e:
                     logger.warning("compaction recovery orphan cleanup failed: %s", _e)
-                self._conn.execute("DELETE FROM metadata WHERE key='compaction_sentinel'")
-                self._conn.commit()
+                self._runtime.conn.execute("DELETE FROM metadata WHERE key='compaction_sentinel'")
+                self._runtime.conn.commit()
                 logger.warning("compaction sentinel recovery complete")
 
-        # Embedder dirty flag (set when SYS SET EMBEDDER changes the embedder)
         self._embedder_dirty = False
 
         # Create executors before WAL replay so _replay_wal can use them
-        self._executor = Executor(self._store, self._schema,
-                                  embedder=self._embedder,
-                                  vector_store=self._vector_store,
-                                  document_store=self._document_store,
+        self._executor = Executor(self._runtime,
                                   ingest_root=self._ingest_root,
                                   ingestor_registry=self._ingestor_registry,
                                   chunker=self._chunker)
@@ -229,11 +228,7 @@ class GraphStore:
             "blob_archive_days": cfg.retention.blob_archive_days,
             "blob_delete_days": cfg.retention.blob_delete_days,
         }
-        self._sys_executor = SystemExecutor(self._store, self._schema, self._conn,
-                                               embedder=self._embedder,
-                                               vector_store=self._vector_store,
-                                               document_store=self._document_store,
-                                               retention=retention_dict)
+        self._sys_executor = SystemExecutor(self._runtime, retention=retention_dict)
         self._sys_executor._eviction_target_ratio = cfg.core.eviction_target_ratio
         # Evolution engine wired after engine is created (below)
 
@@ -242,26 +237,24 @@ class GraphStore:
 
         # WAL manager
         self._wal = WALManager(
-            self._conn, self._store, self._schema, self._executor,
+            self._runtime, self._executor,
             wal_hard_limit=cfg.persistence.wal_hard_limit,
             auto_checkpoint_threshold=cfg.persistence.auto_checkpoint_threshold,
             log_retention_days=cfg.persistence.log_retention_days,
         )
 
         # Replay WAL (must happen after executor is created)
-        if self._path and self._conn:
+        if self._path and self._runtime.conn:
             self._wal.replay()
 
         # Optimizer scheduler (evolution_engine wired after engine init below)
         self._optimizer = OptimizerScheduler(
-            self._store, self._vector_store, self._document_store,
+            self._runtime,
             auto_optimize=cfg.dsl.auto_optimize,
             optimize_interval=cfg.dsl.optimize_interval,
             compact_threshold=cfg.core.compact_threshold,
             string_gc_threshold=cfg.core.string_gc_threshold,
             cache_gc_threshold=cfg.dsl.cache_gc_threshold,
-            schema=self._schema,
-            conn=self._conn,
         )
 
         # Vault: markdown note system
@@ -272,16 +265,12 @@ class GraphStore:
             from graphstore.vault.executor import VaultExecutor
             self._vault_manager = VaultManager(vault_path)
             self._vault_sync = VaultSync(
-                self._vault_manager, self._store, self._schema,
-                self._embedder, self._vector_store, self._document_store,
+                self._vault_manager, self._runtime,
                 summary_max_length=cfg.document.summary_max_length,
             )
-            # Initial sync
             self._vault_sync.sync_all()
-            # Wire vault executor into DSL executor
             self._vault_executor = VaultExecutor(
-                self._vault_manager, self._vault_sync, self._store,
-                self._embedder, self._vector_store
+                self._vault_manager, self._vault_sync, self._runtime,
             )
             self._executor._vault_executor = self._vault_executor
         else:
@@ -307,7 +296,7 @@ class GraphStore:
 
         # Evolution engine (Layer 5: metacognitive memory)
         from graphstore.evolve import EvolutionEngine
-        self._evolution_engine = EvolutionEngine(self, self._conn, cfg.evolution)
+        self._evolution_engine = EvolutionEngine(self, self._runtime.conn, cfg.evolution)
         # Wire into scheduler and sys_executor
         self._optimizer._evolution_engine = self._evolution_engine
         self._sys_executor._evolution_engine = self._evolution_engine
@@ -342,14 +331,6 @@ class GraphStore:
 
         start = time.perf_counter_ns()
 
-        # Sync vector store reference (may have been lazily created)
-        if self._vector_store is not None:
-            if self._executor._vector_store is not self._vector_store:
-                self._executor._vector_store = self._vector_store
-            if self._sys_executor._vector_store is not self._vector_store:
-                self._sys_executor._vector_store = self._vector_store
-
-        # Sync embedder dirty flag
         self._executor._embedder_dirty = self._embedder_dirty
 
         try:
@@ -378,14 +359,6 @@ class GraphStore:
                         self._optimizer._needs_optimize = False
                 else:
                     result = self._sys_executor.execute(ast)
-                    # Sync vector store back from sys executor (rollback may change it)
-                    if self._sys_executor._vector_store is not self._vector_store:
-                        self._vector_store = self._sys_executor._vector_store
-                        self._executor._vector_store = self._vector_store
-                        self._wal.update_vector_store(self._vector_store)
-                        if hasattr(self, '_optimizer'):
-                            self._optimizer.sync_vector_store(self._vector_store)
-                    # Clear dirty flag after successful SYS REEMBED
                     if isinstance(ast, ast_nodes.SysReembed):
                         self._embedder_dirty = False
                         self._executor._embedder_dirty = False
@@ -529,51 +502,31 @@ class GraphStore:
         if self._queue is not None:
             self._queue.shutdown()
             self._queue = None
-        conn = self._conn
+        conn = self._runtime.conn
         if conn is not None:
             self.checkpoint()
             conn.close()
-            self._conn = None
-        if self._document_store is not None:
-            self._document_store.close()
-            self._document_store = None
+            self._runtime.conn = None
+        if self._runtime.document_store is not None:
+            self._runtime.document_store.close()
+            self._runtime.document_store = None
 
     def reset_memory(self) -> Result:
         """Reset the in-memory graph (nodes, edges) to empty. SQLite is left alone."""
         if self._optimizer.optimizing:
             raise OptimizationInProgress()
-        
-        self._store = CoreStore(ceiling_bytes=self._ceiling_bytes,
-                                capacity=self._config.core.initial_capacity)
-        self._schema = SchemaRegistry()
-        
-        if self._vector_store is not None:
-            from graphstore.vector.store import VectorStore
-            self._vector_store = VectorStore(dims=self._vector_store.dims, capacity=self._config.core.initial_capacity)
-        
-        self._executor.store = self._store
-        self._executor.schema = self._schema
-        self._executor._vector_store = self._vector_store
-        
-        self._sys_executor.store = self._store
-        self._sys_executor.schema = self._schema
-        self._sys_executor._vector_store = self._vector_store
-        
-        self._wal._store = self._store
-        self._wal._schema = self._schema
-        self._wal.update_vector_store(self._vector_store)
-        
-        self._optimizer._store = self._store
-        self._optimizer._schema = self._schema
-        self._optimizer.sync_vector_store(self._vector_store)
 
-        if self._vault_executor is not None:
-            self._vault_executor._store = self._store
-            self._vault_executor._vector_store = self._vector_store
-        if self._vault_sync is not None:
-            self._vault_sync._store = self._store
-            self._vault_sync._schema = self._schema
-            self._vault_sync._vector_store = self._vector_store
+        self._runtime.store = CoreStore(
+            ceiling_bytes=self._ceiling_bytes,
+            capacity=self._config.core.initial_capacity,
+        )
+        self._runtime.schema = SchemaRegistry()
+        if self._runtime.vector_store is not None:
+            from graphstore.vector.store import VectorStore
+            self._runtime.vector_store = VectorStore(
+                dims=self._runtime.vector_store.dims,
+                capacity=self._config.core.initial_capacity,
+            )
 
         import collections
         self._counters = {
@@ -722,6 +675,30 @@ class GraphStore:
     def ceiling_mb(self, value: int) -> None:
         self._store._ceiling_bytes = value * 1_000_000
 
+    @property
+    def _store(self):
+        return self._runtime.store
+
+    @property
+    def _schema(self):
+        return self._runtime.schema
+
+    @property
+    def _vector_store(self):
+        return self._runtime.vector_store
+
+    @property
+    def _document_store(self):
+        return self._runtime.document_store
+
+    @property
+    def _embedder(self):
+        return self._runtime.embedder
+
+    @property
+    def _conn(self):
+        return self._runtime.conn
+
     def __enter__(self) -> "GraphStore":
         return self
 
@@ -730,13 +707,11 @@ class GraphStore:
 
     def _ensure_vector_store(self, dims: int):
         """Lazily initialize vector store with given dimensionality."""
-        if self._vector_store is None:
+        if self._runtime.vector_store is None:
             from graphstore.vector.store import VectorStore
-            self._vector_store = VectorStore(dims=dims, capacity=self._store._capacity)
-            self._executor._vector_store = self._vector_store
-            self._wal.update_vector_store(self._vector_store)
-            if hasattr(self, '_optimizer'):
-                self._optimizer.sync_vector_store(self._vector_store)
-        return self._vector_store
+            self._runtime.vector_store = VectorStore(
+                dims=dims, capacity=self._runtime.store._capacity,
+            )
+        return self._runtime.vector_store
 
 

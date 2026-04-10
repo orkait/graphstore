@@ -103,7 +103,7 @@ class TestLiveMask:
         g._store.columns.set_reserved(0, "__expires_at__", 1)  # epoch ms = 1 (long expired)
         # Access executor's _compute_live_mask directly
         from graphstore.dsl.executor import Executor
-        ex = Executor(g._store)
+        ex = Executor(g._runtime)
         mask = ex._compute_live_mask(g._store._next_slot)
         assert mask[0] == False  # expired node excluded
 
@@ -112,7 +112,7 @@ class TestLiveMask:
         g.execute('CREATE NODE "n1" kind = "fact" name = "test"')
         g._store.columns.set_reserved(0, "__retracted__", 1)
         from graphstore.dsl.executor import Executor
-        ex = Executor(g._store)
+        ex = Executor(g._runtime)
         mask = ex._compute_live_mask(g._store._next_slot)
         assert mask[0] == False  # retracted node excluded
 
@@ -120,7 +120,7 @@ class TestLiveMask:
         g = GraphStore(ceiling_mb=256)
         g.execute('CREATE NODE "n1" kind = "test" name = "active"')
         from graphstore.dsl.executor import Executor
-        ex = Executor(g._store)
+        ex = Executor(g._runtime)
         mask = ex._compute_live_mask(g._store._next_slot)
         assert mask[0] == True
 
@@ -131,6 +131,6 @@ class TestLiveMask:
         future_ms = int(time.time() * 1000) + 86400000  # +1 day
         g._store.columns.set_reserved(0, "__expires_at__", future_ms)
         from graphstore.dsl.executor import Executor
-        ex = Executor(g._store)
+        ex = Executor(g._runtime)
         mask = ex._compute_live_mask(g._store._next_slot)
         assert mask[0] == True  # not expired yet

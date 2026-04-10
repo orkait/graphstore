@@ -13,16 +13,31 @@ from graphstore.vault.manager import VaultManager
 class VaultSync:
     """Syncs vault markdown files to graphstore nodes + edges."""
 
-    def __init__(self, manager: VaultManager, store, schema=None,
-                 embedder=None, vector_store=None, document_store=None,
+    def __init__(self, manager: VaultManager, runtime,
                  summary_max_length: int = 200):
         self._manager = manager
-        self._store = store
-        self._schema = schema
-        self._embedder = embedder
-        self._vector_store = vector_store
-        self._document_store = document_store
+        self._runtime = runtime
         self._summary_max_length = summary_max_length
+
+    @property
+    def _store(self):
+        return self._runtime.store
+
+    @property
+    def _schema(self):
+        return self._runtime.schema
+
+    @property
+    def _embedder(self):
+        return self._runtime.embedder
+
+    @property
+    def _vector_store(self):
+        return self._runtime.vector_store
+
+    @property
+    def _document_store(self):
+        return self._runtime.document_store
 
     def sync_all(self) -> dict:
         """Walk vault dir, sync all notes to graph. Returns {synced, skipped, errors}.
