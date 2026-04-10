@@ -3,16 +3,10 @@
 from __future__ import annotations
 
 import os
-import statistics
 from dataclasses import dataclass, field
 from typing import Any
 
-
-def _percentile(sorted_samples: list[float], pct: float) -> float:
-    if not sorted_samples:
-        return 0.0
-    idx = int(len(sorted_samples) * pct)
-    return sorted_samples[min(idx, len(sorted_samples) - 1)]
+import numpy as np
 
 
 @dataclass
@@ -22,25 +16,28 @@ class LatencyMetrics:
     def add(self, ms: float) -> None:
         self.samples_ms.append(ms)
 
+    def _arr(self) -> np.ndarray:
+        return np.asarray(self.samples_ms, dtype=np.float64)
+
     @property
     def p50(self) -> float:
-        return _percentile(sorted(self.samples_ms), 0.50)
+        return float(np.percentile(self._arr(), 50)) if self.samples_ms else 0.0
 
     @property
     def p95(self) -> float:
-        return _percentile(sorted(self.samples_ms), 0.95)
+        return float(np.percentile(self._arr(), 95)) if self.samples_ms else 0.0
 
     @property
     def p99(self) -> float:
-        return _percentile(sorted(self.samples_ms), 0.99)
+        return float(np.percentile(self._arr(), 99)) if self.samples_ms else 0.0
 
     @property
     def mean(self) -> float:
-        return statistics.mean(self.samples_ms) if self.samples_ms else 0.0
+        return float(self._arr().mean()) if self.samples_ms else 0.0
 
     @property
     def stddev(self) -> float:
-        return statistics.stdev(self.samples_ms) if len(self.samples_ms) >= 2 else 0.0
+        return float(self._arr().std(ddof=1)) if len(self.samples_ms) >= 2 else 0.0
 
     def to_dict(self) -> dict:
         return {
