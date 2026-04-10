@@ -54,9 +54,7 @@ Six engines, one DSL. Columnar numpy storage, sparse matrix traversal, HNSW vect
 ## 📦 Install
 
 ```bash
-git clone https://github.com/orkait/graphstore.git
-cd graphstore
-pip install -e .
+pip install graphstore
 ```
 
 Core includes: numpy, scipy, lark, usearch, model2vec, croniter, msgspec (~90 MB)
@@ -69,7 +67,7 @@ Core includes: numpy, scipy, lark, usearch, model2vec, croniter, msgspec (~90 MB
 graphstore install-embedder embeddinggemma
 
 # 30+ ONNX BERT-family models (BGE, mxbai, e5, nomic, snowflake, jina-v2)
-pip install -e ".[fastembed]"
+pip install "graphstore[fastembed]"
 
 # Voice: speech-to-text + text-to-speech (Moonshine + Piper)
 graphstore install-voice
