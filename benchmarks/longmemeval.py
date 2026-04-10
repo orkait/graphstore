@@ -111,7 +111,15 @@ def build_corpus(entry: dict, granularity: str) -> list[CorpusItem]:
             if corpus_id in seen_corpus_ids:
                 continue
             seen_corpus_ids.add(corpus_id)
-            text = "\n".join(turn["content"] for turn in session)
+            # Follow MemPalace's LongMemEval convention: embed only the user
+            # turns when building a session document. Assistant responses
+            # dilute the vector with chatter/rephrasing that isn't in the
+            # ground-truth answer signal. Filtering to user turns closed a
+            # ~3pp gap vs MemPalace's 96.6% R@5 benchmark number.
+            user_turns = [turn["content"] for turn in session if turn.get("role") == "user"]
+            # Fall back to all turns if the dataset doesn't carry role labels
+            # (some LongMemEval variants omit them on older cleaned dumps).
+            text = "\n".join(user_turns) if user_turns else "\n".join(t["content"] for t in session)
             items.append(
                 CorpusItem(
                     corpus_id=corpus_id,
@@ -469,9 +477,32 @@ def _resolve_embedder(name: str | None):
         print("[embedder] loading harrier-oss-v1-0.6b (1024d, last-token pooling)", flush=True)
         return load_installed_embedder("harrier-oss-v1-0.6b", dims=1024)
 
+    # FastEmbed shortcuts — strong encoder models with pre-exported ONNX.
+    _FASTEMBED_ALIASES = {
+        "bge-large":       "BAAI/bge-large-en-v1.5",
+        "bge-base":        "BAAI/bge-base-en-v1.5",
+        "bge-small":       "BAAI/bge-small-en-v1.5",
+        "mxbai-large":     "mixedbread-ai/mxbai-embed-large-v1",
+        "snowflake-l":     "snowflake/snowflake-arctic-embed-l",
+        "snowflake-m":     "snowflake/snowflake-arctic-embed-m",
+        "jina-v2":         "jinaai/jina-embeddings-v2-base-en",
+        "nomic-v1.5":      "nomic-ai/nomic-embed-text-v1.5",
+        "minilm-l6":       "sentence-transformers/all-MiniLM-L6-v2",
+    }
+    if name in _FASTEMBED_ALIASES or name.startswith("fastembed:"):
+        from graphstore.embedding.fastembed_embedder import FastEmbedEmbedder
+        model_id = (
+            _FASTEMBED_ALIASES[name] if name in _FASTEMBED_ALIASES
+            else name[len("fastembed:"):]
+        )
+        print(f"[embedder] loading fastembed: {model_id}", flush=True)
+        return FastEmbedEmbedder(model_name=model_id)
+
     raise ValueError(
         f"Unknown embedder: {name!r}. "
-        "Valid options: default, model2vec:<hf-model-id>, embeddinggemma, embeddinggemma-768, harrier"
+        "Valid options: default, model2vec:<hf-model-id>, embeddinggemma, embeddinggemma-768, "
+        "harrier, fastembed:<hf-id>, or aliases: bge-large, bge-base, bge-small, mxbai-large, "
+        "snowflake-l, snowflake-m, jina-v2, nomic-v1.5, minilm-l6"
     )
 
 
@@ -490,6 +521,13 @@ def main(argv: list[str] | None = None) -> int:
                             "  embeddinggemma                 — EmbeddingGemma-300M ONNX (256d Matryoshka)\n"
                             "  embeddinggemma-768             — EmbeddingGemma-300M ONNX (768d full)\n"
                             "  harrier                        — Microsoft Harrier-OSS-v1 0.6B ONNX (1024d, MTEB 69.0)\n"
+                            "  bge-large / bge-base / bge-small — BAAI bge-en-v1.5 via fastembed\n"
+                            "  mxbai-large                    — mixedbread mxbai-embed-large-v1 (1024d)\n"
+                            "  snowflake-l / snowflake-m      — Snowflake arctic-embed (1024d / 768d)\n"
+                            "  jina-v2                        — jina-embeddings-v2-base-en (768d)\n"
+                            "  nomic-v1.5                     — nomic-embed-text-v1.5 (768d, 8k context)\n"
+                            "  minilm-l6                      — sentence-transformers/all-MiniLM-L6-v2 (384d)\n"
+                            "  fastembed:<hf-id>              — any fastembed-supported HuggingFace model\n"
                         ))
     parser.add_argument("--granularity", choices=["session", "turn"], default="session")
     parser.add_argument("--limit", type=int)

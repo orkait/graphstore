@@ -70,6 +70,13 @@ ingest-pro = [
     "docling>=2.0",
     "openai>=1.0",
 ]
+fastembed = [
+    # Qdrant's lightweight ONNX embedder wrapper — unlocks 30+ pre-exported
+    # BERT-family models (BGE, mxbai, e5, snowflake, jina-v2, MiniLM, nomic)
+    # without dragging in torch. Shares the onnxruntime/tokenizers install
+    # that graphstore already uses, so the added footprint is ~20-30 MB.
+    "fastembed>=0.8",
+]
 
 [tool.setuptools.packages.find]
 include = ["graphstore*"]

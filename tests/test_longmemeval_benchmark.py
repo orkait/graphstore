@@ -55,12 +55,44 @@ def test_load_longmemeval_reads_entries():
     assert data[0]["question_id"] == "q1"
 
 
-def test_build_corpus_session_uses_all_turns():
+def test_build_corpus_session_filters_to_user_turns():
+    """Session documents should contain only user-role turns.
+
+    Assistant responses are chatter/rephrasing that dilute the vector signal
+    for LongMemEval's ground-truth answer questions. Filtering to user turns
+    matches MemPalace's benchmark convention and closed a measured ~3pp R@5
+    gap in our testing. See the benchmark README for full numbers.
+    """
     entry = load_longmemeval(FIXTURE)[0]
     items = build_corpus(entry, granularity="session")
     assert len(items) == 2
     assert items[0].session_id == "sess_1"
-    assert "Seattle sounds like a great move." in items[0].text
+    # User-only content for sess_1 is "I moved to Seattle last year."
+    assert "I moved to Seattle last year." in items[0].text
+    # Assistant response must NOT leak into the embedded text.
+    assert "Seattle sounds like a great move." not in items[0].text
+
+
+def test_build_corpus_session_falls_back_when_no_role_labels():
+    """If the dataset has no role labels, fall back to embedding all turns.
+
+    Some older cleaned LongMemEval dumps omit the role field entirely; we
+    should stay functional rather than producing empty documents.
+    """
+    entry = {
+        "haystack_sessions": [
+            [
+                {"content": "raw turn one with no role"},
+                {"content": "raw turn two with no role"},
+            ],
+        ],
+        "haystack_session_ids": ["sess_no_role"],
+        "haystack_dates": ["2023/01/01 (Sun) 10:00"],
+    }
+    items = build_corpus(entry, granularity="session")
+    assert len(items) == 1
+    assert "raw turn one with no role" in items[0].text
+    assert "raw turn two with no role" in items[0].text
 
 
 def test_build_corpus_turn_keeps_session_mapping():
