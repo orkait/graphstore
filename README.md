@@ -10,7 +10,7 @@
 [![Version](https://img.shields.io/badge/version-0.3.0-f59e0b?logo=semver&logoColor=white)](https://github.com/orkait/graphstore)
 [![NumPy](https://img.shields.io/badge/numpy-%23013243?logo=numpy&logoColor=white)](https://numpy.org)
 [![SciPy](https://img.shields.io/badge/scipy-%238CAAE6?logo=scipy&logoColor=white)](https://scipy.org)
-[![usearch](https://img.shields.io/badge/usearch-%23FF6B35?logo=data:image/svg+xml;base64,&logoColor=white)](https://github.com/unum-cloud/usearch)
+[![usearch](https://img.shields.io/badge/usearch-HNSW-FF6B35?logoColor=white)](https://github.com/unum-cloud/usearch)
 
 </div>
 
@@ -65,6 +65,9 @@ Core includes: numpy, scipy, lark, usearch, model2vec, croniter, msgspec (~90 MB
 ```bash
 # Higher quality embeddings (EmbeddingGemma-300M via ONNX)
 graphstore install-embedder embeddinggemma
+
+# 30+ ONNX BERT-family models (BGE, mxbai, e5, nomic, snowflake, jina-v2)
+pip install "graphstore[fastembed]"
 
 # Voice: speech-to-text + text-to-speech (Moonshine + Piper)
 graphstore install-voice
@@ -624,6 +627,13 @@ VAULT ARCHIVE "title"
 | SYS SNAPSHOT | 1.8 ms |
 | Memory per node | 66 bytes (columns) + 1 KB (vector) |
 
+**Retrieval quality** (LongMemEval benchmark, 500 sessions, R@5):
+
+| System | R@5 |
+|---|---|
+| graphstore (model2vec default) | 94.7% |
+| MemPalace | 96.6% |
+
 ## ⚙️ Configuration
 
 ```python
@@ -722,7 +732,6 @@ g = GraphStore(
 ```
 
 </details>
-```
 
 ## 🏗️ Architecture
 
@@ -749,6 +758,7 @@ graphstore/
 │   ├── optimizer.py           # Self-balancing: compact, GC, evict
 │   ├── scheduler.py          # OptimizerScheduler: health + auto-optimize
 │   ├── queue.py              # CommandQueue: thread-safe priority queue
+│   ├── runtime.py            # RuntimeState: shared component refs
 │   ├── types.py              # Result, Edge dataclasses
 │   └── errors.py             # Error hierarchy
 ├── dsl/                      # Query language
