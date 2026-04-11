@@ -8,6 +8,15 @@ from __future__ import annotations
 
 import numpy as np
 
+from graphstore.algos.compact import (
+    apply_slot_remap_to_edges as _algo_apply_slot_remap,
+    build_live_mask as _algo_build_live_mask,
+    slot_remap_plan as _algo_slot_remap_plan,
+)
+from graphstore.algos.eviction import (
+    needs_optimization as _algo_needs_optimization,
+    rank_evictable_slots as _algo_rank_evictable,
+)
 from graphstore.core.store import CoreStore
 from graphstore.core.strings import StringTable
 
@@ -26,9 +35,17 @@ def health_check(store: CoreStore, vector_store=None, document_store=None) -> di
     total_vectors = 0
     if vector_store is not None:
         total_vectors = vector_store.count()
-        for slot in range(min(n, vector_store._capacity)):
-            if vector_store._has_vector[slot] and slot in store.node_tombstones:
-                dead_vectors += 1
+        cap = min(n, vector_store._capacity)
+        if cap > 0 and store.node_tombstones:
+            has_vec = vector_store._has_vector[:cap]
+            tomb_mask = np.zeros(cap, dtype=bool)
+            tomb_arr = np.fromiter(
+                (t for t in store.node_tombstones if t < cap),
+                dtype=np.int32,
+            )
+            if tomb_arr.size:
+                tomb_mask[tomb_arr] = True
+            dead_vectors = int(np.sum(has_vec & tomb_mask))
 
     edge_keys_count = len(store._edge_keys)
     actual_edges = sum(len(v) for v in store._edges_by_type.values())
@@ -54,19 +71,9 @@ def health_check(store: CoreStore, vector_store=None, document_store=None) -> di
 def needs_optimization(health: dict, compact_threshold: float = 0.2,
                        string_gc_threshold: float = 3.0,
                        cache_gc_threshold: int = 200) -> list[str]:
-    """Determine which operations are needed based on health metrics."""
-    ops = []
-    if health["tombstone_ratio"] > compact_threshold:
-        ops.append("COMPACT")
-    if health["string_bloat"] > string_gc_threshold and health["live_nodes"] > 0:
-        ops.append("STRINGS")
-    if health["dead_vectors"] > 0:
-        ops.append("VECTORS")
-    if health["stale_edge_keys"] > 0:
-        ops.append("EDGES")
-    if health["cache_size"] > cache_gc_threshold:
-        ops.append("CACHE")
-    return ops
+    return _algo_needs_optimization(
+        health, compact_threshold, string_gc_threshold, cache_gc_threshold,
+    )
 
 
 def compact_tombstones(store: CoreStore, vector_store=None, document_store=None) -> dict:
@@ -81,23 +88,13 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
 
     n = store._next_slot
 
-    # Vectorized live slot detection
-    live_mask = store.node_ids[:n] >= 0
-    if store.node_tombstones:
-        tomb_arr = np.array(list(store.node_tombstones), dtype=np.int32)
-        valid = tomb_arr[tomb_arr < n]
-        if len(valid) > 0:
-            live_mask[valid] = False
-
+    live_mask = _algo_build_live_mask(store.node_ids, store.node_tombstones, n)
+    old_to_new, new_count = _algo_slot_remap_plan(live_mask)
     live_slots_arr = np.nonzero(live_mask)[0]
-    new_count = len(live_slots_arr)
 
     if new_count == n:
         return {"compacted": 0}
 
-    # Build remapping via numpy
-    old_to_new = np.full(n, -1, dtype=np.int32)
-    old_to_new[live_slots_arr] = np.arange(new_count, dtype=np.int32)
     old_to_new_dict = {int(old): int(old_to_new[old]) for old in live_slots_arr}
 
     new_capacity = max(new_count * 2, store._capacity)
@@ -121,14 +118,10 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
         store.columns._presence[field] = new_pres
     store.columns._capacity = new_capacity
 
-    # Remap edges using numpy lookup array
     for etype in list(store._edges_by_type.keys()):
-        remapped = []
-        for s, t, d in store._edges_by_type[etype]:
-            ns = old_to_new[s] if s < n else -1
-            nt = old_to_new[t] if t < n else -1
-            if ns >= 0 and nt >= 0:
-                remapped.append((int(ns), int(nt), d))
+        remapped = _algo_apply_slot_remap(
+            store._edges_by_type[etype], old_to_new, n,
+        )
         if remapped:
             store._edges_by_type[etype] = remapped
         else:
@@ -242,9 +235,6 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
     # Rebuild secondary indices
     for field in list(store._indexed_fields):
         store.add_index(field)
-
-    # Invalidate snapshots (slot numbering changed)
-    store._snapshots.clear()
 
     return {"compacted": n - new_count}
 
@@ -476,42 +466,31 @@ def optimize_all(
 
 
 def _get_evictable_slots_sorted(store: CoreStore, protected_kinds: set) -> list[int]:
-    """Helper: get ascending sorted list of (slot) by __updated_at__ for oldest-first eviction."""
+    """Shell: resolve store column arrays, delegate to algos.eviction."""
     n = store._next_slot
     if n == 0:
         return []
 
     live = store.compute_live_mask(n)
-    live_slots = np.nonzero(live)[0]
-
-    if len(live_slots) == 0:
-        return []
-
-    # Get updated_at for sorting
     updated_col = store.columns.get_column("__updated_at__", n)
     if updated_col is not None:
         col_data, col_pres, _ = updated_col
-        # Slots without updated_at get timestamp 0 (oldest, evict first)
-        timestamps = np.where(col_pres[:n], col_data[:n].astype(np.float64), 0.0)
-    else:
-        timestamps = np.zeros(n, dtype=np.float64)
-
-    # Filter protected kinds before sorting
-    candidates = []
-    for s in live_slots:
-        kind_id = int(store.node_kinds[s])
-        if kind_id >= 0:
-            try:
-                kind_name = store.string_table.lookup(kind_id)
-                if kind_name in protected_kinds:
-                    continue
-            except KeyError:
-                pass
-        candidates.append((int(s), timestamps[s]))
-
-    # Sort live slots by timestamp ascending (oldest first)
-    candidates.sort(key=lambda x: x[1])
-    return [s[0] for s in candidates]
+        return _algo_rank_evictable(
+            live_mask=live,
+            kind_ids=store.node_kinds[:n],
+            kind_lookup=store.string_table.lookup,
+            updated_at=col_data[:n],
+            updated_at_present=col_pres[:n],
+            protected_kinds=protected_kinds,
+        )
+    return _algo_rank_evictable(
+        live_mask=live,
+        kind_ids=store.node_kinds[:n],
+        kind_lookup=store.string_table.lookup,
+        updated_at=None,
+        updated_at_present=None,
+        protected_kinds=protected_kinds,
+    )
 
 
 def _evict_nodes(store: CoreStore, slots_to_evict: list[int], vector_store=None, document_store=None) -> int:

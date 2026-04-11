@@ -96,14 +96,18 @@ class TestOptimizeCompact:
         assert result.data["compacted"] == 0
         gs.close()
 
-    def test_compact_invalidates_snapshots(self, tmp_path):
+    def test_compact_preserves_snapshots(self, tmp_path):
         gs = GraphStore(path=str(tmp_path / "db"), embedder=None)
         gs.execute('CREATE NODE "a" kind = "test"')
+        gs.execute('CREATE NODE "b" kind = "test"')
         gs.execute('SYS SNAPSHOT "before"')
         gs.execute('DELETE NODE "a"')
         gs.execute('SYS OPTIMIZE COMPACT')
         snapshots = gs.execute('SYS SNAPSHOTS')
-        assert len(snapshots.data) == 0
+        assert "before" in snapshots.data
+        gs.execute('SYS ROLLBACK TO "before"')
+        assert gs.execute('NODE "a"').data is not None
+        assert gs.execute('NODE "b"').data is not None
         gs.close()
 
 

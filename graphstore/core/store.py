@@ -253,6 +253,120 @@ class CoreStore:
                 return slot
         return self.put_node(id, kind, data)
 
+    def delete_nodes_bulk(
+        self,
+        ids: list[str],
+        vector_store=None,
+        document_store=None,
+    ) -> list[str]:
+        """Bulk tombstone by ID with a single edge cascade rebuild.
+
+        Much faster than looping delete_node() for DELETE NODES WHERE:
+        avoids O(N*E) cascade cost by running one filter pass at the end.
+        Unknown or already-tombstoned IDs are skipped silently.
+        Returns the list of IDs actually removed.
+        """
+        if not ids:
+            return []
+
+        slots_to_remove: list[int] = []
+        str_ids_to_remove: list[int] = []
+        deleted_ids: list[str] = []
+        intern = self.string_table.intern
+
+        for id_ in ids:
+            if id_ not in self.string_table:
+                continue
+            str_id = intern(id_)
+            slot = self.id_to_slot.get(str_id)
+            if slot is None or slot in self.node_tombstones:
+                continue
+            slots_to_remove.append(slot)
+            str_ids_to_remove.append(str_id)
+            deleted_ids.append(id_)
+
+        if not slots_to_remove:
+            return []
+
+        slot_set = set(slots_to_remove)
+
+        if self._indexed_fields:
+            lookup = self.string_table.lookup
+            for field in self._indexed_fields:
+                if not self.columns.has_column(field):
+                    continue
+                pres_col = self.columns._presence[field]
+                data_col = self.columns._columns[field]
+                dtype = self.columns._dtypes[field]
+                bucket = self.secondary_indices.get(field)
+                if bucket is None:
+                    continue
+                for slot in slots_to_remove:
+                    if not pres_col[slot]:
+                        continue
+                    raw = data_col[slot]
+                    if dtype == "int32_interned":
+                        val = lookup(int(raw))
+                    elif dtype == "float64":
+                        val = float(raw)
+                    else:
+                        val = int(raw)
+                    lst = bucket.get(val)
+                    if lst is not None and slot in lst:
+                        lst.remove(slot)
+
+        for slot in slots_to_remove:
+            if vector_store is not None:
+                try:
+                    vector_store.remove(slot)
+                except Exception:
+                    pass
+            if document_store is not None:
+                try:
+                    document_store.delete_document(slot)
+                except Exception:
+                    pass
+            self.columns.clear(slot)
+
+        self.node_tombstones.update(slot_set)
+        self._tombstone_mask_cache = None
+        for str_id in str_ids_to_remove:
+            self.id_to_slot.pop(str_id, None)
+        self._count -= len(slots_to_remove)
+        self._dirty_nodes = True
+        self._dirty_columns = True
+        self._dirty_edges = True
+        self._invalidate_live_cache()
+
+        any_removed = False
+        for etype in list(self._edges_by_type.keys()):
+            old_edges = self._edges_by_type[etype]
+            new_edges = [
+                (s, t, d) for s, t, d in old_edges
+                if s not in slot_set and t not in slot_set
+            ]
+            if len(new_edges) != len(old_edges):
+                any_removed = True
+            if new_edges:
+                self._edges_by_type[etype] = new_edges
+            else:
+                del self._edges_by_type[etype]
+
+        if any_removed:
+            self._edge_keys = {
+                (s, t, k)
+                for k, edges in self._edges_by_type.items()
+                for s, t, _d in edges
+            }
+            self._edge_data_idx = {
+                k: {(s, t): d for s, t, d in edges}
+                for k, edges in self._edges_by_type.items()
+            }
+
+        self._edges_dirty = True
+        self._ensure_edges_built()
+        return deleted_ids
+
     def delete_node(self, id: str):
         """Delete node and cascade-delete all edges. Raises NodeNotFound."""
         if id not in self.string_table:

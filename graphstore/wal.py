@@ -24,6 +24,7 @@ class WALManager:
         self._wal_hard_limit = wal_hard_limit
         self._auto_checkpoint_threshold = auto_checkpoint_threshold
         self._log_retention_days = log_retention_days
+        self._replay_errors: list[dict] = []
 
     @property
     def _conn(self):
@@ -78,6 +79,7 @@ class WALManager:
         rows = conn.execute("SELECT statement FROM wal ORDER BY seq").fetchall()
         if not rows:
             return
+        self._replay_errors.clear()
         for (statement,) in rows:
             try:
                 ast = parse(statement)
@@ -85,9 +87,32 @@ class WALManager:
                     ast = ast_nodes.UpsertNode(id=ast.id, fields=ast.fields)
                 self._executor.execute(ast)
             except Exception as e:
-                logger.debug("WAL replay statement skipped: %s", e, exc_info=True)
+                err = {
+                    "statement": statement[:500],
+                    "error_type": type(e).__name__,
+                    "error": str(e)[:500],
+                }
+                if len(self._replay_errors) < 50:
+                    self._replay_errors.append(err)
+                logger.warning(
+                    "WAL replay statement failed: %s: %s — %s",
+                    err["error_type"], err["error"], err["statement"],
+                )
+        if self._replay_errors:
+            logger.warning(
+                "WAL replay completed with %d error(s). See SYS STATUS for details.",
+                len(self._replay_errors),
+            )
         if rows:
             _checkpoint_fn(self._store, self._schema, conn, force=True)
+
+    @property
+    def replay_error_count(self) -> int:
+        return len(self._replay_errors)
+
+    @property
+    def replay_errors(self) -> list[dict]:
+        return list(self._replay_errors)
 
     def checkpoint(self, vector_store=None) -> None:
         conn = self._conn

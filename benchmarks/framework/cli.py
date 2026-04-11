@@ -40,7 +40,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     adapter = adapter_cls(
         config={
             "ceiling_mb": args.ceiling_mb,
-            "threaded": args.threaded,
+            "queued": args.queued,
         }
     )
 
@@ -61,7 +61,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         max_questions=args.max_questions,
         config={
             "ceiling_mb": args.ceiling_mb,
-            "threaded": args.threaded,
+            "queued": args.queued,
             "k": args.k,
             "variant": args.variant,
             "max_questions": args.max_questions,
@@ -115,7 +115,7 @@ def main() -> int:
     p_run.add_argument("--k", type=int, default=5)
     p_run.add_argument("--max-questions", type=int, default=None)
     p_run.add_argument("--ceiling-mb", type=int, default=2048)
-    p_run.add_argument("--threaded", action="store_true")
+    p_run.add_argument("--queued", action="store_true")
     p_run.add_argument(
         "--out-dir",
         default="benchmarks/framework/results",

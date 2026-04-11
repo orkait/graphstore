@@ -45,6 +45,12 @@ class GraphStore:
         ceiling_mb: Hard memory limit in MB. Raises CeilingExceeded on breach.
         embedder: Embedder instance, "default" for Model2Vec, or None to disable.
         allow_system_queries: If False, SYS queries raise PermissionError.
+        queued: Install a single-worker submission queue in front of the write
+                path. Makes the instance safe to share across caller threads -
+                each execute() is serialized through one daemon worker (NOT
+                concurrent execution, the storage engine is single-writer).
+                Also starts the cron scheduler when a persistent path is set.
+                Default False = caller is responsible for single-threaded use.
     """
 
     _UNSET = object()
@@ -55,7 +61,7 @@ class GraphStore:
                  vault=_UNSET, retention=_UNSET,
                  config: GraphStoreConfig | None = None,
                  config_path: str | None = None,
-                 threaded: bool = False,
+                 queued: bool = False,
                  ingestors: dict | None = None,
                  chunker=None,
                  stt=None,
@@ -176,12 +182,17 @@ class GraphStore:
             doc_db = None
         _document_store = DocumentStore(doc_db, fts_tokenizer=cfg.document.fts_tokenizer)
 
-        # Single shared container for cross-component refs
+        import collections
+        self._similarity_buffer = collections.deque(
+            maxlen=cfg.evolution.similarity_buffer_size
+        )
+
         from graphstore.core.runtime import RuntimeState
         self._runtime = RuntimeState(
             store=_store, schema=_schema,
             vector_store=_vector_store, document_store=_document_store,
             embedder=_embedder, conn=_conn,
+            similarity_buffer=self._similarity_buffer,
         )
 
         # Compaction sentinel recovery Phase 2: DocStore orphan cleanup.
@@ -232,7 +243,7 @@ class GraphStore:
         self._sys_executor._eviction_target_ratio = cfg.core.eviction_target_ratio
         # Evolution engine wired after engine is created (below)
 
-        # Cron scheduler (requires threaded mode for background execution)
+        # Cron scheduler (requires queued mode for background execution)
         self._cron: CronScheduler | None = None
 
         # WAL manager
@@ -242,6 +253,7 @@ class GraphStore:
             auto_checkpoint_threshold=cfg.persistence.auto_checkpoint_threshold,
             log_retention_days=cfg.persistence.log_retention_days,
         )
+        self._sys_executor._wal_manager = self._wal
 
         # Replay WAL (must happen after executor is created)
         if self._path and self._runtime.conn:
@@ -281,8 +293,6 @@ class GraphStore:
         # Trace binding for log layer
         self._active_trace: str | None = None
 
-        # Evolution layer counters and signal infrastructure
-        import collections
         self._counters: dict = {
             "execute_ok": 0,
             "execute_err": 0,
@@ -291,7 +301,6 @@ class GraphStore:
             "eviction_total": 0,
         }
         self._start_time: float = time.time()
-        self._similarity_buffer = collections.deque(maxlen=cfg.evolution.similarity_buffer_size)
         self._last_evolution_events: list = []
 
         # Evolution engine (Layer 5: metacognitive memory)
@@ -301,21 +310,22 @@ class GraphStore:
         self._optimizer._evolution_engine = self._evolution_engine
         self._sys_executor._evolution_engine = self._evolution_engine
 
-        # Command queue for thread-safe access
-        self._threaded = threaded
+        # Single-worker submission queue (not parallelism) — gives
+        # thread-safe caller side even though writes stay serialized.
+        self._queued = queued
         self._queue = None
-        if threaded:
+        if queued:
             from graphstore.core.queue import CommandQueue
             self._queue = CommandQueue(self._execute_internal)
 
-        # Start cron scheduler if threaded and persistent
-        if threaded and self._conn is not None:
+        # Start cron scheduler if queued and persistent
+        if queued and self._conn is not None:
             self._cron = CronScheduler(self._conn, self.submit_background)
             self._cron.start()
             self._sys_executor._cron = self._cron
 
     def execute(self, query: str) -> Result:
-        """Execute a DSL query. Thread-safe if threaded=True."""
+        """Execute a DSL query. Thread-safe if queued=True."""
         if self._queue is not None:
             return self._queue.submit(query)
         return self._execute_internal(query)
@@ -439,10 +449,10 @@ class GraphStore:
             executor._pending_embeddings.clear()
 
     def submit_background(self, query: str) -> "Future":
-        """Submit a background query (low priority). Only available in threaded mode.
+        """Submit a background query (low priority). Only available in queued mode.
         Returns a Future that resolves to a Result."""
         if self._queue is None:
-            raise RuntimeError("submit_background requires GraphStore(threaded=True)")
+            raise RuntimeError("submit_background requires GraphStore(queued=True)")
         return self._queue.submit_background(query)
 
     def checkpoint(self) -> None:
@@ -536,9 +546,7 @@ class GraphStore:
             "recall_misses": 0,
             "eviction_total": 0,
         }
-        self._similarity_buffer = collections.deque(
-            maxlen=self._config.evolution.similarity_buffer_size
-        )
+        self._similarity_buffer.clear()
         self._last_evolution_events.clear()
         self._start_time = time.time()
 

@@ -58,13 +58,13 @@ def gs(tmp_path):
 
 
 @pytest.fixture
-def gs_threaded(tmp_path):
-    """Threaded GraphStore with mock embedder."""
+def gs_queued(tmp_path):
+    """Queued GraphStore with mock embedder (submission queue + cron enabled)."""
     store = GraphStore(
         path=str(tmp_path / "brain"),
         embedder=MockEmbedder(),
         ceiling_mb=256,
-        threaded=True,
+        queued=True,
     )
     yield store
     store.close()
@@ -595,19 +595,19 @@ class TestSystemWithFixtures:
         result = gs.execute('SYS OPTIMIZE')
         assert result.kind == "ok"
 
-    def test_cron_lifecycle(self, gs_threaded):
+    def test_cron_lifecycle(self, gs_queued):
         """CRON add, list, run, delete full lifecycle."""
-        gs_threaded.execute(
+        gs_queued.execute(
             'SYS CRON ADD "test-job" SCHEDULE "@hourly" QUERY "SYS STATS"'
         )
-        result = gs_threaded.execute('SYS CRON LIST')
+        result = gs_queued.execute('SYS CRON LIST')
         assert len(result.data) == 1
         assert result.data[0]["name"] == "test-job"
 
-        gs_threaded.execute('SYS CRON RUN "test-job"')
+        gs_queued.execute('SYS CRON RUN "test-job"')
 
-        gs_threaded.execute('SYS CRON DELETE "test-job"')
-        result = gs_threaded.execute('SYS CRON LIST')
+        gs_queued.execute('SYS CRON DELETE "test-job"')
+        result = gs_queued.execute('SYS CRON LIST')
         assert len(result.data) == 0
 
     def test_log_with_trace_id(self, gs):

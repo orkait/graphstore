@@ -6,6 +6,14 @@ from collections import deque
 import numpy as np
 from scipy.sparse import csr_matrix
 
+from graphstore.algos.fusion import (
+    normalize_bm25 as _algo_normalize_bm25,
+    recency_decay as _algo_recency_decay,
+    weighted_remember_fusion as _algo_weighted_fusion,
+)
+from graphstore.algos.spreading import (
+    spreading_activation as _algo_spreading_activation,
+)
 from graphstore.core.edges import resize_csr
 
 from graphstore.dsl.handlers._registry import handles
@@ -33,9 +41,6 @@ class IntelligenceHandlers:
         if combined is None:
             return Result(kind="nodes", data=[], count=0)
 
-        activation = np.zeros(n, dtype=np.float64)
-        activation[cue_slot] = 1.0
-
         importance = np.ones(n, dtype=np.float64)
         imp_col = self.store.columns.get_column("importance", n)
         if imp_col is not None:
@@ -58,20 +63,19 @@ class IntelligenceHandlers:
         live_mask = self._compute_live_mask(n)
 
         if combined.shape[0] < n:
-            # Rare path: matrix predates latest node additions, resize then transpose.
-            # Intentionally NOT cached — resized matrix differs from _combined_all.
             mat_t = resize_csr(combined, n).T.tocsr()
         else:
             mat_t = self.store.edge_matrices.get_combined_transpose()
         decay = getattr(self, '_recall_decay', 0.7)
-        for _ in range(q.depth):
-            spread = mat_t.dot(activation) * decay
-            activation = activation + spread
-            activation[:n] *= live_mask.astype(np.float64)
-        activation *= importance[:len(activation)]
-        activation *= recency[:len(activation)]
-
-        activation[cue_slot] = 0.0
+        activation = _algo_spreading_activation(
+            matrix_t=mat_t,
+            cue_slot=cue_slot,
+            depth=q.depth,
+            decay=decay,
+            live_mask=live_mask,
+            importance=importance,
+            recency=recency,
+        )
 
         if q.where:
             kind_filter = self._extract_kind_from_where(q.where)
@@ -156,6 +160,7 @@ class IntelligenceHandlers:
         conf_col = self.store.columns.get_column("__confidence__", n)
         results = []
         target_k = q.limit.value if q.limit else 10
+        sim_floor = getattr(self, "_similarity_threshold", None)
         for slot_idx, dist in zip(slots, dists):
             slot = int(slot_idx)
             node = self.store._materialize_slot(slot)
@@ -163,7 +168,10 @@ class IntelligenceHandlers:
                 continue
             if q.where and not self._eval_where(q.where.expr, node):
                 continue
-            node["_similarity_score"] = round(1.0 - float(dist), 4)
+            similarity = 1.0 - float(dist)
+            if sim_floor is not None and similarity < sim_floor:
+                continue
+            node["_similarity_score"] = round(similarity, 4)
             if conf_col is not None:
                 col_data, col_pres, _ = conf_col
                 if col_pres[slot]:
@@ -171,6 +179,10 @@ class IntelligenceHandlers:
             results.append(node)
             if len(results) >= target_k:
                 break
+
+        buf = getattr(self._runtime, "similarity_buffer", None)
+        if buf is not None and results:
+            buf.append(results[0]["_similarity_score"])
 
         return Result(kind="nodes", data=results, count=len(results))
 
@@ -275,13 +287,9 @@ class IntelligenceHandlers:
     @handles(RememberQuery)
     def _remember(self, q: RememberQuery) -> Result:
         """REMEMBER: hybrid retrieval fusing vector + BM25 + recency + confidence."""
-        import math
-
         target_k = q.limit.value if q.limit else 10
         oversample_factor = getattr(self, '_search_oversample', 5)
         oversample = target_k * oversample_factor
-
-        candidates: dict[int, dict] = {}
 
         n = self.store._next_slot
         if n == 0:
@@ -290,7 +298,8 @@ class IntelligenceHandlers:
         live_mask = self._compute_live_mask(n)
         now_ms = int(time.time() * 1000)
 
-        # --- Vector candidates ---
+        vec_slots_np = np.empty(0, dtype=np.int64)
+        vec_sims_np = np.empty(0, dtype=np.float64)
         if self._embedder and self._vector_store and self._vector_store.count() > 0:
             query_vec = self._embedder.encode_queries([q.query])[0]
             vs_cap = self._vector_store._capacity
@@ -298,101 +307,110 @@ class IntelligenceHandlers:
             cap = min(n, vs_cap)
             vs_mask[:cap] = self._vector_store._has_vector[:cap]
             combined = live_mask & vs_mask
+            slots, dists = self._vector_store.search(
+                query_vec, k=oversample, mask=combined, oversample_factor=oversample_factor,
+            )
+            if len(slots) > 0:
+                vec_slots_np = np.asarray(slots, dtype=np.int64)
+                vec_sims_np = np.maximum(
+                    1.0 - np.asarray(dists, dtype=np.float64), 0.0
+                )
 
-            slots, dists = self._vector_store.search(query_vec, k=oversample, mask=combined, oversample_factor=oversample_factor)
-            for slot_idx, dist in zip(slots, dists):
-                slot = int(slot_idx)
-                sim = max(0.0, 1.0 - float(dist))
-                candidates[slot] = {"vector_sim": sim, "bm25": 0.0, "recency": 0.0,
-                                    "confidence": 1.0, "recall_boost": 0.0}
-
-        # --- BM25 candidates ---
+        bm25_slots_np = np.empty(0, dtype=np.int64)
+        bm25_scores_np = np.empty(0, dtype=np.float64)
         if self._document_store:
             hits = self._document_store.search_text(q.query, limit=oversample)
-            for slot, score in hits:
-                if slot < n and live_mask[slot]:
-                    if slot not in candidates:
-                        candidates[slot] = {"vector_sim": 0.0, "bm25": 0.0, "recency": 0.0,
-                                            "confidence": 1.0, "recall_boost": 0.0}
-                    candidates[slot]["bm25"] = abs(float(score))
+            if hits:
+                raw_slots = np.fromiter(
+                    (s for s, _ in hits), dtype=np.int64, count=len(hits),
+                )
+                raw_scores = np.abs(
+                    np.fromiter(
+                        (sc for _, sc in hits), dtype=np.float64, count=len(hits),
+                    )
+                )
+                in_range = raw_slots < n
+                if in_range.any():
+                    rs = raw_slots[in_range]
+                    rsc = raw_scores[in_range]
+                    live_pick = live_mask[rs]
+                    bm25_slots_np = rs[live_pick]
+                    bm25_scores_np = rsc[live_pick]
 
-        if not candidates:
+        if len(vec_slots_np) == 0 and len(bm25_slots_np) == 0:
             return Result(kind="nodes", data=[], count=0)
 
-        # Normalize BM25 scores to 0-1
-        max_bm25 = max((c["bm25"] for c in candidates.values()), default=0.0)
-        if max_bm25 > 0:
-            for c in candidates.values():
-                c["bm25"] = c["bm25"] / max_bm25
+        slot_arr = np.union1d(vec_slots_np, bm25_slots_np)
+        m = len(slot_arr)
 
-        # --- Recency scoring ---
+        vec_signal = np.zeros(m, dtype=np.float64)
+        if len(vec_slots_np) > 0:
+            vi = np.searchsorted(slot_arr, vec_slots_np)
+            vec_signal[vi] = vec_sims_np
+
+        bm25_signal = np.zeros(m, dtype=np.float64)
+        if len(bm25_slots_np) > 0:
+            bi = np.searchsorted(slot_arr, bm25_slots_np)
+            scattered = np.zeros(m, dtype=np.float64)
+            scattered[bi] = bm25_scores_np
+            bm25_signal = _algo_normalize_bm25(scattered)
+
+        recency_signal = np.ones(m, dtype=np.float64)
         updated_col = self.store.columns.get_column("__updated_at__", n)
-        for slot, scores in candidates.items():
-            age_days = 0.0
-            if updated_col is not None:
-                col_data, col_pres, _ = updated_col
-                if col_pres[slot]:
-                    age_ms = now_ms - int(col_data[slot])
-                    age_days = max(0.0, age_ms / 86400000.0)
-            scores["recency"] = math.exp(-age_days / 30.0)
+        if updated_col is not None:
+            col_data, col_pres, _ = updated_col
+            pres_at = col_pres[slot_arr]
+            if pres_at.any():
+                recency_signal = _algo_recency_decay(
+                    col_data[slot_arr], pres_at, now_ms, half_life_days=30.0,
+                )
 
-        # --- Confidence scoring ---
+        confidence_signal = np.ones(m, dtype=np.float64)
         conf_col = self.store.columns.get_column("__confidence__", n)
         if conf_col is not None:
             col_data, col_pres, _ = conf_col
-            for slot, scores in candidates.items():
-                if col_pres[slot]:
-                    scores["confidence"] = max(0.0, min(1.0, float(col_data[slot])))
+            pres_at = col_pres[slot_arr]
+            if pres_at.any():
+                clamped = np.clip(col_data[slot_arr].astype(np.float64), 0.0, 1.0)
+                confidence_signal = np.where(pres_at, clamped, 1.0)
 
-        # --- Recall frequency boost ---
+        recall_signal = np.zeros(m, dtype=np.float64)
         recall_col = self.store.columns.get_column("__recall_count__", n)
         if recall_col is not None:
             col_data, col_pres, _ = recall_col
-            max_recalls = 1.0
-            for slot in candidates:
-                if col_pres[slot]:
-                    max_recalls = max(max_recalls, float(col_data[slot]))
-            for slot, scores in candidates.items():
-                if col_pres[slot] and max_recalls > 0:
-                    scores["recall_boost"] = float(col_data[slot]) / max_recalls
+            pres_at = col_pres[slot_arr]
+            if pres_at.any():
+                counts = col_data[slot_arr].astype(np.float64)
+                max_recalls = max(1.0, float(counts[pres_at].max()))
+                boost = counts / max_recalls
+                recall_signal = np.where(pres_at, boost, 0.0)
 
-        # --- Weighted fusion ---
         weights = getattr(self, '_remember_weights', [0.30, 0.20, 0.15, 0.20, 0.15])
-        W_VECTOR = weights[0] if len(weights) > 0 else 0.30
-        W_BM25 = weights[1] if len(weights) > 1 else 0.20
-        W_RECENCY = weights[2] if len(weights) > 2 else 0.15
-        W_CONFIDENCE = weights[3] if len(weights) > 3 else 0.20
-        W_RECALL = weights[4] if len(weights) > 4 else 0.15
+        final = _algo_weighted_fusion(
+            vec_signal, bm25_signal, recency_signal,
+            confidence_signal, recall_signal, list(weights),
+        )
 
-        scored = []
-        for slot, scores in candidates.items():
-            final = (W_VECTOR * scores["vector_sim"]
-                     + W_BM25 * scores["bm25"]
-                     + W_RECENCY * scores["recency"]
-                     + W_CONFIDENCE * scores["confidence"]
-                     + W_RECALL * scores["recall_boost"])
-            scored.append((slot, final, scores))
+        order = np.argsort(-final)
 
-        scored.sort(key=lambda x: -x[1])
-
-        # --- Materialize, filter, and record retrieval feedback ---
         results = []
         retrieved_slots = []
-        for slot, final_score, scores in scored:
+        for idx_np in order:
+            idx = int(idx_np)
+            slot = int(slot_arr[idx])
             node = self.store._materialize_slot(slot)
             if node is None:
                 continue
             if q.where and not self._eval_where(q.where.expr, node):
                 continue
-            node["_remember_score"] = round(final_score, 4)
-            node["_vector_sim"] = round(scores["vector_sim"], 4)
-            node["_bm25_score"] = round(scores["bm25"], 4)
-            node["_recency_score"] = round(scores["recency"], 4)
-            node["_confidence"] = round(scores["confidence"], 4)
+            node["_remember_score"] = round(float(final[idx]), 4)
+            node["_vector_sim"] = round(float(vec_signal[idx]), 4)
+            node["_bm25_score"] = round(float(bm25_signal[idx]), 4)
+            node["_recency_score"] = round(float(recency_signal[idx]), 4)
+            node["_confidence"] = round(float(confidence_signal[idx]), 4)
             results.append(node)
             retrieved_slots.append(slot)
             if q.tokens is not None:
-                # Token budget mode: estimate tokens from text length
                 total_tokens = sum(
                     len(r.get("summary", "") + r.get("claim", "") + r.get("text", "")) // 4
                     for r in results
@@ -401,6 +419,10 @@ class IntelligenceHandlers:
                     break
             elif len(results) >= target_k:
                 break
+
+        buf = getattr(self._runtime, "similarity_buffer", None)
+        if buf is not None and results:
+            buf.append(results[0].get("_vector_sim", 0.0))
 
         # --- Retrieval feedback: increment recall count for returned nodes ---
         for slot in retrieved_slots:

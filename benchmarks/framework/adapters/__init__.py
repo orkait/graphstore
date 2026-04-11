@@ -25,6 +25,20 @@ try:  # pragma: no cover
 except ImportError:
     pass
 
+try:  # pragma: no cover
+    from .chroma_bm25 import ChromaBM25Adapter
+
+    AVAILABLE["chroma-bm25"] = ChromaBM25Adapter
+except ImportError:
+    pass
+
+try:  # pragma: no cover
+    from .llamaindex_ import LlamaIndexAdapter
+
+    AVAILABLE["llamaindex"] = LlamaIndexAdapter
+except ImportError:
+    pass
+
 
 def get_adapter(name: str) -> type:
     if name not in AVAILABLE:

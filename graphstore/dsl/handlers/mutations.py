@@ -267,18 +267,10 @@ class MutationHandlers:
                 nodes = self.store.get_all_nodes(kind=kind_filter)
                 ids_to_delete = [n["id"] for n in nodes if self._eval_where(q.where.expr, n)]
 
-        deleted_ids = []
-        for nid in ids_to_delete:
-            try:
-                # Clean vector before tombstoning
-                if self._vector_store:
-                    slot = self._resolve_slot(nid)
-                    if slot is not None:
-                        self._vector_store.remove(slot)
-                self.store.delete_node(nid)
-                deleted_ids.append(nid)
-            except NodeNotFound:
-                pass
+        deleted_ids = self.store.delete_nodes_bulk(
+            ids_to_delete,
+            vector_store=self._vector_store,
+        )
         return Result(kind="nodes", data=[{"id": i} for i in deleted_ids], count=len(deleted_ids))
 
     @handles(UpdateNodes, write=True)
