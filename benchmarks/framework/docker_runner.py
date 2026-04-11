@@ -43,6 +43,9 @@ def main() -> int:
     p.add_argument("--embedder-pooling", default="mean",
                    choices=["mean", "last_token"])
     p.add_argument("--embedder-threads", type=int, default=None)
+    p.add_argument("--gpu", action="store_true",
+                   help="enable onnxruntime CUDA provider for ONNX embedders "
+                        "(requires graphstore[gpu] install)")
     p.add_argument("--ceiling-mb", type=int, default=3072)
     p.add_argument("--cache-dir", default="/cache/fastembed")
     p.add_argument("--run-tag", default="")
@@ -79,6 +82,7 @@ def main() -> int:
         "embedder_max_length": args.embedder_max_length,
         "embedder_pooling": args.embedder_pooling,
         "embedder_threads": args.embedder_threads,
+        "embedder_gpu": args.gpu,
         "ceiling_mb": args.ceiling_mb,
         "cache_dir": args.cache_dir,
     }

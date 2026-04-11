@@ -77,6 +77,21 @@ fastembed = [
     # that graphstore already uses, so the added footprint is ~20-30 MB.
     "fastembed>=0.8",
 ]
+gpu = [
+    # Opt-in GPU acceleration for the ONNX embedder path. The pypi
+    # onnxruntime-gpu wheel is linked against CUDA 12 sonames, so we
+    # also bundle the matching nvidia-*-cu12 runtime wheels — the
+    # OnnxHFEmbedder dlopens them via ctypes at first use so users don't
+    # have to set LD_LIBRARY_PATH. Activate with GRAPHSTORE_GPU=1.
+    "onnxruntime-gpu>=1.23",
+    "nvidia-cublas-cu12>=12.0",
+    "nvidia-cuda-runtime-cu12>=12.0",
+    "nvidia-cuda-nvrtc-cu12>=12.0",
+    "nvidia-cudnn-cu12>=9.0",
+    "nvidia-cufft-cu12>=11.0",
+    "nvidia-curand-cu12>=10.0",
+    "nvidia-nvjitlink-cu12>=12.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["graphstore*"]
