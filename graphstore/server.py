@@ -9,11 +9,18 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+
+try:
+    from fastapi import FastAPI, Request
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
+    from fastapi.staticfiles import StaticFiles
+    from pydantic import BaseModel
+except ImportError as e:
+    raise ImportError(
+        "graphstore.server requires the `playground` extra. "
+        "Install with: pip install 'graphstore[playground]'"
+    ) from e
 
 from graphstore import GraphStore
 from graphstore.core.errors import GraphStoreError

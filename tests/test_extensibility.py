@@ -54,6 +54,7 @@ class TestIngestorRegistry:
         assert ingestor is not None
         assert ingestor.name in ("pymupdf4llm", "markitdown")
 
+    @pytest.mark.needs_ingest
     def test_builtin_txt_resolves(self):
         from graphstore.ingest.registry import IngestorRegistry
         reg = IngestorRegistry()

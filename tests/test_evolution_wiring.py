@@ -6,6 +6,7 @@ import pytest
 from graphstore import GraphStore
 
 
+@pytest.mark.needs_embedder
 class TestSimilarityBufferWired:
     def test_buffer_shared_with_runtime(self, tmp_path):
         gs = GraphStore(path=str(tmp_path / "db"))
@@ -80,6 +81,7 @@ class TestEdgeDensitySignal:
         gs.close()
 
 
+@pytest.mark.needs_embedder
 class TestSimilarityThresholdWired:
     def test_default_is_none(self, tmp_path):
         gs = GraphStore(path=str(tmp_path / "db"))

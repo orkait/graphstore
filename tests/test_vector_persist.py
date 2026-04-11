@@ -59,6 +59,7 @@ class TestSysDuplicates:
 
 
 class TestSysEmbedders:
+    @pytest.mark.needs_embedder
     def test_lists_active_embedder(self):
         g = GraphStore()
         result = g.execute('SYS EMBEDDERS')

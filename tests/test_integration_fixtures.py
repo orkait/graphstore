@@ -310,6 +310,7 @@ class TestVectorSearchWithFixtures:
 # Engine 4: Document Ingestion (text, markdown, HTML, CSV, PDF)
 # ===================================================================
 
+@pytest.mark.needs_ingest
 class TestDocumentIngestion:
 
     def test_ingest_text_fixture(self, gs):
@@ -595,6 +596,7 @@ class TestSystemWithFixtures:
         result = gs.execute('SYS OPTIMIZE')
         assert result.kind == "ok"
 
+    @pytest.mark.needs_scheduler
     def test_cron_lifecycle(self, gs_queued):
         """CRON add, list, run, delete full lifecycle."""
         gs_queued.execute(

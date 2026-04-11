@@ -10,8 +10,14 @@ class PyMuPDF4LLMIngestor(Ingestor):
     supported_extensions = ["pdf"]
 
     def convert(self, file_path: str, **kwargs) -> IngestResult:
-        import pymupdf4llm
-        import pymupdf
+        try:
+            import pymupdf4llm
+            import pymupdf
+        except ImportError as e:
+            raise ImportError(
+                "PyMuPDF4LLMIngestor requires the `ingest` extra. "
+                "Install with: pip install 'graphstore[ingest]'"
+            ) from e
 
         md_text = pymupdf4llm.to_markdown(file_path)
 

@@ -56,6 +56,7 @@ class TestSimilarToByVector:
         assert len(result.data) == 0
 
 
+@pytest.mark.needs_embedder
 class TestSimilarToByText:
     def test_similar_by_text(self):
         g = GraphStore()  # default model2vec embedder

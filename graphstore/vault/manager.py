@@ -3,11 +3,10 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 
-import yaml
-
 from graphstore.vault.parser import (
     parse_frontmatter, parse_sections, extract_wikilinks,
     title_to_slug, write_frontmatter, write_section as _write_section,
+    yaml,
 )
 
 

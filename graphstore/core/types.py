@@ -1,8 +1,8 @@
 """Core types for graphstore query results and graph elements."""
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, TypeAlias
-import orjson
 
 NodeData: TypeAlias = dict[str, Any]
 
@@ -38,5 +38,5 @@ class Result:
         return d
 
     def to_json(self) -> str:
-        """Compact JSON string (Rust-backed via orjson)."""
-        return orjson.dumps(self.to_dict(), default=str, option=orjson.OPT_NON_STR_KEYS).decode()
+        """Compact JSON string."""
+        return json.dumps(self.to_dict(), default=str, separators=(",", ":"))
