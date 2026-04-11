@@ -11,12 +11,12 @@
 
 set -u
 
-STATE=$HOME/.gs_bench_state
-LOG=$HOME/.gs_bench_scheduler.log
-LOCK=/tmp/gs_bench_scheduler.lock
-REPO=/home/kai/orkait/graphstore/graphstore
-MODELS=/home/kai/graphstore-models
-PER_CATEGORY=20
+STATE=${GS_BENCH_STATE:-$HOME/.gs_bench_state}
+LOG=${GS_BENCH_LOG:-$HOME/.gs_bench_scheduler.log}
+LOCK=${GS_BENCH_LOCK:-/tmp/gs_bench_scheduler.lock}
+REPO=${GS_REPO:-$(cd "$(dirname "$0")/../../.." && pwd)}
+MODELS=${GS_MODELS:?set GS_MODELS to the host path containing fastembed model cache}
+PER_CATEGORY=${GS_PER_CATEGORY:-20}
 
 exec 9>"$LOCK" 2>/dev/null || exit 0
 flock -n 9 || exit 0
