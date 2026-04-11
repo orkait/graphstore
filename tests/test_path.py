@@ -125,6 +125,12 @@ class TestBfsTraverse:
         m = make_csr([(0, 1), (0, 2)], 3)
         assert bfs_traverse(m, 0, 0) == [(0, 0)]
 
+    def test_repeated_calls_return_same_result(self):
+        m = make_csr([(0, 1), (1, 2)], 3)
+        first = bfs_traverse(m, 0, 2)
+        second = bfs_traverse(m, 0, 2)
+        assert first == second
+
 
 # ---------------------------------------------------------------------------
 # find_all_paths

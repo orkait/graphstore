@@ -54,11 +54,19 @@ def materialize_bulk(
             continue
         dtype = dtypes[field]
         field_pres = presence[field][slots]
-        if not field_pres.any():
-            continue
         field_vals = col[slots]
-        present_idx = np.where(field_pres)[0]
         vals_list = field_vals.tolist()
+        if field_pres.all():
+            if dtype == "int32_interned":
+                for i, raw in enumerate(vals_list):
+                    result[i][field] = id_to_str[raw]
+            else:
+                for i, raw in enumerate(vals_list):
+                    result[i][field] = raw
+            continue
+        present_idx = np.where(field_pres)[0]
+        if len(present_idx) == 0:
+            continue
         if dtype == "int32_interned":
             for i in present_idx:
                 result[i][field] = id_to_str[vals_list[i]]

@@ -18,6 +18,14 @@ __all__ = [
 ]
 
 
+def _transpose_csr_cached(matrix: csr_matrix) -> csr_matrix:
+    cached = getattr(matrix, "_graphstore_transpose_csr", None)
+    if cached is None or cached.shape != matrix.shape:
+        cached = matrix.T.tocsr()
+        matrix._graphstore_transpose_csr = cached
+    return cached
+
+
 def bidirectional_bfs(
     matrix: csr_matrix,
     matrix_t: csr_matrix,
@@ -108,7 +116,7 @@ def bfs_traverse(
     visited[start] = True
     frontier = np.zeros(n, dtype=np.float32)
     frontier[start] = 1.0
-    matT = matrix.T.tocsr()
+    matT = _transpose_csr_cached(matrix)
 
     for depth in range(1, max_depth + 1):
         reached = matT.dot(frontier) > 0
@@ -223,7 +231,7 @@ def bfs_reach(
     else:
         return visited
 
-    matT = matrix.T.tocsr()
+    matT = _transpose_csr_cached(matrix)
     depth = 0
     while True:
         if max_depth is not None and depth >= max_depth:

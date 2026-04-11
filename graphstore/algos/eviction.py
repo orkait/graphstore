@@ -1,5 +1,3 @@
-"""Pure eviction + pressure-metric helpers."""
-
 import numpy as np
 
 __all__ = ["needs_optimization", "rank_evictable_slots"]
@@ -11,7 +9,6 @@ def needs_optimization(
     string_gc_threshold: float = 3.0,
     cache_gc_threshold: int = 200,
 ) -> list[str]:
-    """Decide which optimizer ops are required from a health snapshot."""
     ops = []
     if health["tombstone_ratio"] > compact_threshold:
         ops.append("COMPACT")
@@ -34,48 +31,39 @@ def rank_evictable_slots(
     updated_at_present: np.ndarray | None,
     protected_kinds: set[str],
 ) -> list[int]:
-    # Identify live slots
     live_slots = np.flatnonzero(live_mask)
     if live_slots.size == 0:
         return []
 
-    # Compute timestamps for all slots
-    timestamps = np.zeros(live_mask.shape[0], dtype=np.float64)
-    if updated_at is not None and updated_at_present is not None:
-        timestamps = np.where(updated_at_present, updated_at.astype(np.float64), 0.0)
+    if protected_kinds:
+        kind_ids_live = kind_ids[live_slots]
+        unique_kinds = np.unique(kind_ids_live)
 
-    # Extract kind IDs for live slots
-    kind_ids_live = kind_ids[live_slots]
+        def is_protected(k):
+            if k < 0:
+                return False
+            try:
+                return kind_lookup(int(k)) in protected_kinds
+            except KeyError:
+                return False
 
-    # Unique kind IDs present among live slots and mapping back to each slot
-    unique_kind_ids, first_idx = np.unique(kind_ids_live, return_inverse=True)
+        protected_mask = np.fromiter(map(is_protected, unique_kinds), dtype=bool, count=unique_kinds.size)
+        protected_ids = unique_kinds[protected_mask]
 
-    # Helper to test protection per kind ID (handles negative IDs and missing keys)
-    def _is_protected(k):
-        if k < 0:
-            return False
-        try:
-            return kind_lookup(k) in protected_kinds
-        except KeyError:
-            return False
+        n_protected = protected_ids.size
+        if n_protected == 1:
+            live_slots = live_slots[kind_ids_live != protected_ids[0]]
+        elif n_protected == 2:
+            live_slots = live_slots[(kind_ids_live != protected_ids[0]) & (kind_ids_live != protected_ids[1])]
+        elif n_protected > 2:
+            live_slots = live_slots[~np.in1d(kind_ids_live, protected_ids)]
 
-    # Vectorized evaluation of protection for each unique kind ID
-    protected_flags = np.frompyfunc(_is_protected, 1, 1)(unique_kind_ids)
-    protected_flags = protected_flags.astype(bool)
-
-    # Map protection back to live slots
-    protected_mask = protected_flags[first_idx]
-
-    # Filter out protected slots
-    evictable_mask = ~protected_mask
-    evictable_slots = live_slots[evictable_mask]
-
-    if evictable_slots.size == 0:
+    if live_slots.size == 0:
         return []
 
-    # Sort by timestamp (oldest first); stable sort preserves original order for ties
-    evictable_timestamps = timestamps[evictable_slots]
-    sorted_indices = np.argsort(evictable_timestamps, kind="stable")
-    sorted_slots = evictable_slots[sorted_indices]
+    if updated_at is not None and updated_at_present is not None:
+        evictable_timestamps = updated_at[live_slots] * updated_at_present[live_slots]
+        sorted_indices = np.argsort(evictable_timestamps, kind="stable")
+        return live_slots[sorted_indices].tolist()
 
-    return sorted_slots.tolist()
+    return live_slots.tolist()

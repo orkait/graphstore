@@ -63,7 +63,7 @@ Modes:
   gate             Strict gate: fail if any algo >5% slower (for CI)
   list             List saved benchmark runs
   solo <algo>      Run ONE algo's bench file, print METRIC lines (for autoresearch)
-                   algos: graph compact fusion spreading eviction text
+                   algos: graph compact fusion materialization spreading eviction sort text
                    extra flags: --fast --quiet --json
 
 Typical workflow:
