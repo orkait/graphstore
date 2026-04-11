@@ -1,4 +1,4 @@
-"""Tests for graphstore.schema — SchemaRegistry and validation."""
+"""Tests for graphstore.schema - SchemaRegistry and validation."""
 
 import pytest
 

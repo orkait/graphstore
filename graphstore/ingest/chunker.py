@@ -1,4 +1,4 @@
-"""Text chunking strategies — shim over graphstore.algos.chunker."""
+"""Text chunking strategies - shim over graphstore.algos.chunker."""
 
 from graphstore.algos.chunker import (
     Chunk,
@@ -18,7 +18,7 @@ __all__ = [
 
 
 class HeadingChunker:
-    """Default ChunkerProtocol implementation — delegates to chunk_by_heading."""
+    """Default ChunkerProtocol implementation - delegates to chunk_by_heading."""
 
     def chunk(self, text: str, **kwargs) -> list[Chunk]:
         return chunk_by_heading(text, **kwargs)

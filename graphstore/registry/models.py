@@ -25,7 +25,7 @@ SUPPORTED_MODELS = {
         "description": (
             "Microsoft Harrier v1 0.6B (Qwen3-based) via ONNX. "
             "MTEB v2 69.0, 1024 dims, 32k context, multilingual, last-token pooling. "
-            "Default variant q4 — 40 ms/encode on CPU, 5x faster than fp16 with "
+            "Default variant q4 - 40 ms/encode on CPU, 5x faster than fp16 with "
             "equivalent retrieval quality. Requires onnxruntime >= 1.21 for the "
             "GatherBlockQuantized operator."
         ),

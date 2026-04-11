@@ -6,7 +6,7 @@ Two levels:
 
   1. Test files that import a feature module at module level (and would
      therefore crash during pytest collection) are listed in
-     ``_FILES_REQUIRING`` — this conftest tells pytest to ``collect_ignore``
+     ``_FILES_REQUIRING`` - this conftest tells pytest to ``collect_ignore``
      them when their extra is missing.
 
   2. Test files that boot cleanly without the extra but whose test bodies

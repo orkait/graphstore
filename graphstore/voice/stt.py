@@ -21,7 +21,7 @@ class MoonshineSTT:
             )
         self._moonshine_voice = moonshine_voice
         self._model = model
-        # Transcriber is lazily initialized on first use — construction succeeds
+        # Transcriber is lazily initialized on first use - construction succeeds
         # even if libmoonshine.so is absent; only transcription will raise.
         self._transcriber = None
         self._listening = False
@@ -36,7 +36,7 @@ class MoonshineSTT:
             except Exception as e:
                 raise RuntimeError(
                     f"Moonshine STT failed to initialize: {e}. "
-                    "Ensure libmoonshine.so is installed — "
+                    "Ensure libmoonshine.so is installed - "
                     "see https://github.com/usefulsensors/moonshine"
                 ) from e
         return self._transcriber

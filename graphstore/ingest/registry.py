@@ -1,4 +1,4 @@
-"""IngestorRegistry — pluggable extension-to-ingestor routing."""
+"""IngestorRegistry - pluggable extension-to-ingestor routing."""
 from pathlib import Path
 from graphstore.ingest.base import Ingestor, IngestResult
 

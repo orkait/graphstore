@@ -30,10 +30,10 @@ export default function App() {
       ([, scriptRes]) => {
         const g = useGraphStore.getState().graph
         if (scriptRes.script) {
-          // Server has a custom script — use it as editor content
+          // Server has a custom script - use it as editor content
           useGraphStore.getState().setEditorContent(scriptRes.script)
         } else if (g.nodes.length === 0) {
-          // No custom script and empty graph — run the default example
+          // No custom script and empty graph - run the default example
           executeAll()
         }
       },

@@ -72,7 +72,7 @@ def topk_from_column(
         column: full-size column array to index by `slots`.
         presence: full-size bool presence mask to index by `slots`.
         dtype_str: "int64" | "float64" | "int32_interned". Interned strings
-                   are not orderable — returns None so caller falls back.
+                   are not orderable - returns None so caller falls back.
         descending: sort high → low.
         limit: retain up to this many positions after offset. None = all.
         offset: drop this many leading positions. None = 0.

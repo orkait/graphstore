@@ -35,7 +35,7 @@ def collect_referenced_ids(
             (e.g. edge type names interned elsewhere).
 
     Returns:
-        set[int] — every interned id that must survive the GC.
+        set[int] - every interned id that must survive the GC.
     """
     live_ids = node_ids[:n][live_mask]
     live_kinds = node_kinds[:n][live_mask]

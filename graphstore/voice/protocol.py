@@ -1,7 +1,7 @@
 """Runtime-checkable protocols for voice and chunking subsystems.
 
 Note: Python's isinstance() on runtime_checkable Protocols only checks
-that required method *names* exist — it does NOT check signatures or
+that required method *names* exist - it does NOT check signatures or
 return types. Use mypy/pyright for full structural type checking.
 """
 from typing import Protocol, runtime_checkable

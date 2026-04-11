@@ -1,4 +1,4 @@
-"""Tests for graphstore.memory — memory estimator and ceiling enforcement."""
+"""Tests for graphstore.memory - memory estimator and ceiling enforcement."""
 
 import pytest
 
@@ -38,7 +38,7 @@ class TestEstimate:
         usage = estimate(800_000, 3_200_000)
         # 800_000 * 330 = 264_000_000
         # 3_200_000 * 20 = 64_000_000
-        # total = 328_000_000 bytes (328 MB) — exceeds 256 MB ceiling
+        # total = 328_000_000 bytes (328 MB) - exceeds 256 MB ceiling
         assert usage == 328_000_000
         assert usage > DEFAULT_CEILING_BYTES, (
             "800K nodes + 3.2M edges exceeds the 256MB default ceiling"
@@ -145,7 +145,7 @@ class TestCheckCeiling:
 
     def test_custom_bytes_per_node_overrides_static(self):
         """Caller-supplied bytes_per_node replaces the static default."""
-        big_bpn = 10_000  # 10 KB / node — only 10 nodes fit in 100KB ceiling
+        big_bpn = 10_000  # 10 KB / node - only 10 nodes fit in 100KB ceiling
         with pytest.raises(CeilingExceeded):
             check_ceiling(
                 current_nodes=0,

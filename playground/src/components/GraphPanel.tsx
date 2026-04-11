@@ -214,7 +214,7 @@ export function GraphPanel() {
       // Set edges immediately
       setFlowEdges(layoutEdges)
 
-      // Create a LIVE simulation — preserve positions if available
+      // Create a LIVE simulation - preserve positions if available
       const live = createLiveSimulation(layoutNodes, layoutEdges, {
         clusterStrength: config.clusterStrength,
         repelStrength: config.repelStrength,

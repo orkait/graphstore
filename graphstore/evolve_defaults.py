@@ -1,6 +1,6 @@
 """Default evolution rules shipped with graphstore.
 
-All rules are disabled by default — agents must explicitly enable them.
+All rules are disabled by default - agents must explicitly enable them.
 """
 
 STARTER_RULES = [
