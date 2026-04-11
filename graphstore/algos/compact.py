@@ -51,18 +51,44 @@ def apply_slot_remap_to_edges(
     m = len(edge_list)
     if m == 0:
         return []
-    srcs = np.fromiter((e[0] for e in edge_list), dtype=np.int64, count=m)
-    tgts = np.fromiter((e[1] for e in edge_list), dtype=np.int64, count=m)
+    
+    # Pre-allocate arrays for srcs and tgts
+    srcs = np.empty(m, dtype=np.int64)
+    tgts = np.empty(m, dtype=np.int64)
+    
+    # Use list comprehension for extraction to avoid generator overhead
+    for i, (s, t, _) in enumerate(edge_list):
+        srcs[i] = s
+        tgts[i] = t
+    
+    # Vectorized bounds check
     in_range = (srcs < n) & (tgts < n)
-    ns = np.where(in_range, old_to_new[np.clip(srcs, 0, n - 1)], -1)
-    nt = np.where(in_range, old_to_new[np.clip(tgts, 0, n - 1)], -1)
+    
+    # Clip to valid range for indexing
+    srcs_clipped = np.where(in_range, srcs, 0)
+    tgts_clipped = np.where(in_range, tgts, 0)
+    
+    # Vectorized lookup
+    ns = np.where(in_range, old_to_new[srcs_clipped], -1)
+    nt = np.where(in_range, old_to_new[tgts_clipped], -1)
+    
+    # Keep edges where both endpoints are remapped to valid slots
     keep = (ns >= 0) & (nt >= 0)
-    if not keep.any():
+    
+    if not np.any(keep):
         return []
+    
+    # Get indices of kept edges
     keep_idx = np.nonzero(keep)[0]
-    new_srcs = ns[keep_idx].tolist()
-    new_tgts = nt[keep_idx].tolist()
-    return [
-        (new_srcs[i], new_tgts[i], edge_list[int(keep_idx[i])][2])
-        for i in range(len(keep_idx))
-    ]
+    
+    # Extract new srcs and tgts
+    new_srcs = ns[keep_idx]
+    new_tgts = nt[keep_idx]
+    
+    # Build result list without converting to list first
+    result = []
+    for i in range(len(keep_idx)):
+        orig_idx = keep_idx[i]
+        result.append((new_srcs[i], new_tgts[i], edge_list[orig_idx][2]))
+    
+    return result
