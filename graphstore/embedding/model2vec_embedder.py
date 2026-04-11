@@ -15,7 +15,13 @@ class Model2VecEmbedder(Embedder):
 
     def __init__(self, model_name: str = "minishlab/M2V_base_output"):
         if model_name not in _model_cache:
-            from model2vec import StaticModel
+            try:
+                from model2vec import StaticModel
+            except ImportError as e:
+                raise ImportError(
+                    "Model2VecEmbedder requires the `embed-default` extra. "
+                    "Install with: pip install 'graphstore[embed-default]'"
+                ) from e
             _model_cache[model_name] = StaticModel.from_pretrained(model_name)
         self._model = _model_cache[model_name]
         self._name = "model2vec"

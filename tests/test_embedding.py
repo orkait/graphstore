@@ -6,6 +6,8 @@ from graphstore.embedding.base import Embedder
 from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
 from graphstore.embedding.postprocess import l2_normalize, truncate_dims
 
+pytestmark = pytest.mark.needs_embedder
+
 
 class TestModel2VecEmbedder:
     @pytest.fixture(scope="class")
