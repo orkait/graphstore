@@ -1,4 +1,4 @@
-"""Integration tests exercising all 6 engines with real fixture artifacts.
+"""Integration tests exercising all three storage engines (graph, vector, document) with real fixture artifacts.
 
 Uses a mock embedder (deterministic hash-based vectors) so tests run without
 downloading models. Tests verify the full pipeline: ingest -> store -> query
