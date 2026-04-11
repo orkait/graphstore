@@ -10,7 +10,13 @@ class MarkItDownIngestor(Ingestor):
     ]
 
     def __init__(self, llm_client=None, llm_model=None):
-        from markitdown import MarkItDown
+        try:
+            from markitdown import MarkItDown
+        except ImportError as e:
+            raise ImportError(
+                "MarkItDownIngestor requires the `ingest` extra. "
+                "Install with: pip install 'graphstore[ingest]'"
+            ) from e
 
         kwargs = {}
         if llm_client:

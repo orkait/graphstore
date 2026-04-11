@@ -2,9 +2,6 @@
 
 These tests verify that graphstore works as a cognitive layer for AI agents:
 ingest real documents, build knowledge, query semantically, maintain over time.
-
-Requires: model2vec (downloads ~30MB model on first run), pymupdf4llm.
-Skip gracefully if dependencies are missing.
 """
 
 import tempfile
@@ -16,25 +13,18 @@ import numpy as np
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
-# Skip entire module if model2vec not available
-try:
-    from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
-    _embedder = Model2VecEmbedder()
-    HAS_EMBEDDER = True
-except Exception:
-    HAS_EMBEDDER = False
-
-pytestmark = pytest.mark.skipif(not HAS_EMBEDDER, reason="model2vec not available")
+pytestmark = [pytest.mark.needs_embedder, pytest.mark.needs_ingest]
 
 
 @pytest.fixture(scope="module")
 def brain(tmp_path_factory):
     """Persistent GraphStore with real Model2Vec embedder. Shared across module."""
     from graphstore import GraphStore
+    from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
     td = tmp_path_factory.mktemp("brain")
     gs = GraphStore(
         path=str(td),
-        embedder=_embedder,
+        embedder=Model2VecEmbedder(),
         ceiling_mb=256,
     )
     yield gs

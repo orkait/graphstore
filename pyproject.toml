@@ -26,20 +26,11 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "scipy>=1.10",
-    "lark>=1.1",
     "numpy>=1.24",
+    "scipy>=1.10",
     "usearch>=2.0",
-    "model2vec>=0.4",
-    "pyyaml>=6.0",
-    "markitdown>=0.1",
-    "pymupdf4llm>=0.1",
-    "pymupdf>=1.20",
+    "lark>=1.1",
     "msgspec>=0.18",
-    "croniter>=6.0",
-    "fastapi>=0.135.1",
-    "httpx>=0.28.1",
-    "orjson>=3.11.8",
 ]
 
 [project.urls]
@@ -57,25 +48,64 @@ dev = [
     "pytest-cov>=4.0",
     "httpx>=0.24",
 ]
+embed-default = [
+    "model2vec>=0.4",
+]
+embed-fastembed = [
+    "fastembed>=0.8",
+]
+ingest = [
+    "markitdown>=0.1",
+    "pymupdf4llm>=0.1",
+    "pymupdf>=1.20",
+]
+ingest-pro = [
+    "docling>=2.0",
+    "openai>=1.0",
+]
+scheduler = [
+    "croniter>=6.0",
+]
+vault = [
+    "pyyaml>=6.0",
+]
 playground = [
     "fastapi>=0.100",
     "uvicorn>=0.20",
+    "pydantic>=2.0",
+]
+# onnxruntime-gpu pypi wheels are linked against CUDA 12 sonames, so
+# the nvidia-*-cu12 runtime wheels ship alongside and get dlopen'd
+# via ctypes at first use (see graphstore/embedding/onnx_hf_embedder.py).
+gpu = [
+    "onnxruntime-gpu>=1.23",
+    "nvidia-cublas-cu12>=12.0",
+    "nvidia-cuda-runtime-cu12>=12.0",
+    "nvidia-cuda-nvrtc-cu12>=12.0",
+    "nvidia-cudnn-cu12>=9.0",
+    "nvidia-cufft-cu12>=11.0",
+    "nvidia-curand-cu12>=10.0",
+    "nvidia-nvjitlink-cu12>=12.0",
 ]
 voice = [
     "sounddevice>=0.4",
     "moonshine-voice",
     "piper-tts>=1.4",
 ]
-ingest-pro = [
-    "docling>=2.0",
-    "openai>=1.0",
-]
-fastembed = [
-    # Qdrant's lightweight ONNX embedder wrapper — unlocks 30+ pre-exported
-    # BERT-family models (BGE, mxbai, e5, snowflake, jina-v2, MiniLM, nomic)
-    # without dragging in torch. Shares the onnxruntime/tokenizers install
-    # that graphstore already uses, so the added footprint is ~20-30 MB.
-    "fastembed>=0.8",
+gpu = [
+    # Opt-in GPU acceleration for the ONNX embedder path. The pypi
+    # onnxruntime-gpu wheel is linked against CUDA 12 sonames, so we
+    # also bundle the matching nvidia-*-cu12 runtime wheels — the
+    # OnnxHFEmbedder dlopens them via ctypes at first use so users don't
+    # have to set LD_LIBRARY_PATH. Activate with GRAPHSTORE_GPU=1.
+    "onnxruntime-gpu>=1.23",
+    "nvidia-cublas-cu12>=12.0",
+    "nvidia-cuda-runtime-cu12>=12.0",
+    "nvidia-cuda-nvrtc-cu12>=12.0",
+    "nvidia-cudnn-cu12>=9.0",
+    "nvidia-cufft-cu12>=11.0",
+    "nvidia-curand-cu12>=10.0",
+    "nvidia-nvjitlink-cu12>=12.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -86,6 +116,16 @@ include = ["graphstore*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "needs_embedder: requires graphstore[embed-default]",
+    "needs_fastembed: requires graphstore[embed-fastembed]",
+    "needs_ingest: requires graphstore[ingest]",
+    "needs_vault: requires graphstore[vault]",
+    "needs_scheduler: requires graphstore[scheduler]",
+    "needs_playground: requires graphstore[playground]",
+    "needs_gpu: requires graphstore[gpu]",
+    "needs_voice: requires graphstore[voice]",
+]
 
 [tool.bumpversion]
 current_version = "0.1.0"

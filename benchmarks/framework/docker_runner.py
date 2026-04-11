@@ -32,14 +32,20 @@ def main() -> int:
                    help="at most this many records per category")
     p.add_argument("--k", type=int, default=5)
     p.add_argument("--embedder", default="fastembed",
-                   choices=["model2vec", "fastembed", "onnx"])
+                   choices=["model2vec", "fastembed", "onnx", "installed"])
     p.add_argument("--embedder-model", default="BAAI/bge-small-en-v1.5")
     p.add_argument("--embedder-model-dir", default=None,
                    help="local dir for onnx embedder (tokenizer.json + onnx/*.onnx)")
+    p.add_argument("--embedder-cache-dir", default=None,
+                   help="graphstore registry cache root (for --embedder installed)")
+    p.add_argument("--embedder-output-dims", type=int, default=None)
     p.add_argument("--embedder-max-length", type=int, default=512)
     p.add_argument("--embedder-pooling", default="mean",
                    choices=["mean", "last_token"])
     p.add_argument("--embedder-threads", type=int, default=None)
+    p.add_argument("--gpu", action="store_true",
+                   help="enable onnxruntime CUDA provider for ONNX embedders "
+                        "(requires graphstore[gpu] install)")
     p.add_argument("--ceiling-mb", type=int, default=3072)
     p.add_argument("--cache-dir", default="/cache/fastembed")
     p.add_argument("--run-tag", default="")
@@ -71,9 +77,12 @@ def main() -> int:
         "embedder": args.embedder,
         "embedder_model": args.embedder_model,
         "embedder_model_dir": args.embedder_model_dir,
+        "embedder_cache_dir": args.embedder_cache_dir,
+        "embedder_output_dims": args.embedder_output_dims,
         "embedder_max_length": args.embedder_max_length,
         "embedder_pooling": args.embedder_pooling,
         "embedder_threads": args.embedder_threads,
+        "embedder_gpu": args.gpu,
         "ceiling_mb": args.ceiling_mb,
         "cache_dir": args.cache_dir,
     }

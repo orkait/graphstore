@@ -63,6 +63,9 @@ def _extract_entities(text: str) -> list[str]:
 
 def _build_embedder(config: dict[str, Any]):
     name = (config.get("embedder") or "model2vec").lower()
+    gpu = bool(config.get("embedder_gpu"))
+    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if gpu else None
+
     if name in ("model2vec", "default"):
         return "default"
     if name == "fastembed":
@@ -84,6 +87,20 @@ def _build_embedder(config: dict[str, Any]):
             output_dims=config.get("embedder_output_dims"),
             max_length=int(config.get("embedder_max_length", 512)),
             pooling_mode=config.get("embedder_pooling", "mean"),
+            providers=providers,
+        )
+    if name == "installed":
+        from graphstore.registry.installer import load_installed_embedder, set_cache_dir
+        cache = config.get("embedder_cache_dir")
+        if cache:
+            set_cache_dir(cache)
+        model_name = config.get("embedder_model")
+        if not model_name:
+            raise ValueError("embedder=installed requires embedder_model (e.g. 'harrier-oss-v1-0.6b')")
+        return load_installed_embedder(
+            model_name,
+            dims=config.get("embedder_output_dims"),
+            providers=providers,
         )
     raise ValueError(f"unknown embedder: {name!r}")
 
@@ -107,6 +124,9 @@ class GraphStoreAdapter:
         elif emb_name == "onnx":
             short = Path(self.config.get("embedder_model_dir", "onnx")).name
             self.name = f"graphstore-skill-onnx-{short}"
+        elif emb_name == "installed":
+            short = (self.config.get("embedder_model") or "installed").lower()
+            self.name = f"graphstore-skill-{short}"
         else:
             self.name = "graphstore-skill-model2vec"
 

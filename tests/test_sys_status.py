@@ -102,6 +102,7 @@ class TestSysReembed:
         with pytest.raises(Exception, match="Embedder changed"):
             g.execute('SIMILAR TO [1.0, 0.0, 0.0, 0.0]')
 
+    @pytest.mark.needs_embedder
     def test_reembed_clears_dirty_flag(self, tmp_path):
         g = GraphStore(path=str(tmp_path / "db"))
         # Create node using auto-embed (embedder creates proper vector dimensions)

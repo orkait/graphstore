@@ -121,8 +121,17 @@ def uninstall_embedder(name: str) -> None:
         print(f"{name} is not installed")
 
 
-def load_installed_embedder(name: str, dims: int | None = None):
-    """Load an installed ONNX embedder."""
+def load_installed_embedder(
+    name: str,
+    dims: int | None = None,
+    providers: list[str] | str | None = None,
+):
+    """Load an installed ONNX embedder.
+
+    Pass ``providers=["CUDAExecutionProvider", "CPUExecutionProvider"]`` or
+    set ``GRAPHSTORE_GPU=1`` in the environment to run inference on GPU.
+    Requires the ``graphstore[gpu]`` install.
+    """
     model_dir = get_model_dir(name)
     if not is_installed(name):
         raise FileNotFoundError(
@@ -141,6 +150,7 @@ def load_installed_embedder(name: str, dims: int | None = None):
         max_length=manifest.get("max_length", 512),
         pooling_mode=manifest.get("pooling", "mean"),
         onnx_file=manifest.get("onnx_file"),
+        providers=providers,
     )
 
 
