@@ -242,12 +242,17 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
 def gc_strings(store: CoreStore) -> dict:
     """Rebuild string table with only referenced strings.
 
-    Remaps all int32 values: node_ids, node_kinds, all int32_interned columns.
-    Uses numpy for bulk ID collection instead of Python loops.
+    Shell over graphstore.algos.string_gc: collects referenced ids,
+    builds remap plan, applies in-place remap to store arrays.
     """
+    from graphstore.algos.string_gc import (
+        collect_referenced_ids,
+        build_remap_plan,
+        apply_remap_to_array,
+    )
+
     n = store._next_slot
 
-    # Vectorized: collect all referenced string IDs
     live_mask = store.node_ids[:n] >= 0
     if store.node_tombstones:
         tomb_arr = np.array(list(store.node_tombstones), dtype=np.int32)
@@ -255,79 +260,61 @@ def gc_strings(store: CoreStore) -> dict:
         if len(valid) > 0:
             live_mask[valid] = False
 
-    live_ids = store.node_ids[:n][live_mask]
-    live_kinds = store.node_kinds[:n][live_mask]
-    referenced: set[int] = set(live_ids[live_ids >= 0].tolist())
-    referenced.update(live_kinds[live_kinds >= 0].tolist())
+    interned_cols = [
+        (store.columns._columns[field], store.columns._presence[field])
+        for field in store.columns._columns
+        if store.columns._dtypes[field] == "int32_interned"
+    ]
+    extra_ids = {
+        store.string_table.intern(etype)
+        for etype in store._edges_by_type
+        if etype in store.string_table
+    }
 
-    for field in store.columns._columns:
-        if store.columns._dtypes[field] == "int32_interned":
-            col = store.columns._columns[field][:n]
-            pres = store.columns._presence[field][:n]
-            referenced.update(col[pres].tolist())
-
-    # Also reference edge type names
-    for etype in store._edges_by_type:
-        if etype in store.string_table:
-            referenced.add(store.string_table.intern(etype))
+    referenced = collect_referenced_ids(
+        node_ids=store.node_ids,
+        node_kinds=store.node_kinds,
+        live_mask=live_mask,
+        n=n,
+        interned_columns=interned_cols,
+        extra_ids=extra_ids,
+    )
 
     old_table = store.string_table
     old_count = len(old_table)
-
     if len(referenced) == old_count:
         return {"strings_freed": 0}
 
-    # Build new table from referenced strings only
-    old_to_new: dict[int, int] = {}
-    new_strings: list[str] = []
-    for old_id in sorted(referenced):
-        old_to_new[old_id] = len(new_strings)
-        new_strings.append(old_table.lookup(old_id))
+    new_strings, remap_arr = build_remap_plan(
+        referenced=referenced,
+        old_table_len=old_count,
+        lookup_fn=old_table.lookup,
+    )
 
-    new_table = StringTable.from_list(new_strings)
-
-    # Vectorized remap: build lookup array old_id -> new_id
-    max_old = len(old_table)
-    remap_arr = np.arange(max_old, dtype=np.int32)  # identity by default
-    for old_id, new_id in old_to_new.items():
-        remap_arr[old_id] = new_id
-
-    # Remap node_ids and node_kinds via numpy fancy indexing
     ids = store.node_ids[:n]
-    valid_ids = ids >= 0
-    ids[valid_ids] = remap_arr[ids[valid_ids]]
+    apply_remap_to_array(ids, remap_arr, ids >= 0)
 
     kinds = store.node_kinds[:n]
-    valid_kinds = live_mask
-    kinds[valid_kinds] = remap_arr[kinds[valid_kinds]]
+    apply_remap_to_array(kinds, remap_arr, live_mask)
 
-    # Remap int32_interned columns via numpy fancy indexing
     for field in store.columns._columns:
         if store.columns._dtypes[field] == "int32_interned":
             col = store.columns._columns[field][:n]
             pres = store.columns._presence[field][:n]
-            col[pres] = remap_arr[col[pres]]
+            apply_remap_to_array(col, remap_arr, pres)
 
-    # Remap id_to_slot keys
     store.id_to_slot = {
-        old_to_new[old_str_id]: slot
+        int(remap_arr[old_str_id]): slot
         for old_str_id, slot in store.id_to_slot.items()
     }
 
-    # Remap edge type names in _edges_by_type
-    new_edges: dict[str, list] = {}
-    for etype, edges in store._edges_by_type.items():
-        new_edges[etype] = edges  # edge type is a string key, not an int
-    store._edges_by_type = new_edges
-
+    new_table = StringTable.from_list(new_strings)
     store.string_table = new_table
     store.columns._string_table = new_table
 
-    # Clear plan cache (cached ASTs may hold stale interned values)
     from graphstore.dsl.parser import clear_cache
     clear_cache()
 
-    # Rebuild secondary indices
     for field in list(store._indexed_fields):
         store.add_index(field)
 

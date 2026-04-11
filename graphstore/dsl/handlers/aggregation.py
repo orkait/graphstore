@@ -72,14 +72,23 @@ class AggregationHandlers:
                         row[func.label()] = 0
                 return Result(kind="aggregate", data=[row], count=1)
 
+        from graphstore.algos.aggregate import (
+            group_assign_single,
+            group_assign_multi,
+            group_count,
+            group_sum,
+            group_avg,
+            group_min,
+            group_max,
+            group_count_distinct,
+        )
+
         if group_by:
             group_cols = [self.store.columns._columns[f][:n][mask] for f in group_by]
             if len(group_cols) == 1:
-                keys = group_cols[0]
-                unique_keys, inverse = np.unique(keys, return_inverse=True)
+                unique_keys, inverse = group_assign_single(group_cols[0])
             else:
-                keys = np.column_stack(group_cols)
-                unique_keys, inverse = np.unique(keys, axis=0, return_inverse=True)
+                unique_keys, inverse = group_assign_multi(group_cols)
         else:
             unique_keys = np.array([0])
             inverse = np.zeros(filtered_count, dtype=np.intp)
@@ -90,34 +99,22 @@ class AggregationHandlers:
         for func in select:
             label = func.label()
             if func.func == "COUNT":
-                results[label] = np.bincount(inverse, minlength=num_groups).astype(np.float64)
+                results[label] = group_count(inverse, num_groups)
             elif func.func == "COUNT_DISTINCT":
                 col = self.store.columns._columns[func.field][:n][mask]
-                counts = np.zeros(num_groups, dtype=np.float64)
-                for g in range(num_groups):
-                    counts[g] = len(np.unique(col[inverse == g]))
-                results[label] = counts
+                results[label] = group_count_distinct(col, inverse, num_groups)
             elif func.func == "SUM":
-                col = self.store.columns._columns[func.field][:n][mask].astype(np.float64)
-                sums = np.zeros(num_groups, dtype=np.float64)
-                np.add.at(sums, inverse, col)
-                results[label] = sums
+                col = self.store.columns._columns[func.field][:n][mask]
+                results[label] = group_sum(col, inverse, num_groups)
             elif func.func == "AVG":
-                col = self.store.columns._columns[func.field][:n][mask].astype(np.float64)
-                sums = np.zeros(num_groups, dtype=np.float64)
-                np.add.at(sums, inverse, col)
-                counts = np.bincount(inverse, minlength=num_groups).astype(np.float64)
-                results[label] = sums / np.maximum(counts, 1)
+                col = self.store.columns._columns[func.field][:n][mask]
+                results[label] = group_avg(col, inverse, num_groups)
             elif func.func == "MIN":
-                col = self.store.columns._columns[func.field][:n][mask].astype(np.float64)
-                mins = np.full(num_groups, np.inf)
-                np.minimum.at(mins, inverse, col)
-                results[label] = mins
+                col = self.store.columns._columns[func.field][:n][mask]
+                results[label] = group_min(col, inverse, num_groups)
             elif func.func == "MAX":
-                col = self.store.columns._columns[func.field][:n][mask].astype(np.float64)
-                maxs = np.full(num_groups, -np.inf)
-                np.maximum.at(maxs, inverse, col)
-                results[label] = maxs
+                col = self.store.columns._columns[func.field][:n][mask]
+                results[label] = group_max(col, inverse, num_groups)
 
         group_dicts = []
         for i in range(num_groups):

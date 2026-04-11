@@ -3,24 +3,10 @@
 import numpy as np
 from scipy.sparse import csr_matrix
 
-
-def resize_csr(mat: csr_matrix, n: int) -> csr_matrix:
-    """Safely resize a CSR matrix to (n, n) by padding indptr.
-
-    When nodes are added after the last edge rebuild, the CSR matrix
-    has fewer rows than _next_slot. Padding indptr with the last value
-    (meaning "no edges for these rows") fixes the shape mismatch.
-    """
-    if mat.shape[0] >= n:
-        return mat
-    old_size = len(mat.indptr)
-    needed = n + 1
-    if old_size < needed:
-        pad = np.full(needed - old_size, mat.indptr[-1], dtype=mat.indptr.dtype)
-        new_indptr = np.concatenate([mat.indptr, pad])
-    else:
-        new_indptr = mat.indptr
-    return csr_matrix((mat.data, mat.indices, new_indptr), shape=(n, n))
+from graphstore.algos.edges_ops import (
+    resize_csr,  # noqa: F401 — re-export
+    build_typed_csrs,
+)
 
 
 class EdgeMatrices:
@@ -111,45 +97,24 @@ class EdgeMatrices:
         return t.indices[start:end].copy()
 
     def rebuild(self, edges_by_type: dict[str, list[tuple]], num_nodes: int):
-        """Full rebuild from edge lists. Called after COMMIT.
-
-        edges_by_type: {edge_type: [(source_idx, target_idx, data_dict), ...]}
-        num_nodes: total number of node slots (matrix dimension)
-        """
+        """Full rebuild from edge lists. Delegates CSR construction to algos."""
         self._typed.clear()
         self._cache.clear()
         self._transpose_cache.clear()
-        self._combined_transpose = None  # invalidate on rebuild
+        self._combined_transpose = None
         self._edge_data.clear()
         self._out_degree.clear()
         self._in_degree.clear()
 
-        for etype, edge_list in edges_by_type.items():
-            if not edge_list:
-                continue
-            m = len(edge_list)
-            sources = np.empty(m, dtype=np.int32)
-            targets = np.empty(m, dtype=np.int32)
-            weights = np.empty(m, dtype=np.float32)
-            data_list = [None] * m
-            for i, (s, t, d) in enumerate(edge_list):
-                sources[i] = s
-                targets[i] = t
-                weights[i] = d.get("weight", 1.0) if d else 1.0
-                data_list[i] = d
-            self._typed[etype] = csr_matrix(
-                (weights, (sources, targets)),
-                shape=(num_nodes, num_nodes),
-            )
-            self._edge_data[etype] = data_list
+        typed, data_lists = build_typed_csrs(edges_by_type, num_nodes)
+        self._typed = typed
+        self._edge_data = data_lists
 
-        # Precompute combined matrix
         if self._typed:
             self._combined_all = sum(self._typed.values())
         else:
             self._combined_all = None
 
-        # Precompute degree arrays
         for etype, m in self._typed.items():
             self._out_degree[etype] = np.diff(m.indptr)
         if self._combined_all is not None:
@@ -157,7 +122,6 @@ class EdgeMatrices:
         else:
             self._out_degree_all = None
 
-        # Precompute in-degree from transposed matrices
         for etype in self._typed:
             t = self.get_transpose(etype)
             self._in_degree[etype] = np.diff(t.indptr)
