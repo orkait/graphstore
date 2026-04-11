@@ -42,8 +42,10 @@ ALGO_TO_FILE = {
     "graph": "graphstore/algos/graph.py",
     "compact": "graphstore/algos/compact.py",
     "fusion": "graphstore/algos/fusion.py",
+    "materialization": "graphstore/algos/materialization.py",
     "spreading": "graphstore/algos/spreading.py",
     "eviction": "graphstore/algos/eviction.py",
+    "sort": "graphstore/algos/sort.py",
     "text": "graphstore/algos/text.py",
 }
 
@@ -51,8 +53,10 @@ ALGO_TO_BENCH = {
     "graph": "benchmarks/algos/test_graph_bench.py",
     "compact": "benchmarks/algos/test_compact_bench.py",
     "fusion": "benchmarks/algos/test_fusion_bench.py",
+    "materialization": "benchmarks/algos/test_materialization_bench.py",
     "spreading": "benchmarks/algos/test_spreading_bench.py",
     "eviction": "benchmarks/algos/test_eviction_bench.py",
+    "sort": "benchmarks/algos/test_sort_bench.py",
     "text": "benchmarks/algos/test_text_bench.py",
 }
 

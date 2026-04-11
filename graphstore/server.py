@@ -8,12 +8,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 try:
     from fastapi import FastAPI, Request
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import JSONResponse, Response
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 except ImportError as e:
@@ -24,6 +22,7 @@ except ImportError as e:
 
 from graphstore import GraphStore
 from graphstore.core.errors import GraphStoreError
+from graphstore.core.types import encode_json
 
 app = FastAPI(title="graphstore playground")
 
@@ -116,27 +115,17 @@ def _get_store() -> GraphStore:
 # ---------------------------------------------------------------------------
 
 
-def _result_to_dict(result) -> dict[str, Any]:
-    """Convert a Result to a JSON-serialisable dict, handling numpy arrays."""
-    data = result.data
-    if isinstance(data, np.ndarray):
-        data = data.tolist()
-    elif isinstance(data, list):
-        data = [
-            item.tolist() if isinstance(item, np.ndarray) else item
-            for item in data
-        ]
-    elif isinstance(data, dict):
-        data = {
-            k: v.tolist() if isinstance(v, np.ndarray) else v
-            for k, v in data.items()
-        }
+def _result_payload(result) -> dict[str, Any]:
     return {
         "kind": result.kind,
-        "data": data,
+        "data": result.data,
         "count": result.count,
         "elapsed_us": result.elapsed_us,
     }
+
+
+def _json_bytes_response(payload: Any) -> Response:
+    return Response(content=encode_json(payload), media_type="application/json")
 
 
 # ---------------------------------------------------------------------------
@@ -187,21 +176,21 @@ def _validate_query(query: str) -> str | None:
 def execute(req: ExecuteRequest):
     err = _validate_query(req.query)
     if err:
-        return {"kind": "error", "data": err, "count": 0, "elapsed_us": 0}
+        return _json_bytes_response({"kind": "error", "data": err, "count": 0, "elapsed_us": 0})
     store = _get_store()
     try:
         result = store.execute(req.query)
     except GraphStoreError as exc:
         # Return soft errors (NodeExists, duplicate edge) as 200 so the
         # frontend can continue executing subsequent queries in a batch.
-        return {"kind": "error", "data": str(exc), "count": 0, "elapsed_us": 0}
-    return _result_to_dict(result)
+        return _json_bytes_response({"kind": "error", "data": str(exc), "count": 0, "elapsed_us": 0})
+    return _json_bytes_response(_result_payload(result))
 
 
 @app.post("/api/execute-batch")
 def execute_batch(req: BatchRequest):
     if len(req.queries) > _MAX_BATCH_SIZE:
-        return [{"kind": "error", "data": f"Batch exceeds {_MAX_BATCH_SIZE} queries", "count": 0, "elapsed_us": 0}]
+        return _json_bytes_response([{"kind": "error", "data": f"Batch exceeds {_MAX_BATCH_SIZE} queries", "count": 0, "elapsed_us": 0}])
     store = _get_store()
     results = []
     for q in req.queries:
@@ -211,10 +200,10 @@ def execute_batch(req: BatchRequest):
             continue
         try:
             r = store.execute(q)
-            results.append(_result_to_dict(r))
+            results.append(_result_payload(r))
         except GraphStoreError as exc:
             results.append({"kind": "error", "data": str(exc), "count": 0, "elapsed_us": 0})
-    return results
+    return _json_bytes_response(results)
 
 
 @app.get("/api/graph")
@@ -222,7 +211,7 @@ def get_graph():
     store = _get_store()
     nodes = store.get_all_nodes()
     edges = store.get_all_edges()
-    return {"nodes": nodes, "edges": edges}
+    return _json_bytes_response({"nodes": nodes, "edges": edges})
 
 
 @app.post("/api/reset")

@@ -34,3 +34,6 @@ graphstore/algos/*.best
 
 # Benchmark run artifacts
 benchmarks/results/
+
+# pytest tmpdir cache
+pytest-of-*/
