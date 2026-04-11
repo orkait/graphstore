@@ -138,6 +138,16 @@ def updated_at_10k() -> tuple[np.ndarray, np.ndarray]:
 
 
 @pytest.fixture(scope="session")
+def updated_at_100k() -> tuple[np.ndarray, np.ndarray]:
+    rng = _rng(seed_offset=14)
+    now_ms = 1_700_000_000_000
+    ages_ms = rng.integers(0, 365 * 86_400_000, 100_000, dtype=np.int64)
+    timestamps = now_ms - ages_ms
+    present = rng.random(100_000) < 0.9
+    return timestamps, present
+
+
+@pytest.fixture(scope="session")
 def eviction_inputs_10k(
     live_mask_10k_80pct: np.ndarray,
     node_ids_10k: np.ndarray,
@@ -150,6 +160,23 @@ def eviction_inputs_10k(
         "kind_lookup": lambda i: kinds[i],
         "updated_at": updated_at_10k[0],
         "updated_at_present": updated_at_10k[1],
+        "protected_kinds": {"schema", "config"},
+    }
+
+
+@pytest.fixture(scope="session")
+def eviction_inputs_100k(
+    live_mask_100k_80pct: np.ndarray,
+    node_ids_100k: np.ndarray,
+    updated_at_100k: tuple[np.ndarray, np.ndarray],
+) -> dict:
+    kinds = ["user", "document", "chunk", "message", "schema", "config"]
+    return {
+        "live_mask": live_mask_100k_80pct,
+        "kind_ids": node_ids_100k % len(kinds),
+        "kind_lookup": lambda i: kinds[i],
+        "updated_at": updated_at_100k[0],
+        "updated_at_present": updated_at_100k[1],
         "protected_kinds": {"schema", "config"},
     }
 

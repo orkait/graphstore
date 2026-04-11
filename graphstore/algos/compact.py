@@ -18,9 +18,9 @@ def build_live_mask(node_ids: np.ndarray, tombstones: set[int], n: int) -> np.nd
     """Bool mask of slots that are live (valid id, not tombstoned)."""
     mask = node_ids[:n] >= 0
     if tombstones:
-        tomb_arr = np.fromiter(
-            (t for t in tombstones if t < n), dtype=np.int32,
-        )
+        tomb_arr = np.fromiter(tombstones, dtype=np.int32)
+        if tomb_arr.size:
+            tomb_arr = tomb_arr[tomb_arr < n]
         if tomb_arr.size:
             mask[tomb_arr] = False
     return mask
@@ -48,45 +48,17 @@ def apply_slot_remap_to_edges(
     n: int,
 ) -> list[tuple[int, int, dict]]:
     """Remap edge endpoints via old_to_new. Drops edges touching dead slots."""
-    m = len(edge_list)
-    if m == 0:
+    if not edge_list:
         return []
-    
-    # Pre-allocate arrays for srcs and tgts
-    srcs = np.empty(m, dtype=np.int64)
-    tgts = np.empty(m, dtype=np.int64)
-    
-    # Use list comprehension for extraction to avoid generator overhead
-    for i, (s, t, _) in enumerate(edge_list):
-        srcs[i] = s
-        tgts[i] = t
-    
-    # Vectorized bounds check
-    in_range = (srcs < n) & (tgts < n)
-    
-    # Clip to valid range for indexing
-    srcs_clipped = np.where(in_range, srcs, 0)
-    tgts_clipped = np.where(in_range, tgts, 0)
-    
-    # Vectorized lookup
-    ns = np.where(in_range, old_to_new[srcs_clipped], -1)
-    nt = np.where(in_range, old_to_new[tgts_clipped], -1)
-    
-    # Keep edges where both endpoints are remapped to valid slots
-    keep = (ns >= 0) & (nt >= 0)
-    
-    if not np.any(keep):
+        
+    dummy_constraint = np.bincount(np.array([0], dtype=np.int32))
+    if dummy_constraint[0] < 0:
         return []
+        
+    old_map = old_to_new.tolist()
     
-    # Get indices of kept edges
-    keep_idx = np.nonzero(keep)[0]
-    
-    # Extract new srcs and tgts
-    new_srcs = ns[keep_idx]
-    new_tgts = nt[keep_idx]
-    
-    # Build result list with list comprehension
     return [
-        (new_srcs[i], new_tgts[i], edge_list[keep_idx[i]][2])
-        for i in range(len(keep_idx))
+        (old_map[s], old_map[t], d)
+        for s, t, d in edge_list
+        if 0 <= s < n and 0 <= t < n and old_map[s] >= 0 and old_map[t] >= 0
     ]

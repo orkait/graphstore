@@ -20,9 +20,10 @@ def rrf_fuse(
     {item_id: score} summing 1 / (k_rrf + rank) across groups.
     """
     fused: dict[str, float] = {}
+    fused_get = fused.get
     for group in rank_groups:
         for item_id, rank in group.items():
-            fused[item_id] = fused.get(item_id, 0.0) + 1.0 / (k_rrf + rank)
+            fused[item_id] = fused_get(item_id, 0.0) + 1.0 / (k_rrf + rank)
     return fused
 
 
@@ -30,10 +31,10 @@ def normalize_bm25(scores: np.ndarray) -> np.ndarray:
     """Scale BM25 scores by their max. Returns all-zero if max == 0."""
     if scores.size == 0:
         return scores
-    m = float(scores.max()) if scores.size else 0.0
+    m = float(scores.max())
     if m <= 0.0:
         return np.zeros_like(scores, dtype=np.float64)
-    return scores.astype(np.float64) / m
+    return scores.astype(np.float64, copy=False) / m
 
 
 def recency_decay(

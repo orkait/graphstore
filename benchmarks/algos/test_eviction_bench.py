@@ -30,3 +30,6 @@ class TestNeedsOptimization:
 class TestRankEvictable:
     def test_10k(self, benchmark, eviction_inputs_10k):
         benchmark(rank_evictable_slots, **eviction_inputs_10k)
+
+    def test_100k(self, benchmark, eviction_inputs_100k):
+        benchmark(rank_evictable_slots, **eviction_inputs_100k)

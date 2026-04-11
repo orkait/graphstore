@@ -1,6 +1,7 @@
 """Tests for graphstore.types and graphstore.errors."""
 
 import json
+import numpy as np
 
 from graphstore.core.types import Edge, NodeData, Result
 from graphstore.core.errors import (
@@ -48,6 +49,22 @@ class TestResult:
         j = r.to_json()
         parsed = json.loads(j)
         assert "boom" in parsed["data"]
+
+    def test_to_json_converts_numpy_array_to_list(self):
+        r = Result(kind="nodes", data=np.array([1, 2, 3], dtype=np.int32), count=3)
+        j = r.to_json()
+        parsed = json.loads(j)
+        assert parsed["data"] == [1, 2, 3]
+
+    def test_to_json_converts_list_of_numpy_arrays(self):
+        r = Result(
+            kind="nodes",
+            data=[np.array([1, 2], dtype=np.int32), np.array([3, 4], dtype=np.int32)],
+            count=2,
+        )
+        j = r.to_json()
+        parsed = json.loads(j)
+        assert parsed["data"] == [[1, 2], [3, 4]]
 
 
 # ── Edge ─────────────────────────────────────────────────────────────
