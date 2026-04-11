@@ -145,8 +145,9 @@ def write_summary(algo: str, metrics: list[dict]) -> Path:
         "file_under_improvement": ALGO_TO_FILE[algo],
         "unit": "microseconds",
         "lower_is_better": True,
+        "stat": "min",
         "n_metrics": len(metrics),
-        "metrics": {m["name"]: m["mean_us"] for m in metrics},
+        "metrics": {m["name"]: m["min_us"] for m in metrics},
         "detailed": metrics,
     }
     summary_path.write_text(json.dumps(summary, indent=2))
@@ -207,7 +208,8 @@ def main() -> int:
             "file_under_improvement": ALGO_TO_FILE[args.algo],
             "unit": "microseconds",
             "lower_is_better": True,
-            "metrics": {m["name"]: m["mean_us"] for m in metrics},
+            "stat": "min",
+            "metrics": {m["name"]: m["min_us"] for m in metrics},
         }
         sys.stdout.write(json.dumps(payload, indent=2) + "\n")
         return 0
@@ -223,7 +225,7 @@ def main() -> int:
 
     print(f"METRIC_FILE {ALGO_TO_FILE[args.algo]}")
     for m in metrics:
-        print(f"METRIC {m['name']} {m['mean_us']:.4f}")
+        print(f"METRIC {m['name']} {m['min_us']:.4f}")
     return 0
 
 
