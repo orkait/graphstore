@@ -125,21 +125,23 @@ class EdgeMatrices:
         self._in_degree.clear()
 
         for etype, edge_list in edges_by_type.items():
-            if edge_list:
-                sources = np.array([s for s, t, d in edge_list], dtype=np.int32)
-                targets = np.array([t for s, t, d in edge_list], dtype=np.int32)
-                data = [d for s, t, d in edge_list]
-
-                # Use edge weight if available, else 1.0
-                weights = np.array(
-                    [d.get("weight", 1.0) if d else 1.0 for d in data],
-                    dtype=np.float32
-                )
-                self._typed[etype] = csr_matrix(
-                    (weights, (sources, targets)),
-                    shape=(num_nodes, num_nodes)
-                )
-                self._edge_data[etype] = data
+            if not edge_list:
+                continue
+            m = len(edge_list)
+            sources = np.empty(m, dtype=np.int32)
+            targets = np.empty(m, dtype=np.int32)
+            weights = np.empty(m, dtype=np.float32)
+            data_list = [None] * m
+            for i, (s, t, d) in enumerate(edge_list):
+                sources[i] = s
+                targets[i] = t
+                weights[i] = d.get("weight", 1.0) if d else 1.0
+                data_list[i] = d
+            self._typed[etype] = csr_matrix(
+                (weights, (sources, targets)),
+                shape=(num_nodes, num_nodes),
+            )
+            self._edge_data[etype] = data_list
 
         # Precompute combined matrix
         if self._typed:

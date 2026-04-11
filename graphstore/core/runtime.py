@@ -10,8 +10,9 @@ through its shared reference.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from collections import deque
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import sqlite3
@@ -31,3 +32,4 @@ class RuntimeState:
     document_store: "DocumentStore | None" = None
     embedder: "Embedder | None" = None
     conn: "sqlite3.Connection | None" = None
+    similarity_buffer: Any = field(default_factory=lambda: deque(maxlen=100))

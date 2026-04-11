@@ -81,6 +81,9 @@ class SystemExecutor:
         self._evolution_engine = evolution_engine
         self._eviction_target_ratio = 0.8
         self._start_time = time.time()
+        self._duplicate_threshold_override: float | None = None
+        self._protected_kinds: set[str] | None = None
+        self._wal_manager = None
 
     @property
     def store(self):
@@ -586,13 +589,13 @@ class SystemExecutor:
 
         snap = store._snapshots[q.name]
 
-        # Restore columns
-        store.columns.restore_arrays(snap["columns"])
-
-        # Restore capacity if needed
         saved_next_slot = snap["next_slot"]
-        if saved_next_slot > store._capacity:
+        saved_capacity = snap.get("capacity", saved_next_slot)
+        while store._capacity < saved_capacity:
             store._grow()
+
+        store.columns.restore_arrays(snap["columns"])
+        store.columns.grow(store._capacity)
 
         # Restore node arrays
         store.node_ids[:saved_next_slot] = snap["node_ids"]
@@ -650,7 +653,10 @@ class SystemExecutor:
         store = self.store
         n = store._next_slot
 
-        # Build live mask
+        effective_threshold = q.threshold
+        if self._duplicate_threshold_override is not None and q.threshold == 0.95:
+            effective_threshold = self._duplicate_threshold_override
+
         mask = store.compute_live_mask(n)
 
         # Apply optional WHERE filter
@@ -688,7 +694,7 @@ class SystemExecutor:
                     continue
                 # cosine similarity = 1 - cosine distance
                 similarity = 1.0 - float(dist)
-                if similarity >= q.threshold:
+                if similarity >= effective_threshold:
                     pair_key = (min(slot, found_slot), max(slot, found_slot))
                     if pair_key not in seen:
                         seen.add(pair_key)
@@ -813,8 +819,12 @@ class SystemExecutor:
         data["registered_kinds"] = self.schema.list_node_kinds()
         data["registered_edge_kinds"] = self.schema.list_edge_kinds()
 
-        # Uptime
         data["uptime_seconds"] = time.time() - self._start_time
+
+        if self._wal_manager is not None:
+            data["wal_replay_errors"] = self._wal_manager.replay_error_count
+            if self._wal_manager.replay_error_count > 0:
+                data["wal_replay_error_details"] = self._wal_manager.replay_errors
 
         # Accurate measurement
         try:
@@ -929,14 +939,20 @@ class SystemExecutor:
         """SYS EVICT: emergency eviction of oldest nodes to free memory."""
         from graphstore.core.optimizer import evict_oldest, evict_by_count
 
+        protected = self._protected_kinds
+
         if q.limit:
-            # LIMIT overrides - evict exactly N nodes
-            data = evict_by_count(self.store, q.limit.value, self._vector_store, self._document_store)
+            data = evict_by_count(
+                self.store, q.limit.value, self._vector_store, self._document_store,
+                protected_kinds=protected,
+            )
         else:
-            # Evict to config-specified ratio of ceiling
             target = int(self.store._ceiling_bytes * self._eviction_target_ratio)
-            data = evict_oldest(self.store, target, self._vector_store, self._document_store)
-            
+            data = evict_oldest(
+                self.store, target, self._vector_store, self._document_store,
+                protected_kinds=protected,
+            )
+
         return Result(kind="ok", data=data, count=data["evicted"])
 
     def _log(self, q: SysLog) -> Result:
@@ -981,7 +997,7 @@ class SystemExecutor:
 
     def _cron_add(self, q: SysCronAdd) -> Result:
         if not self._cron:
-            raise GraphStoreError("CRON not configured. Use GraphStore(threaded=True)")
+            raise GraphStoreError("CRON not configured. Use GraphStore(queued=True)")
         data = self._cron.add(q.name, q.schedule, q.query)
         return Result(kind="ok", data=data, count=1)
 
