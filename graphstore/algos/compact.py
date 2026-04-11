@@ -85,10 +85,8 @@ def apply_slot_remap_to_edges(
     new_srcs = ns[keep_idx]
     new_tgts = nt[keep_idx]
     
-    # Build result list without converting to list first
-    result = []
-    for i in range(len(keep_idx)):
-        orig_idx = keep_idx[i]
-        result.append((new_srcs[i], new_tgts[i], edge_list[orig_idx][2]))
-    
-    return result
+    # Build result list with list comprehension
+    return [
+        (new_srcs[i], new_tgts[i], edge_list[keep_idx[i]][2])
+        for i in range(len(keep_idx))
+    ]

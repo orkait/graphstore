@@ -94,12 +94,12 @@ def group_count_distinct(
 ) -> np.ndarray:
     """Per-group distinct count.
 
-    Unlike COUNT/SUM/AVG/MIN/MAX this does NOT have a single-shot numpy
-    primitive - we walk each group with a mask, unique, and len. For
-    small group counts this is fine; for very wide GROUP BYs consider a
-    sort-then-adjacent-diff approach.
+    Fully vectorized O(N log N) using numpy unique and bincount instead
+    of a python for-loop over groups.
     """
-    counts = np.zeros(num_groups, dtype=np.float64)
-    for g in range(num_groups):
-        counts[g] = len(np.unique(values[inverse == g]))
-    return counts
+    if len(values) == 0:
+        return np.zeros(num_groups, dtype=np.float64)
+    # Find all unique (group_id, value) pairs
+    _, unique_idx = np.unique(np.column_stack((inverse, values)), axis=0, return_index=True)
+    # Count how many unique pairs belong to each group
+    return np.bincount(inverse[unique_idx], minlength=num_groups).astype(np.float64)

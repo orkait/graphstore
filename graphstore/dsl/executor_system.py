@@ -175,8 +175,8 @@ class SystemExecutor:
             data["edge_count"] = self.store.edge_count
             if q.target is None:
                 data["edge_counts_by_type"] = {
-                    etype: m.nnz
-                    for etype, m in self.store.edge_matrices._typed.items()
+                    etype: len(edges)
+                    for etype, edges in self.store._edges_by_type.items()
                 }
         if q.target is None or q.target == "MEMORY":
             data["memory_bytes"] = estimate_memory(
@@ -252,24 +252,47 @@ class SystemExecutor:
     def _failed_queries(self, q: SysFailedQueries) -> Result:
         if not self.conn:
             return Result(kind="log_entries", data=[], count=0)
-        sql = (
+            
+        entries = []
+        params: list = []
+        if q.limit:
+            params.append(q.limit.value)
+            
+        # 1. Fetch runtime query failures
+        sql_log = (
             "SELECT timestamp, query, elapsed_us, error FROM query_log "
             "WHERE error IS NOT NULL ORDER BY timestamp DESC"
         )
-        params: list = []
         if q.limit:
-            sql += " LIMIT ?"
-            params.append(q.limit.value)
-        rows = self.conn.execute(sql, params).fetchall()
-        entries = [
-            {
+            sql_log += " LIMIT ?"
+        rows_log = self.conn.execute(sql_log, params).fetchall()
+        for r in rows_log:
+            entries.append({
+                "source": "runtime",
                 "timestamp": r[0],
                 "query": r[1],
                 "elapsed_us": r[2],
                 "error": r[3],
-            }
-            for r in rows
-        ]
+            })
+            
+        # 2. Fetch recovery (WAL replay) failures
+        sql_wal = "SELECT timestamp, statement, error_msg FROM failed_wal_entries ORDER BY timestamp DESC"
+        if q.limit:
+            sql_wal += " LIMIT ?"
+        rows_wal = self.conn.execute(sql_wal, params).fetchall()
+        for r in rows_wal:
+            entries.append({
+                "source": "recovery",
+                "timestamp": r[0],
+                "query": r[1],
+                "elapsed_us": 0,
+                "error": r[2],
+            })
+            
+        entries.sort(key=lambda x: x["timestamp"], reverse=True)
+        if q.limit:
+            entries = entries[:q.limit.value]
+            
         return Result(kind="log_entries", data=entries, count=len(entries))
 
     def _explain(self, q: SysExplain) -> Result:
