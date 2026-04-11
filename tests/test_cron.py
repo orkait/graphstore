@@ -3,6 +3,8 @@ import pytest
 from graphstore import GraphStore
 from graphstore.cron import CronScheduler
 
+pytestmark = pytest.mark.needs_scheduler
+
 
 class TestCronCRUD:
     def test_add_and_list(self, tmp_path):

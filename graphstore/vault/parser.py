@@ -1,7 +1,14 @@
 """Parse markdown notes: frontmatter, sections, wikilinks."""
 import re
-import yaml
 from datetime import datetime
+
+try:
+    import yaml
+except ImportError as e:
+    raise ImportError(
+        "graphstore.vault requires the `vault` extra. "
+        "Install with: pip install 'graphstore[vault]'"
+    ) from e
 
 
 def parse_frontmatter(content: str) -> dict:
