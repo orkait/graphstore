@@ -9,10 +9,12 @@ from scipy.sparse.csgraph import dijkstra as _csgraph_dijkstra
 
 __all__ = [
     "bfs_traverse",
+    "bfs_reach",
     "bidirectional_bfs",
     "find_all_paths",
     "dijkstra",
     "common_neighbors",
+    "propagate_values",
 ]
 
 
@@ -202,3 +204,101 @@ def common_neighbors(matrix: csr_matrix, node_a: int, node_b: int) -> np.ndarray
     neighbors_a = matrix.indices[start_a:end_a]
     neighbors_b = matrix.indices[start_b:end_b]
     return np.intersect1d(neighbors_a, neighbors_b)
+
+
+def bfs_reach(
+    matrix: csr_matrix,
+    source: int,
+    max_depth: int | None = None,
+) -> set:
+    """Set of slots reachable from source within max_depth hops (or unlimited)."""
+    n = matrix.shape[0]
+    if n == 0 or source >= n:
+        return {source} if source >= 0 else set()
+
+    visited: set = {source}
+    frontier = np.zeros(n, dtype=np.float32)
+    if source < n:
+        frontier[source] = 1.0
+    else:
+        return visited
+
+    matT = matrix.T.tocsr()
+    depth = 0
+    while True:
+        if max_depth is not None and depth >= max_depth:
+            break
+        reached = matT.dot(frontier) > 0
+        next_idx = np.nonzero(reached)[0]
+        new_slots = [int(s) for s in next_idx if int(s) not in visited]
+        if not new_slots:
+            break
+        visited.update(new_slots)
+        next_mask = np.zeros(n, dtype=np.float32)
+        next_mask[new_slots] = 1.0
+        frontier = next_mask
+        depth += 1
+    return visited
+
+
+def propagate_values(
+    matrix: csr_matrix,
+    source: int,
+    source_value: float,
+    depth: int,
+    existing_values: np.ndarray,
+    presence: np.ndarray,
+    blocked_slots=None,
+) -> tuple:
+    """BFS forward, multiplying source_value by edge weights at each hop.
+
+    Args:
+        matrix: CSR weight matrix. matrix[i, j] == weight of edge i→j.
+        source: starting slot.
+        source_value: initial value at source.
+        depth: max hops (inclusive).
+        existing_values: per-slot current value array (read-only here).
+        presence: per-slot bool mask of which slots have existing values.
+        blocked_slots: optional set of slot indices to skip entirely.
+
+    Returns:
+        (updated_slots, new_values) — lists giving the slot indices and
+        newly computed values in order. Caller writes back to columns.
+
+    Note:
+        This implements the semantics of `_propagate`: value diffuses
+        multiplicatively along edge weights, each neighbor is visited
+        at most once (BFS visited set), blocked slots are not traversed.
+    """
+    from collections import deque
+
+    blocked = blocked_slots or set()
+    visited: set = {source}
+    frontier: deque = deque([(source, float(source_value), 0)])
+    updated_slots: list = []
+    new_values: list = []
+
+    while frontier:
+        current_slot, parent_value, current_depth = frontier.popleft()
+        if current_depth >= depth:
+            continue
+
+        start = matrix.indptr[current_slot]
+        end = matrix.indptr[current_slot + 1]
+        neighbors = matrix.indices[start:end]
+        weights = matrix.data[start:end]
+
+        for i, nb in enumerate(neighbors):
+            nb = int(nb)
+            if nb in visited:
+                continue
+            visited.add(nb)
+            if nb in blocked:
+                continue
+            edge_weight = float(weights[i]) if i < len(weights) else 1.0
+            propagated = parent_value * edge_weight
+            updated_slots.append(nb)
+            new_values.append(propagated)
+            frontier.append((nb, propagated, current_depth + 1))
+
+    return updated_slots, new_values

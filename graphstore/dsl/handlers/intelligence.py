@@ -229,31 +229,19 @@ class IntelligenceHandlers:
         saved_node_kinds = self.store.node_kinds[:self.store._next_slot].copy()
 
         try:
+            from graphstore.algos.graph import bfs_reach
+
             self.store.columns.set_reserved(src_slot, "__retracted__", 1)
 
             combined = self.store.edge_matrices.get(None)
             n = self.store._next_slot
-            affected_slots = set()
-            affected_slots.add(src_slot)
+            affected_slots: set = {src_slot}
 
             if combined is not None:
                 mat = combined
                 if mat.shape[0] < n:
                     mat = resize_csr(mat, n)
-
-                frontier = deque([src_slot])
-                visited = {src_slot}
-                while frontier:
-                    current = frontier.popleft()
-                    if current < mat.shape[0]:
-                        start = mat.indptr[current]
-                        end = mat.indptr[current + 1]
-                        for nb in mat.indices[start:end]:
-                            nb = int(nb)
-                            if nb not in visited:
-                                visited.add(nb)
-                                affected_slots.add(nb)
-                                frontier.append(nb)
+                affected_slots |= bfs_reach(mat, src_slot, max_depth=None)
 
             affected_nodes = []
             for slot in affected_slots:

@@ -338,30 +338,16 @@ class CoreStore:
         self._dirty_edges = True
         self._invalidate_live_cache()
 
-        any_removed = False
-        for etype in list(self._edges_by_type.keys()):
-            old_edges = self._edges_by_type[etype]
-            new_edges = [
-                (s, t, d) for s, t, d in old_edges
-                if s not in slot_set and t not in slot_set
-            ]
-            if len(new_edges) != len(old_edges):
-                any_removed = True
-            if new_edges:
-                self._edges_by_type[etype] = new_edges
-            else:
-                del self._edges_by_type[etype]
-
+        from graphstore.algos.edges_ops import (
+            cascade_filter_edges,
+            rebuild_edge_keys_set,
+            rebuild_edge_data_idx,
+        )
+        new_edges, any_removed = cascade_filter_edges(self._edges_by_type, slot_set)
+        self._edges_by_type = new_edges
         if any_removed:
-            self._edge_keys = {
-                (s, t, k)
-                for k, edges in self._edges_by_type.items()
-                for s, t, _d in edges
-            }
-            self._edge_data_idx = {
-                k: {(s, t): d for s, t, d in edges}
-                for k, edges in self._edges_by_type.items()
-            }
+            self._edge_keys = rebuild_edge_keys_set(self._edges_by_type)
+            self._edge_data_idx = rebuild_edge_data_idx(self._edges_by_type)
 
         self._edges_dirty = True
         self._ensure_edges_built()
@@ -646,20 +632,24 @@ class CoreStore:
 
     def compute_live_mask(self, n: int) -> np.ndarray:
         """Unified visibility: tombstones + TTL + retracted."""
-        mask = self.node_ids[:n] >= 0
-        if self.node_tombstones:
-            mask = mask & ~self._tombstone_mask(n)
+        from graphstore.algos.visibility import full_live_mask
+        import time as _time
         expires = self.columns.get_column("__expires_at__", n)
-        if expires is not None:
-            col, pres, _ = expires
-            import time as _time
-            now_ms = int(_time.time() * 1000)
-            mask = mask & ~(pres & (col > 0) & (col < now_ms))
         retracted = self.columns.get_column("__retracted__", n)
-        if retracted is not None:
-            col, pres, _ = retracted
-            mask = mask & ~(pres & (col == 1))
-        return mask
+        expires_col = expires[0] if expires is not None else None
+        expires_pres = expires[1] if expires is not None else None
+        retracted_col = retracted[0] if retracted is not None else None
+        retracted_pres = retracted[1] if retracted is not None else None
+        return full_live_mask(
+            node_ids=self.node_ids,
+            tombstones=self.node_tombstones,
+            n=n,
+            now_ms=int(_time.time() * 1000),
+            expires_col=expires_col,
+            expires_pres=expires_pres,
+            retracted_col=retracted_col,
+            retracted_pres=retracted_pres,
+        )
 
     def _has_time_sensitive_visibility(self) -> bool:
         """True when TTL or retracted columns exist — prevents stale cache hits."""
@@ -760,50 +750,17 @@ class CoreStore:
         return d
 
     def _materialize_bulk(self, slots: np.ndarray) -> list[dict]:
-        """Vectorized bulk materialization: one numpy fancy-index op per column.
-
-        Replaces the per-slot Python loop in hot query paths. Column arrays are
-        read once across all slots (O(columns)) instead of once per slot
-        (O(slots * columns)).
-        """
-        if len(slots) == 0:
-            return []
-
-        id_to_str = self.string_table._id_to_str  # direct list: O(1) index, no call overhead
-        # .tolist() converts the whole numpy array to Python ints in one C call,
-        # cheaper than calling .item() per element inside the loop.
-        str_id_list = self.node_ids[slots].tolist()
-        kind_id_list = self.node_kinds[slots].tolist()
-        n = len(slots)
-
-        result: list[dict] = [
-            {"id": id_to_str[str_id_list[i]], "kind": id_to_str[kind_id_list[i]]}
-            for i in range(n)
-        ]
-
-        cols = self.columns._columns
-        pres = self.columns._presence
-        dtypes = self.columns._dtypes
-
-        for field, col in cols.items():
-            if field[0] == "_" and field[-1] == "_":
-                continue
-            dtype = dtypes[field]
-            field_pres = pres[field][slots]   # one numpy fancy-index op
-            if not field_pres.any():
-                continue
-            field_vals = col[slots]           # one numpy fancy-index op
-            present_idx = np.where(field_pres)[0]
-            if dtype == "int32_interned":
-                vals_list = field_vals.tolist()
-                for i in present_idx:
-                    result[i][field] = id_to_str[vals_list[i]]
-            else:  # float64 / int64 — .tolist() converts to native Python scalar
-                vals_list = field_vals.tolist()
-                for i in present_idx:
-                    result[i][field] = vals_list[i]
-
-        return result
+        """Vectorized bulk materialization — delegates to algos.materialization."""
+        from graphstore.algos.materialization import materialize_bulk
+        return materialize_bulk(
+            slots=slots,
+            node_ids=self.node_ids,
+            node_kinds=self.node_kinds,
+            id_to_str=self.string_table._id_to_str,
+            columns=self.columns._columns,
+            presence=self.columns._presence,
+            dtypes=self.columns._dtypes,
+        )
 
     def get_all_nodes(self, kind: str | None = None, predicate=None) -> list[dict]:
         """Get all live nodes, optionally filtered by kind and/or predicate.

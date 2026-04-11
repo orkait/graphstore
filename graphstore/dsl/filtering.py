@@ -376,119 +376,58 @@ class FilteringMixin:
     def _try_column_order_by(self, nodes: list[dict], field: str,
                               descending: bool, limit: int | None,
                               offset: int | None) -> list[dict] | None:
-        """Try column-accelerated ORDER BY using np.argpartition for top-K."""
+        """Column-accelerated ORDER BY — delegates to algos.sort.topk_from_column."""
+        from graphstore.algos.sort import topk_from_column
+
         col_info = self.store.columns.get_column(field, self.store._next_slot)
         if col_info is None:
             return None
         col_data, col_pres, dtype_str = col_info
-
-        if dtype_str == "int32_interned":
-            return None
 
         slot_to_idx: dict[int, int] = {}
         for i, node in enumerate(nodes):
             slot = self._resolve_slot(node["id"])
             if slot is not None:
                 slot_to_idx[slot] = i
-
         if not slot_to_idx:
             return nodes
 
-        slots = np.array(list(slot_to_idx.keys()), dtype=np.int32)
-        values = col_data[slots].astype(np.float64)
-        present = col_pres[slots]
-
-        if descending:
-            values[~present] = -np.inf
-        else:
-            values[~present] = np.inf
-
-        total = len(slots)
-        eff_offset = (offset or 0)
-        eff_limit = limit if limit is not None else total
-
-        k = min(eff_offset + eff_limit, total)
-
-        if k < total and k > 0:
-            if descending:
-                part_idx = np.argpartition(-values, k)[:k]
-                sorted_idx = part_idx[np.argsort(-values[part_idx])]
-            else:
-                part_idx = np.argpartition(values, k)[:k]
-                sorted_idx = part_idx[np.argsort(values[part_idx])]
-        else:
-            if descending:
-                sorted_idx = np.argsort(-values)
-            else:
-                sorted_idx = np.argsort(values)
-
-        sorted_idx = sorted_idx[eff_offset:eff_offset + eff_limit]
-
-        result = []
-        for idx in sorted_idx:
-            slot = int(slots[idx])
-            node_idx = slot_to_idx[slot]
-            result.append(nodes[node_idx])
-        return result
+        slots = np.fromiter(slot_to_idx.keys(), dtype=np.int32, count=len(slot_to_idx))
+        ordered_slots = topk_from_column(
+            slots=slots,
+            column=col_data,
+            presence=col_pres,
+            dtype_str=dtype_str,
+            descending=descending,
+            limit=limit,
+            offset=offset,
+        )
+        if ordered_slots is None:
+            return None
+        return [nodes[slot_to_idx[int(s)]] for s in ordered_slots]
 
     def _order_slots_by_column(self, slots: np.ndarray, field: str,
                                descending: bool, limit: int | None,
                                offset: int | None,
                                fallback_predicate=None) -> np.ndarray | None:
-        """Sort slot indices by column values using numpy, apply offset+limit.
+        """Sort slot indices by column values — delegates to algos.sort."""
+        from graphstore.algos.sort import topk_from_column
 
-        Returns sorted+sliced slot array, or None if column not available.
-        When fallback_predicate is set, we can't use argpartition (need full sort)
-        but still sort by column values.
-        """
         col_info = self.store.columns.get_column(field, self.store._next_slot)
         if col_info is None:
             return None
         col_data, col_pres, dtype_str = col_info
 
-        if dtype_str == "int32_interned":
-            return None
-
-        if len(slots) == 0:
-            return slots
-
-        values = col_data[slots].astype(np.float64)
-        present = col_pres[slots]
-
-        if descending:
-            values[~present] = -np.inf
-        else:
-            values[~present] = np.inf
-
-        total = len(slots)
-        eff_offset = offset or 0
-        eff_limit = limit if limit is not None else total
-
-        if fallback_predicate is not None:
-            # Can't partition when we need post-filter; do full sort
-            if descending:
-                sorted_idx = np.argsort(-values)
-            else:
-                sorted_idx = np.argsort(values)
-            return slots[sorted_idx]
-
-        k = min(eff_offset + eff_limit, total)
-
-        if k < total and k > 0:
-            if descending:
-                part_idx = np.argpartition(-values, k)[:k]
-                sorted_idx = part_idx[np.argsort(-values[part_idx])]
-            else:
-                part_idx = np.argpartition(values, k)[:k]
-                sorted_idx = part_idx[np.argsort(values[part_idx])]
-        else:
-            if descending:
-                sorted_idx = np.argsort(-values)
-            else:
-                sorted_idx = np.argsort(values)
-
-        sorted_idx = sorted_idx[eff_offset:eff_offset + eff_limit]
-        return slots[sorted_idx]
+        return topk_from_column(
+            slots=slots,
+            column=col_data,
+            presence=col_pres,
+            dtype_str=dtype_str,
+            descending=descending,
+            limit=limit,
+            offset=offset,
+            full_sort=fallback_predicate is not None,
+        )
 
     def _materialize_slots_filtered(self, slots: np.ndarray, predicate=None) -> list[dict]:
         """Materialize slot array into node dicts, optionally filtering by predicate."""
