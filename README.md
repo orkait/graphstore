@@ -103,9 +103,14 @@ pip install 'graphstore[scheduler]'
 # local web playground (FastAPI + React UI)
 pip install 'graphstore[playground]'
 
-# GPU acceleration for the ONNX embedder path (onnxruntime-gpu + cu12 wheels)
+# GPU acceleration, zero-config (onnxruntime-gpu + bundled nvidia cu12 wheels)
 pip install 'graphstore[gpu]'
+
+# GPU acceleration, lean (onnxruntime-gpu only; bring your own system CUDA 12)
+pip install 'graphstore[gpu-ort]'
 ```
+
+GPU support is **Linux x86_64 only** today. Activation is opt-in via `GRAPHSTORE_GPU=1` or an explicit `providers=["CUDAExecutionProvider", ...]` argument - CPU remains the default. On Ubuntu 24.04, you'll need to temporarily relax apparmor's unprivileged-userns restriction for CUDA to initialize; graphstore detects this and raises a targeted error with the exact sysctl fix.
 
 Extras compose - `pip install 'graphstore[embed-default,ingest,vault,scheduler]'` gets you a full agent-memory stack. When a feature is used without its extra installed, graphstore raises a targeted `ImportError` pointing at the right `pip install` recipe, not a cryptic `ModuleNotFoundError`.
 
@@ -121,7 +126,8 @@ Extras compose - `pip install 'graphstore[embed-default,ingest,vault,scheduler]'
 | `scheduler` | croniter (cron-expression parsing for `SYS CRON ADD`) |
 | `vault` | pyyaml (Obsidian-style markdown vault sync) |
 | `playground` | fastapi + uvicorn + pydantic (local web UI) |
-| `gpu` | onnxruntime-gpu + nvidia cu12 runtime wheels; activate via `GRAPHSTORE_GPU=1` |
+| `gpu` | onnxruntime-gpu + bundled nvidia-cu12 runtime wheels (Linux x86_64) |
+| `gpu-ort` | onnxruntime-gpu only - expects system CUDA 12 + cuDNN 9 (Linux x86_64) |
 | `voice` | sounddevice + moonshine-voice + piper-tts |
 | `dev` | pytest + pytest-benchmark + pytest-cov |
 

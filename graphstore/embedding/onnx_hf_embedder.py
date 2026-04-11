@@ -1,7 +1,6 @@
 """Generic HuggingFace ONNX embedder using tokenizers + onnxruntime."""
 
 import ctypes
-import glob
 import os
 import sys
 from pathlib import Path
@@ -14,48 +13,125 @@ from graphstore.embedding.postprocess import l2_normalize, truncate_dims
 
 _CU12_PRELOADED = False
 
+# cu12-family sonames ORT's CUDA provider .so looks up at session creation.
+# Ordered so dependents load after their dependencies (cudart first).
+_CU12_SONAMES = (
+    "libcudart.so.12",
+    "libnvrtc.so.12",
+    "libnvJitLink.so.12",
+    "libcublas.so.12",
+    "libcublasLt.so.12",
+    "libcufft.so.11",
+    "libcurand.so.10",
+    "libcudnn.so.9",
+)
+
+# Map soname → (nvidia wheel subdir, wheel lib filename).
+# We look these up inside $site-packages/nvidia/<sub>/lib when the
+# filesystem probe can't find the libs in a system path.
+_WHEEL_LAYOUT: dict[str, str] = {
+    "libcudart.so.12": "cuda_runtime/lib",
+    "libnvrtc.so.12": "cuda_nvrtc/lib",
+    "libnvJitLink.so.12": "nvjitlink/lib",
+    "libcublas.so.12": "cublas/lib",
+    "libcublasLt.so.12": "cublas/lib",
+    "libcufft.so.11": "cufft/lib",
+    "libcurand.so.10": "curand/lib",
+    "libcudnn.so.9": "cudnn/lib",
+}
+
+
+def _apparmor_userns_blocks_cuda() -> bool:
+    """True if Ubuntu 24.04+ apparmor userns restriction is active.
+
+    When set, cudaGetDeviceCount() fails with error 304 from any
+    venv-isolated process - the exact reason every first-time GPU run
+    on a fresh 24.04 box mysteriously breaks.
+    """
+    path = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+    try:
+        with open(path) as f:
+            return f.read().strip() == "1"
+    except (FileNotFoundError, PermissionError, OSError):
+        return False
+
+
+def _system_cuda_libs_present() -> bool:
+    """Filesystem-only probe: are all required cu12 sonames in a path
+    the dynamic linker will search?
+
+    No dlopen - dlopen caches by soname and would pollute later fallback
+    attempts with partial loads if one lib is missing. We only check
+    existence on disk.
+    """
+    search: list[str] = []
+    for env in ("CUDA_HOME", "CUDA_PATH"):
+        value = os.environ.get(env)
+        if value:
+            search.append(os.path.join(value, "lib64"))
+    ld = os.environ.get("LD_LIBRARY_PATH", "")
+    search.extend(p for p in ld.split(":") if p)
+    search.extend([
+        "/usr/local/cuda/lib64",
+        "/usr/local/cuda-12/lib64",
+        "/usr/lib/x86_64-linux-gnu",
+    ])
+    for soname in _CU12_SONAMES:
+        if not any(os.path.exists(os.path.join(d, soname)) for d in search):
+            return False
+    return True
+
 
 def _preload_cu12_libs() -> None:
-    """Preload nvidia-*-cu12 shared libs so onnxruntime-gpu can find them.
+    """Make CUDA 12 runtime libs findable by onnxruntime-gpu.
 
-    The PyPI onnxruntime-gpu wheel is linked against CUDA 12 sonames
-    (libcublasLt.so.12, libcudart.so.12, libcudnn.so.9). On systems
-    without a matching CUDA 12 install (e.g. hosts on CUDA 13.x), users
-    typically install the nvidia-*-cu12 pip wheels alongside. This
-    helper dlopens the libs from the installed wheel locations via
-    ctypes so ORT's session loader resolves them without requiring
-    the user to manually set LD_LIBRARY_PATH.
+    Strategy:
+        1. Non-Linux: no-op. cu12 wheels are Linux x86_64 only.
+        2. Ubuntu 24.04 apparmor userns restriction active: raise a
+           targeted error with the sysctl fix - otherwise the user
+           would hit an opaque "CUDA failure 304" at session creation.
+        3. System already has the libs in a standard search path:
+           skip preload. ORT's own dlopen will find them.
+        4. nvidia-*-cu12 pip wheels installed alongside onnxruntime-gpu:
+           dlopen each lib from the wheel location so subsequent
+           ORT provider loads resolve the same soname to our wheel.
+        5. None of the above: do nothing - ORT will raise a clear
+           "libcublasLt.so.12 not found" at session creation which
+           points users at ``pip install graphstore[gpu]``.
 
-    Idempotent - safe to call multiple times.
+    Idempotent.
     """
     global _CU12_PRELOADED
-    if _CU12_PRELOADED:
+    if _CU12_PRELOADED or sys.platform != "linux":
         return
 
-    site_packages = [p for p in sys.path if p.endswith("site-packages")]
-    for sp in site_packages:
+    if _apparmor_userns_blocks_cuda():
+        raise RuntimeError(
+            "CUDA cannot initialize: Ubuntu 24.04+ apparmor is blocking\n"
+            "unprivileged user namespaces (error 304 from cudaGetDeviceCount).\n"
+            "\n"
+            "Temporary fix for this session:\n"
+            "    sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0\n"
+            "\n"
+            "Restore the safeguard after the run with:\n"
+            "    sudo sysctl kernel.apparmor_restrict_unprivileged_userns=1"
+        )
+
+    if _system_cuda_libs_present():
+        _CU12_PRELOADED = True
+        return
+
+    for sp in (p for p in sys.path if p.endswith("site-packages")):
         nvidia_root = Path(sp) / "nvidia"
         if not nvidia_root.exists():
             continue
-        # Order matters: cublas and cudnn depend on cuda_runtime.
-        for sub, patterns in [
-            ("cuda_runtime/lib", ["libcudart.so.12"]),
-            ("cuda_nvrtc/lib", ["libnvrtc.so.12"]),
-            ("nvjitlink/lib", ["libnvJitLink.so.12"]),
-            ("cublas/lib", ["libcublasLt.so.12", "libcublas.so.12"]),
-            ("cufft/lib", ["libcufft.so.11"]),
-            ("curand/lib", ["libcurand.so.10"]),
-            ("cudnn/lib", ["libcudnn.so.9"]),
-        ]:
-            lib_dir = nvidia_root / sub
-            if not lib_dir.exists():
-                continue
-            for pat in patterns:
-                for match in sorted(glob.glob(str(lib_dir / pat))):
-                    try:
-                        ctypes.CDLL(match, mode=ctypes.RTLD_GLOBAL)
-                    except OSError:
-                        pass
+        for soname in _CU12_SONAMES:
+            lib_path = nvidia_root / _WHEEL_LAYOUT[soname] / soname
+            if lib_path.exists():
+                try:
+                    ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
+                except OSError:
+                    pass
     _CU12_PRELOADED = True
 
 
@@ -110,10 +186,19 @@ class OnnxHFEmbedder(Embedder):
     Supports asymmetric query/document prefixes, Matryoshka truncation,
     and both mean and last-token pooling (for encoder vs decoder models).
 
-    GPU: pass ``providers=["CUDAExecutionProvider", "CPUExecutionProvider"]``
-    or set ``GRAPHSTORE_GPU=1`` in the environment. Requires the
-    ``onnxruntime-gpu`` wheel (install via ``pip install graphstore[gpu]``).
-    Falls back to CPU silently if CUDA is unavailable.
+    GPU (Linux x86_64 only): set ``GRAPHSTORE_GPU=1`` or pass
+    ``providers=["CUDAExecutionProvider", "CPUExecutionProvider"]``.
+
+    Two install paths:
+        - ``pip install 'graphstore[gpu]'``     - zero-config, bundles
+          onnxruntime-gpu plus the nvidia-*-cu12 runtime wheels.
+        - ``pip install 'graphstore[gpu-ort]'`` - leaner, assumes the
+          host already has CUDA 12 / cuDNN 9 in a standard search path
+          (system install, conda env, or LD_LIBRARY_PATH).
+
+    Falls back to CPU silently if CUDA is unavailable. Raises a targeted
+    error on Ubuntu 24.04 if apparmor's unprivileged-userns restriction
+    is blocking cudaGetDeviceCount().
     """
 
     def __init__(
