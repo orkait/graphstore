@@ -11,21 +11,21 @@ from typing import Any
 import numpy as np
 
 from graphstore.core.strings import StringTable
+from graphstore.algos.column_ops import (
+    INT64_SENTINEL,
+    STR_SENTINEL,
+    NUM_OPS as _NUM_OPS,
+    eval_mask,
+    eval_mask_in,
+)
 
 
 class ColumnStore:
     """Typed numpy arrays indexed by slot for fast vectorized filtering."""
 
-    INT64_SENTINEL = np.iinfo(np.int64).min
-    STR_SENTINEL = np.int32(-1)
-    _NUM_OPS = {
-        "=": np.equal,
-        "!=": np.not_equal,
-        ">": np.greater,
-        "<": np.less,
-        ">=": np.greater_equal,
-        "<=": np.less_equal,
-    }
+    INT64_SENTINEL = INT64_SENTINEL
+    STR_SENTINEL = STR_SENTINEL
+    _NUM_OPS = _NUM_OPS
 
     def __init__(self, string_table: StringTable, capacity: int = 1024):
         self._columns: dict[str, np.ndarray] = {}
@@ -96,57 +96,30 @@ class ColumnStore:
         """Return boolean mask for a comparison, or None if field not columnarized."""
         if field not in self._columns:
             return None
-
-        dtype_str = self._dtypes[field]
-        col = self._columns[field][:n]
-        pres = self._presence[field][:n]
-
-        if value is None:
-            if op == "=":
-                return ~pres
-            elif op == "!=":
-                return pres.copy()
-            return None
-
-        if dtype_str == "int32_interned":
-            if not isinstance(value, str):
-                return None
-            if value not in self._string_table:
-                if op == "=":
-                    return np.zeros(n, dtype=bool)
-                elif op == "!=":
-                    return pres.copy()
-                return None
-            int_val = self._string_table.intern(value)
-            if op == "=":
-                return (col == int_val) & pres
-            elif op == "!=":
-                return (col != int_val) & pres
-            return None  # >, <, >=, <= not supported on interned strings
-
-        fn = self._NUM_OPS.get(op)
-        if fn is None:
-            return None
-        return fn(col, value) & pres
+        return eval_mask(
+            col=self._columns[field],
+            presence=self._presence[field],
+            dtype_str=self._dtypes[field],
+            op=op,
+            value=value,
+            n=n,
+            intern_lookup=self._string_table.intern,
+            has_string=lambda v: v in self._string_table,
+        )
 
     def get_mask_in(self, field: str, values: list, n: int) -> np.ndarray | None:
         """Return mask for IN operator."""
         if field not in self._columns:
             return None
-        dtype_str = self._dtypes[field]
-        col = self._columns[field][:n]
-        pres = self._presence[field][:n]
-
-        if dtype_str == "int32_interned":
-            int_vals = [
-                self._string_table.intern(v)
-                for v in values
-                if isinstance(v, str) and v in self._string_table
-            ]
-            if not int_vals:
-                return np.zeros(n, dtype=bool)
-            return np.isin(col, int_vals) & pres
-        return np.isin(col, values) & pres
+        return eval_mask_in(
+            col=self._columns[field],
+            presence=self._presence[field],
+            dtype_str=self._dtypes[field],
+            values=values,
+            n=n,
+            intern_lookup=self._string_table.intern,
+            has_string=lambda v: v in self._string_table,
+        )
 
     def get_presence(self, field: str, n: int) -> np.ndarray | None:
         """Return presence bitmask for a field, or None if not columnarized."""

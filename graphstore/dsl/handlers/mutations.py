@@ -421,37 +421,16 @@ class MutationHandlers:
                 self.store.columns._presence[field][tgt_slot] = True
                 fields_merged += 1
 
-            edges_rewired = 0
-            for etype in list(self.store._edges_by_type.keys()):
-                new_edges = []
-                for s, t, d in self.store._edges_by_type[etype]:
-                    if s == src_slot:
-                        new_edges.append((tgt_slot, t, d))
-                        edges_rewired += 1
-                    elif t == src_slot:
-                        new_edges.append((s, tgt_slot, d))
-                        edges_rewired += 1
-                    else:
-                        new_edges.append((s, t, d))
-                self.store._edges_by_type[etype] = new_edges
-
-            for etype in list(self.store._edges_by_type.keys()):
-                seen = set()
-                deduped = []
-                for s, t, d in self.store._edges_by_type[etype]:
-                    key = (s, t)
-                    if key not in seen:
-                        seen.add(key)
-                        deduped.append((s, t, d))
-                self.store._edges_by_type[etype] = deduped
-                if not deduped:
-                    del self.store._edges_by_type[etype]
-
-            self.store._edge_keys = {
-                (s, t, k)
-                for k, edges in self.store._edges_by_type.items()
-                for s, t, _d in edges
-            }
+            from graphstore.algos.edges_ops import (
+                rewire_edges_source_target,
+                dedupe_edges_by_src_tgt,
+                rebuild_edge_keys_set,
+            )
+            rewired_edges, edges_rewired = rewire_edges_source_target(
+                self.store._edges_by_type, src_slot, tgt_slot,
+            )
+            self.store._edges_by_type = dedupe_edges_by_src_tgt(rewired_edges)
+            self.store._edge_keys = rebuild_edge_keys_set(self.store._edges_by_type)
             self.store._edges_dirty = True
             self.store._ensure_edges_built()
 

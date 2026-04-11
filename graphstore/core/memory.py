@@ -1,22 +1,31 @@
-"""Memory accounting: real component measurement + ceiling enforcement."""
+"""Memory accounting: real component measurement + ceiling enforcement.
+
+Math lives in graphstore.algos.measure. This module adapts it to the
+graphstore store/vector/document types.
+"""
 
 import sys
 from graphstore.core.errors import CeilingExceeded
+from graphstore.algos.measure import (
+    estimate_bytes as _algo_estimate_bytes,
+    will_exceed_ceiling as _algo_will_exceed,
+    measure_components as _algo_measure_components,
+    BYTES_PER_NODE_DEFAULT,
+    BYTES_PER_EDGE_DEFAULT,
+)
 
 DEFAULT_CEILING_BYTES = 256 * 1_000_000  # 256MB
 
-# Rough per-item overhead for estimation when real measurement is unavailable
-BYTES_PER_NODE_ESTIMATE = 330
-BYTES_PER_EDGE_ESTIMATE = 20
+BYTES_PER_NODE_ESTIMATE = BYTES_PER_NODE_DEFAULT
+BYTES_PER_EDGE_ESTIMATE = BYTES_PER_EDGE_DEFAULT
 
-# Backwards-compatible aliases
 BYTES_PER_NODE = BYTES_PER_NODE_ESTIMATE
 BYTES_PER_EDGE = BYTES_PER_EDGE_ESTIMATE
 
 
 def estimate(node_count: int, edge_count: int) -> int:
     """Quick estimate for backwards compat. Prefer measure() for accuracy."""
-    return (node_count * BYTES_PER_NODE_ESTIMATE) + (edge_count * BYTES_PER_EDGE_ESTIMATE)
+    return _algo_estimate_bytes(node_count, edge_count)
 
 
 def measure(store, vector_store=None, document_store=None, skip_csr: bool = False) -> dict:
@@ -26,79 +35,54 @@ def measure(store, vector_store=None, document_store=None, skip_csr: bool = Fals
         skip_csr: If True, skip CSR matrix measurement to avoid triggering an
                   expensive rebuild.  Use this on the hot calibration path.
     """
-    report = {}
-
-    # Node arrays
-    node_arrays = store.node_ids.nbytes + store.node_kinds.nbytes
-    report["node_arrays"] = node_arrays
-
-    # Column store
-    col_bytes = store.columns.memory_bytes
-    report["columns"] = col_bytes
-
-    # String table (both the list and the dict)
     st = store.string_table
+    node_arrays_bytes = store.node_ids.nbytes + store.node_kinds.nbytes
+
     str_list_size = sys.getsizeof(st._id_to_str)
     str_dict_size = sys.getsizeof(st._str_to_id)
-    # Add estimated string content (average ~20 bytes per string)
-    str_content = len(st) * 20
-    report["string_table"] = str_list_size + str_dict_size + str_content
+    string_table_bytes = str_list_size + str_dict_size + len(st) * 20
 
-    # Edge lists (Python objects)
-    edge_list_bytes = 0
+    edge_lists_bytes = 0
     for etype, edges in store._edges_by_type.items():
-        edge_list_bytes += sys.getsizeof(edges)
-        # Each tuple (int, int, dict) ~100 bytes
-        edge_list_bytes += len(edges) * 100
-    report["edge_lists"] = edge_list_bytes
+        edge_lists_bytes += sys.getsizeof(edges) + len(edges) * 100
 
-    # Edge data index
-    edge_idx_bytes = 0
+    edge_data_idx_bytes = 0
     for etype, idx in store._edge_data_idx.items():
-        edge_idx_bytes += sys.getsizeof(idx)
-        edge_idx_bytes += len(idx) * 80  # dict entry overhead
-    report["edge_data_idx"] = edge_idx_bytes
+        edge_data_idx_bytes += sys.getsizeof(idx) + len(idx) * 80
 
-    # CSR matrices (skipped on calibration path to avoid expensive rebuild)
-    csr_bytes = 0
+    edge_matrices_bytes = 0
     if not skip_csr and hasattr(store, '_edge_matrices'):
         store._ensure_edges_built()
-        for etype, m in store._edge_matrices._typed.items():
-            csr_bytes += m.data.nbytes + m.indices.nbytes + m.indptr.nbytes
+        for m in store._edge_matrices._typed.values():
+            edge_matrices_bytes += m.data.nbytes + m.indices.nbytes + m.indptr.nbytes
         if store._edge_matrices._combined_all is not None:
             m = store._edge_matrices._combined_all
-            csr_bytes += m.data.nbytes + m.indices.nbytes + m.indptr.nbytes
-    report["edge_matrices"] = csr_bytes
+            edge_matrices_bytes += m.data.nbytes + m.indices.nbytes + m.indptr.nbytes
 
-    # Edge keys set
-    report["edge_keys"] = sys.getsizeof(store._edge_keys) + len(store._edge_keys) * 80
+    edge_keys_bytes = sys.getsizeof(store._edge_keys) + len(store._edge_keys) * 80
+    tombstones_bytes = sys.getsizeof(store.node_tombstones) + len(store.node_tombstones) * 28
+    id_to_slot_bytes = sys.getsizeof(store.id_to_slot) + len(store.id_to_slot) * 40
+    vector_bytes = vector_store.memory_bytes if vector_store is not None else 0
 
-    # Tombstone set
-    report["tombstones"] = sys.getsizeof(store.node_tombstones) + len(store.node_tombstones) * 28
+    report = _algo_measure_components(
+        node_arrays_bytes=node_arrays_bytes,
+        column_nbytes=store.columns.memory_bytes,
+        string_table_bytes=string_table_bytes,
+        edge_lists_bytes=edge_lists_bytes,
+        edge_data_idx_bytes=edge_data_idx_bytes,
+        edge_matrices_bytes=edge_matrices_bytes,
+        edge_keys_bytes=edge_keys_bytes,
+        tombstones_bytes=tombstones_bytes,
+        id_to_slot_bytes=id_to_slot_bytes,
+        vector_store_bytes=vector_bytes,
+    )
 
-    # id_to_slot dict
-    report["id_to_slot"] = sys.getsizeof(store.id_to_slot) + len(store.id_to_slot) * 40
-
-    # Vector store
-    if vector_store is not None:
-        report["vector_store"] = vector_store.memory_bytes
-    else:
-        report["vector_store"] = 0
-
-    # Total core
-    core_total = sum(report.values())
-    report["core_total"] = core_total
-
-    # Document store is on disk (SQLite), doesn't count toward RAM
-    report["document_store_disk"] = 0
     if document_store is not None:
         try:
             stats = document_store.stats()
             report["document_store_disk"] = stats.get("total_bytes", 0)
         except Exception:
             pass
-
-    report["total"] = core_total
 
     return report
 
@@ -112,18 +96,19 @@ def check_ceiling(
     bytes_per_node: int | None = None,
     bytes_per_edge: int | None = None,
 ) -> None:
-    """Check if adding nodes/edges would exceed memory ceiling.
-
-    Uses quick estimate for hot-path performance. Pass ``bytes_per_node`` /
-    ``bytes_per_edge`` to override the static defaults with a self-calibrated
-    value (see CoreStore._recalibrate_ceiling_estimate).  Accurate full
-    measurement still happens in SYS HEALTH and auto-optimize health checks.
-    """
+    """Check if adding nodes/edges would exceed memory ceiling."""
     bpn = bytes_per_node if bytes_per_node is not None else BYTES_PER_NODE_ESTIMATE
     bpe = bytes_per_edge if bytes_per_edge is not None else BYTES_PER_EDGE_ESTIMATE
-    projected = (current_nodes + added_nodes) * bpn + (current_edges + added_edges) * bpe
-    if projected > ceiling_bytes:
-        current_mb = (current_nodes * bpn + current_edges * bpe) // 1_000_000
+    exceeds, current_mb = _algo_will_exceed(
+        current_nodes=current_nodes,
+        current_edges=current_edges,
+        added_nodes=added_nodes,
+        added_edges=added_edges,
+        ceiling_bytes=ceiling_bytes,
+        bytes_per_node=bpn,
+        bytes_per_edge=bpe,
+    )
+    if exceeds:
         raise CeilingExceeded(
             current_mb=current_mb,
             ceiling_mb=ceiling_bytes // 1_000_000,

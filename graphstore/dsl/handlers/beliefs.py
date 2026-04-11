@@ -68,7 +68,9 @@ class BeliefHandlers:
 
     @handles(PropagateStmt, write=True)
     def _propagate(self, q: PropagateStmt) -> Result:
-        """PROPAGATE: BFS forward belief chaining."""
+        """PROPAGATE: BFS forward belief chaining via algos.graph.propagate_values."""
+        from graphstore.algos.graph import propagate_values
+
         src_slot = self._resolve_slot(q.node_id)
         if src_slot is None:
             raise NodeNotFound(q.node_id)
@@ -89,57 +91,30 @@ class BeliefHandlers:
         if mat.shape[0] < n:
             mat = resize_csr(mat, n)
 
-        visited = set()
-        visited.add(src_slot)
-        frontier = deque()
-
         dtype = self.store.columns._dtypes[field]
         raw = self.store.columns._columns[field][src_slot]
         if dtype == "float64":
             source_value = float(raw)
         elif dtype == "int64":
-            source_value = int(raw)
+            source_value = float(int(raw))
         else:
             return Result(kind="ok", data={"updated": 0}, count=0)
 
-        frontier.append((src_slot, source_value, 0))
-        updated_count = 0
+        updated_slots, new_values = propagate_values(
+            matrix=mat,
+            source=src_slot,
+            source_value=source_value,
+            depth=q.depth,
+            existing_values=self.store.columns._columns[field],
+            presence=self.store.columns._presence[field],
+            blocked_slots=self.store.node_tombstones,
+        )
+
         now_ms = int(time.time() * 1000)
+        for nb, propagated in zip(updated_slots, new_values):
+            self.store.columns.set(nb, {field: propagated})
+            self.store.columns.set_reserved(nb, "__updated_at__", now_ms)
 
-        while frontier:
-            current_slot, parent_value, depth = frontier.popleft()
-            if depth >= q.depth:
-                continue
-
-            start = mat.indptr[current_slot]
-            end = mat.indptr[current_slot + 1]
-            neighbors = mat.indices[start:end]
-            weights = mat.data[start:end]
-
-            for i, nb in enumerate(neighbors):
-                nb = int(nb)
-                if nb in visited:
-                    continue
-                visited.add(nb)
-
-                if nb in self.store.node_tombstones:
-                    continue
-
-                if self.store.columns._presence[field][nb]:
-                    if dtype == "float64":
-                        current_val = float(self.store.columns._columns[field][nb])
-                    else:
-                        current_val = int(self.store.columns._columns[field][nb])
-                else:
-                    current_val = 0.0
-
-                edge_weight = float(weights[i]) if i < len(weights) else 1.0
-                propagated = parent_value * edge_weight
-
-                self.store.columns.set(nb, {field: propagated})
-                self.store.columns.set_reserved(nb, "__updated_at__", now_ms)
-                updated_count += 1
-
-                frontier.append((nb, propagated, depth + 1))
-
-        return Result(kind="ok", data={"updated": updated_count}, count=updated_count)
+        return Result(
+            kind="ok", data={"updated": len(updated_slots)}, count=len(updated_slots)
+        )

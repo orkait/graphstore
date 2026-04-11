@@ -2,6 +2,9 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from graphstore.algos.chunker import Chunk  # noqa: F401 — re-export
+
+
 @dataclass
 class ExtractedImage:
     data: bytes
@@ -10,14 +13,6 @@ class ExtractedImage:
     caption: str | None = None
     description: str | None = None
 
-@dataclass
-class Chunk:
-    text: str
-    summary: str       # first 200 chars of text
-    index: int
-    heading: str | None = None
-    page: int | None = None
-    start_char: int = 0
 
 @dataclass
 class IngestResult:
