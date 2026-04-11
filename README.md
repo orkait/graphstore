@@ -80,20 +80,52 @@ Three storage engines, one typed DSL, a layered feature set on top, and a pair o
 pip install graphstore
 ```
 
-This pulls in numpy, scipy, usearch, model2vec, lark, msgspec, and croniter - about 90 MB total.
+This is the lightweight core: numpy, scipy, usearch, lark, msgspec. Five runtime deps, no torch, no PDF parser, no HTTP server. The graph + vector + doc engines are fully functional — you can create nodes/edges, run BFS/Dijkstra paths, query by kind/property, and persist via WAL+snapshots out of the box.
+
+For anything beyond the core engine, opt into an extra:
+
+```bash
+# zero-config default embedder (30 MB, CPU-only)
+pip install 'graphstore[embed-default]'
+
+# 30+ ONNX models (BGE, mxbai, e5, nomic, jina-v2)
+pip install 'graphstore[embed-fastembed]'
+
+# PDF / DOCX / HTML → markdown ingestion
+pip install 'graphstore[ingest]'
+
+# Obsidian-style vault sync
+pip install 'graphstore[vault]'
+
+# cron-scheduled DSL jobs
+pip install 'graphstore[scheduler]'
+
+# local web playground (FastAPI + React UI)
+pip install 'graphstore[playground]'
+
+# GPU acceleration for the ONNX embedder path (onnxruntime-gpu + cu12 wheels)
+pip install 'graphstore[gpu]'
+```
+
+Extras compose — `pip install 'graphstore[embed-default,ingest,vault,scheduler]'` gets you a full agent-memory stack. When a feature is used without its extra installed, graphstore raises a targeted `ImportError` pointing at the right `pip install` recipe, not a cryptic `ModuleNotFoundError`.
 
 <details>
-<summary><strong>Optional extras</strong></summary>
+<summary><strong>Full extras reference</strong></summary>
 
-| Extra | What it adds | Command |
-|---|---|---|
-| `fastembed` | 30+ ONNX models (BGE, mxbai, e5, nomic, jina-v2) | `pip install "graphstore[fastembed]"` |
-| `embeddinggemma` | EmbeddingGemma-300M via ONNX (higher quality) | `graphstore install-embedder embeddinggemma` |
-| `voice` | Moonshine STT + Piper TTS (speech in/out) | `graphstore install-voice` |
-| `ingest-pro` | Docling for hard PDFs + OpenAI vision | `pip install "graphstore[ingest-pro]"` |
-| `playground` | Local web UI (CodeMirror + React Flow) | `pip install "graphstore[playground]"` |
+| Extra | What it adds |
+|---|---|
+| `embed-default` | model2vec — zero-config CPU embedder |
+| `embed-fastembed` | fastembed — ~30 pre-exported ONNX encoder models |
+| `ingest` | markitdown + pymupdf + pymupdf4llm (~80 MB, PDF/DOCX/HTML → markdown) |
+| `ingest-pro` | docling + openai (heavier PDF + vision via LLM) |
+| `scheduler` | croniter (cron-expression parsing for `SYS CRON ADD`) |
+| `vault` | pyyaml (Obsidian-style markdown vault sync) |
+| `playground` | fastapi + uvicorn + pydantic (local web UI) |
+| `gpu` | onnxruntime-gpu + nvidia cu12 runtime wheels; activate via `GRAPHSTORE_GPU=1` |
+| `voice` | sounddevice + moonshine-voice + piper-tts |
+| `dev` | pytest + pytest-benchmark + pytest-cov |
 
-For vision (images, diagrams), you also need [Ollama](https://ollama.com) running:
+For vision-powered ingestion (images, diagrams), you also need [Ollama](https://ollama.com) running:
 
 ```bash
 ollama pull smolvlm2:2.2b
