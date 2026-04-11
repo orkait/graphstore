@@ -165,19 +165,4 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     if schema_row:
         schema = SchemaRegistry.from_dict(mjson.decode(schema_row[0]))
 
-    # Compaction sentinel recovery Phase 1: in-memory remap.
-    sentinel_row = conn.execute(
-        "SELECT value FROM metadata WHERE key='compaction_sentinel'"
-    ).fetchone()
-    if sentinel_row is not None:
-        import logging as _logging
-        _logger = _logging.getLogger(__name__)
-        _logger.warning("compaction sentinel found - running in-memory recovery")
-        try:
-            from graphstore.core.optimizer import compact_tombstones
-            _vs = getattr(store, "vectors", None)
-            compact_tombstones(store, vector_store=_vs, document_store=None)
-        except Exception as _e:
-            _logger.error("compaction recovery failed: %s", _e)
-
     return store, schema

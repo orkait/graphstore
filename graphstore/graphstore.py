@@ -62,6 +62,7 @@ class GraphStore:
                  config: GraphStoreConfig | None = None,
                  config_path: str | None = None,
                  queued: bool = False,
+                 strict_recovery: bool = False,
                  ingestors: dict | None = None,
                  chunker=None,
                  stt=None,
@@ -195,24 +196,6 @@ class GraphStore:
             similarity_buffer=self._similarity_buffer,
         )
 
-        # Compaction sentinel recovery Phase 2: DocStore orphan cleanup.
-        if self._runtime.conn is not None:
-            _sentinel_row = self._runtime.conn.execute(
-                "SELECT value FROM metadata WHERE key='compaction_sentinel'"
-            ).fetchone()
-            if _sentinel_row is not None:
-                import numpy as _np
-                _n = self._runtime.store._next_slot
-                _live = self._runtime.store.compute_live_mask(_n)
-                _live_slots = set(int(s) for s in _np.nonzero(_live)[0])
-                try:
-                    self._runtime.document_store.orphan_cleanup(_live_slots)
-                except Exception as _e:
-                    logger.warning("compaction recovery orphan cleanup failed: %s", _e)
-                self._runtime.conn.execute("DELETE FROM metadata WHERE key='compaction_sentinel'")
-                self._runtime.conn.commit()
-                logger.warning("compaction sentinel recovery complete")
-
         self._embedder_dirty = False
 
         # Create executors before WAL replay so _replay_wal can use them
@@ -252,6 +235,7 @@ class GraphStore:
             wal_hard_limit=cfg.persistence.wal_hard_limit,
             auto_checkpoint_threshold=cfg.persistence.auto_checkpoint_threshold,
             log_retention_days=cfg.persistence.log_retention_days,
+            strict_recovery=strict_recovery,
         )
         self._sys_executor._wal_manager = self._wal
 
@@ -721,5 +705,8 @@ class GraphStore:
                 dims=dims, capacity=self._runtime.store._capacity,
             )
         return self._runtime.vector_store
+
+
+
 
 
