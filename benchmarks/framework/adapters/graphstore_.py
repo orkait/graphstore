@@ -63,6 +63,9 @@ def _extract_entities(text: str) -> list[str]:
 
 def _build_embedder(config: dict[str, Any]):
     name = (config.get("embedder") or "model2vec").lower()
+    gpu = bool(config.get("embedder_gpu"))
+    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if gpu else None
+
     if name in ("model2vec", "default"):
         return "default"
     if name == "fastembed":
@@ -84,6 +87,7 @@ def _build_embedder(config: dict[str, Any]):
             output_dims=config.get("embedder_output_dims"),
             max_length=int(config.get("embedder_max_length", 512)),
             pooling_mode=config.get("embedder_pooling", "mean"),
+            providers=providers,
         )
     if name == "installed":
         from graphstore.registry.installer import load_installed_embedder, set_cache_dir
@@ -96,6 +100,7 @@ def _build_embedder(config: dict[str, Any]):
         return load_installed_embedder(
             model_name,
             dims=config.get("embedder_output_dims"),
+            providers=providers,
         )
     raise ValueError(f"unknown embedder: {name!r}")
 
