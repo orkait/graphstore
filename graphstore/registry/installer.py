@@ -1,5 +1,6 @@
 """Model installer: download, verify, activate."""
 
+import os
 import subprocess
 import sys
 import shutil
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 from graphstore.registry.models import get_model_info, SUPPORTED_MODELS
 
 
-DEFAULT_CACHE_DIR = Path.home() / ".graphstore" / "models"
+DEFAULT_CACHE_DIR = Path.home() / "graphstore-models"
 
 _cache_dir_override: Path | None = None
 
@@ -21,9 +22,18 @@ def set_cache_dir(path: str | Path | None) -> None:
     _cache_dir_override = Path(path) if path else None
 
 
+def _effective_cache_dir() -> Path:
+    """Resolution order: explicit set_cache_dir() > GRAPHSTORE_MODEL_CACHE env > default."""
+    if _cache_dir_override is not None:
+        return _cache_dir_override
+    env = os.environ.get("GRAPHSTORE_MODEL_CACHE")
+    if env:
+        return Path(env)
+    return DEFAULT_CACHE_DIR
+
+
 def get_model_dir(name: str) -> Path:
-    base = _cache_dir_override if _cache_dir_override is not None else DEFAULT_CACHE_DIR
-    return base / name
+    return _effective_cache_dir() / name
 
 
 def is_installed(name: str) -> bool:
