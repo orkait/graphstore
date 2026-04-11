@@ -74,18 +74,22 @@ playground = [
     "uvicorn>=0.20",
     "pydantic>=2.0",
 ]
-# onnxruntime-gpu pypi wheels are linked against CUDA 12 sonames, so
-# the nvidia-*-cu12 runtime wheels ship alongside and get dlopen'd
-# via ctypes at first use (see graphstore/embedding/onnx_hf_embedder.py).
+# Lean: onnxruntime-gpu only. Assumes host has CUDA 12 + cuDNN 9
+# findable by the dynamic linker. Saves ~1.6 GB over [gpu].
+gpu-ort = [
+    "onnxruntime-gpu>=1.23; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+# Zero-config: bundles the nvidia-*-cu12 runtime wheels, ctypes-dlopened
+# at first use. Platform markers keep pip install clean on mac/win/arm.
 gpu = [
-    "onnxruntime-gpu>=1.23",
-    "nvidia-cublas-cu12>=12.0",
-    "nvidia-cuda-runtime-cu12>=12.0",
-    "nvidia-cuda-nvrtc-cu12>=12.0",
-    "nvidia-cudnn-cu12>=9.0",
-    "nvidia-cufft-cu12>=11.0",
-    "nvidia-curand-cu12>=10.0",
-    "nvidia-nvjitlink-cu12>=12.0",
+    "onnxruntime-gpu>=1.23; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cublas-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cuda-runtime-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cuda-nvrtc-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cudnn-cu12>=9.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cufft-cu12>=11.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-curand-cu12>=10.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-nvjitlink-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
 voice = [
     "sounddevice>=0.4",
