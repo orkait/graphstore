@@ -116,7 +116,7 @@ class GraphStoreAdapter:
         self._gs = GraphStore(
             path=str(self._tmpdir),
             ceiling_mb=self.config.get("ceiling_mb", 4096),
-            threaded=False,
+            queued=False,
             embedder=self._embedder,
         )
         self._gs.execute(
