@@ -72,6 +72,25 @@ class OnnxHFEmbedder(Embedder):
         self._session = ort.InferenceSession(str(onnx_path))
         self._input_names = {i.name for i in self._session.get_inputs()}
         self._needs_token_type_ids = "token_type_ids" in self._input_names
+        self._needs_position_ids = "position_ids" in self._input_names
+
+        # Decoder-style exports (Qwen3, Llama, Mistral) expose past_key_values
+        # inputs and require a prefill pass with empty KV cache. Cache the
+        # per-layer shape spec so _encode can build zero tensors on demand.
+        self._kv_cache_specs: list = []
+        self._hidden_output_idx: int = 0
+        for inp in self._session.get_inputs():
+            if inp.name.startswith("past_key_values."):
+                shape = inp.shape
+                num_heads = shape[1] if isinstance(shape[1], int) else None
+                head_dim = shape[3] if isinstance(shape[3], int) else None
+                dtype = np.float16 if inp.type == "tensor(float16)" else np.float32
+                self._kv_cache_specs.append((inp.name, num_heads, head_dim, dtype))
+        if self._kv_cache_specs:
+            for i, out in enumerate(self._session.get_outputs()):
+                if out.name == "last_hidden_state" or "hidden" in out.name:
+                    self._hidden_output_idx = i
+                    break
 
         test_enc = self._tokenizer.encode("test")
         test_ids = np.array([[test_enc.ids[0]]], dtype=np.int64)
@@ -79,8 +98,12 @@ class OnnxHFEmbedder(Embedder):
         test_feed = {"input_ids": test_ids, "attention_mask": test_mask}
         if self._needs_token_type_ids:
             test_feed["token_type_ids"] = np.zeros((1, 1), dtype=np.int64)
+        if self._needs_position_ids:
+            test_feed["position_ids"] = np.zeros((1, 1), dtype=np.int64)
+        for name, num_heads, head_dim, dtype in self._kv_cache_specs:
+            test_feed[name] = np.zeros((1, num_heads, 0, head_dim), dtype=dtype)
         test_out = self._session.run(None, test_feed)
-        self._base_dims = test_out[0].shape[-1]
+        self._base_dims = test_out[self._hidden_output_idx].shape[-1]
         if self._output_dims is None:
             self._output_dims = self._base_dims
 
@@ -125,17 +148,28 @@ class OnnxHFEmbedder(Embedder):
         }
         if self._needs_token_type_ids:
             feed["token_type_ids"] = np.zeros_like(input_ids)
-        outputs = self._session.run(None, feed)
-        embeddings = outputs[0]  # (batch, seq_len, hidden_dim)
+        if self._needs_position_ids:
+            pos = attention_mask.cumsum(axis=1) - 1
+            pos = np.maximum(pos, 0)
+            feed["position_ids"] = pos.astype(np.int64)
+        if self._kv_cache_specs:
+            for name, num_heads, head_dim, dtype in self._kv_cache_specs:
+                feed[name] = np.zeros((batch, num_heads, 0, head_dim), dtype=dtype)
 
-        if self._pooling_mode == "last_token":
-            # Take embedding at index of last non-padding token per row.
-            # For decoder-only models (Qwen3, Gemma3-decoder, Harrier).
-            last_idx = attention_mask.sum(axis=1) - 1  # (batch,)
+        outputs = self._session.run(None, feed)
+        embeddings = outputs[self._hidden_output_idx]
+
+        # Some ONNX exports (e.g. Harrier fp16) bake the SentenceTransformer
+        # pooling head into the graph and return (batch, hidden_dim) directly.
+        # Others return raw (batch, seq_len, hidden_dim) and expect the caller
+        # to pool. Handle both.
+        if embeddings.ndim == 2:
+            pooled = embeddings
+        elif self._pooling_mode == "last_token":
+            last_idx = attention_mask.sum(axis=1) - 1
             batch_idx = np.arange(embeddings.shape[0])
             pooled = embeddings[batch_idx, last_idx]
         else:
-            # Mean pooling over non-padding tokens (encoder models).
             mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
             pooled = (embeddings * mask_expanded).sum(axis=1) / mask_expanded.sum(axis=1)
 
