@@ -1,0 +1,49 @@
+{
+  "algo": "compact",
+  "active_provider": "local_ollama",
+  "active_model": "qwen3-coder-next:cloud",
+  "provider_fallback_order": ["local_ollama", "openrouter"],
+  "providers": {
+    "local_ollama": {
+      "base_url": "http://localhost:11434",
+      "api_key": "REPLACE_WITH_OLLAMA_KEY_OR_LEAVE_EMPTY",
+      "is_local": true,
+      "litellm_prefix": "ollama_chat",
+      "models": {
+        "qwen3-coder-next:cloud": { "notes": "Coder-optimized. Fast. Primary." },
+        "glm-5.1:cloud":          { "notes": "Thinking model. Slow — manual only via --model." },
+        "minimax-m2.7:cloud":     { "notes": "Verified fast via --model." }
+      },
+      "model_fallback_order": [
+        "qwen3-coder-next:cloud",
+        "minimax-m2.7:cloud"
+      ]
+    },
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": "REPLACE_WITH_OPENROUTER_KEY_sk-or-v1-...",
+      "is_local": false,
+      "litellm_prefix": "openrouter",
+      "models": {
+        "qwen/qwen3-coder-next:nitro":  { "notes": "OpenRouter :nitro = highest-throughput provider priority." },
+        "z-ai/glm-5.1:nitro":           { "notes": "Thinking model via OpenRouter." },
+        "minimax/minimax-m2.7:nitro":   { "notes": "Via OpenRouter." },
+        "google/gemini-3.1-pro-preview":{ "notes": "Preview model — try via --model for high-quality exploration." }
+      },
+      "model_fallback_order": [
+        "qwen/qwen3-coder-next:nitro",
+        "minimax/minimax-m2.7:nitro",
+        "z-ai/glm-5.1:nitro"
+      ]
+    }
+  },
+  "max_iterations": 50,
+  "iteration_timeout": 180,
+  "checkpoint_interval": 5,
+  "sleep_between": 2,
+  "fast_bench": true,
+  "noise_tolerance": 1.02,
+  "full_bench_repeats": 3,
+  "attempts_per_hypothesis": 3,
+  "notes": "Copy to config.json and fill in api_key fields. config.json is gitignored. To swap models, edit active_model. Max LLM calls per (algo, model) = 6 hypotheses × attempts_per_hypothesis."
+}

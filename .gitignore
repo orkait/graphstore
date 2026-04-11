@@ -23,9 +23,11 @@ benchmarks/*.log
 benchmarks/results_*.jsonl
 benchmarks/results_*.summary.json
 benchmarks/mempalace-results/
-# Autoresearch working state — tool output, not source
+# Autoresearch runtime state — checkpoints, candidates, result logs
 .autoresearch/
-autoresearch/
+# Autoresearch tool: source is tracked; keep secrets + build artifacts out
+autoresearch/config.json
+autoresearch/__pycache__/
 # Baseline/best captures inside algos (autoresearch artefacts)
 graphstore/algos/*.baseline
 graphstore/algos/*.best
