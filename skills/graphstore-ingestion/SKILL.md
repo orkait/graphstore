@@ -1,6 +1,6 @@
 ---
 name: graphstore-ingestion
-description: How to inject data into graphstore correctly. Covers the 6 engines, schema-first ingestion, REMEMBER vs RECALL vs SIMILAR TO, timestamp pitfalls, BM25 FTS gotchas, benchmark-friendly patterns, and the anti-patterns that make graphstore underperform vector stores. Use whenever you are writing a graphstore adapter, ingesting a new dataset, debugging retrieval quality, or about to write CREATE NODE in a loop.
+description: How to inject data into graphstore correctly. Covers the three storage engines (graph, vector, document), schema-first ingestion, REMEMBER vs RECALL vs SIMILAR TO, timestamp pitfalls, BM25 FTS gotchas, benchmark-friendly patterns, and the anti-patterns that make graphstore underperform vector stores. Use whenever you are writing a graphstore adapter, ingesting a new dataset, debugging retrieval quality, or about to write CREATE NODE in a loop.
 compatibility: Requires a local graphstore install. Works against any graphstore >= 0.3.0.
 metadata:
   author: orkait
@@ -22,18 +22,28 @@ Read this before you touch an ingestion loop.
 - You need to choose between REMEMBER, RECALL, SIMILAR TO, LEXICAL SEARCH
 - You are debugging "my benchmark accuracy is lower than a plain vector store"
 
-## The six engines, one paragraph each
+## Three storage engines unified by one DSL
 
-graphstore is not one thing. It is six engines stitched together behind one DSL. Treating it as "just a vector store" leaves most of the value on the table.
+graphstore is not one thing. It is three storage engines stitched together behind one query language, plus a pile of feature layers that reach into them. Treating it as "just a vector store" leaves most of the value on the table.
 
-1. **Core engine** (`graphstore/core/`) - CoreStore holds columnar node arrays (numpy), sparse CSR edge matrices (scipy), a string intern table, and tombstone-based deletion. This is the data plane. Every field you set lives in a typed numpy column. `node_ids`, `node_kinds`, `id_to_slot`, `_edges_by_type` are the load-bearing dicts.
-2. **DSL engine** (`graphstore/dsl/`) - Lark LALR(1) grammar compiled to 70+ AST dataclasses, executed via a handler registry. Every CREATE / NODES / REMEMBER / RECALL / SYS command you see in docs goes through this.
-3. **Embedding engine** (`graphstore/embedding/`) - Pluggable embedder protocol. Default is model2vec (30 MB static, ~1000 embeds/sec on CPU). FastEmbed wrapper covers 30+ BGE/e5/mxbai/nomic ONNX models (~20-100 embeds/sec on CPU). OnnxHFEmbedder for EmbeddingGemma.
-4. **Vector engine** (`graphstore/vector/`) - usearch HNSW index wrapping (slot, vector) pairs with cosine metric. `VectorStore.search(query, k, mask)` returns top-k slot ids filtered by a boolean mask.
-5. **Document engine** (`graphstore/document/`) - SQLite multi-table storage with FTS5 over summaries (`doc_fts` virtual table). This is where BM25 lives. `put_summary(slot, text, ...)` writes both the row AND the FTS index.
-6. **Ingest engine** (`graphstore/ingest/`) - File-to-graph pipeline. Tiered routing (MarkItDown → PyMuPDF4LLM → Docling), chunker, vision (SmolVLM2/Qwen3-VL via Ollama). Used by the INGEST DSL command.
+**The three storage engines** — each is an independent class with its own state and lifecycle:
 
-Plus two extras: **Vault** (markdown notes, `graphstore/vault/`) and **Voice** (Moonshine STT + Piper TTS).
+1. **Graph engine** (`graphstore/core/`) — `CoreStore` holds columnar node arrays (numpy), sparse CSR edge matrices (scipy), a string intern table, and tombstone-based deletion. This is the data plane for structured fields + the relationship graph. Every field you set lives in a typed numpy column. `node_ids`, `node_kinds`, `id_to_slot`, `_edges_by_type` are the load-bearing structures.
+2. **Vector engine** (`graphstore/vector/`) — `VectorStore` wraps a usearch HNSW index over `(slot, vector)` pairs with cosine metric. `VectorStore.search(query, k, mask)` returns top-k slot ids filtered by a boolean live mask.
+3. **Document engine** (`graphstore/document/`) — `DocumentStore` is SQLite multi-table storage (`documents`, `summaries`, `doc_metadata`, `images`) with an FTS5 virtual table (`doc_fts`) over summaries. This is where BM25 lives. `put_summary(slot, text, ...)` writes both the row AND the FTS index.
+
+A single node can live in **all three at once**: row in numpy columns + vector in usearch + entry in FTS5.
+
+**Plus feature layers on top:**
+
+- **DSL** (`graphstore/dsl/`) — Lark LALR(1) grammar compiled to 70+ AST dataclasses, handler-registry dispatch. The unified interface to all three engines.
+- **Embedding** (`graphstore/embedding/`) — pluggable embedder protocol (model2vec default, FastEmbed for BGE/e5/mxbai/nomic, OnnxHF for EmbeddingGemma/Harrier).
+- **Beliefs** — `ASSERT` / `RETRACT` / `PROPAGATE` write reserved columns (`__confidence__`, `__retracted__`, `__source__`) on the Graph engine.
+- **Evolution** (`graphstore/evolve.py`) — `EvolutionEngine`, opt-in. WHEN/THEN rules that self-tune graphstore's own runtime parameters based on live signals.
+- **Ingest pipeline** (`graphstore/ingest/`) — file-to-graph routing (MarkItDown → PyMuPDF4LLM → Docling), chunker, vision. Used by the `INGEST` DSL verb.
+- **Algos** (`graphstore/algos/`) — 17 pure numpy/scipy primitives under a strict purity gate. Tunable in isolation.
+
+**Optional subsystems** (off by default): **Vault** (markdown notebook, `graphstore/vault/`) and **Voice** (Moonshine STT + Piper TTS).
 
 ## The mental model
 
@@ -433,6 +443,6 @@ Run through this top to bottom when REMEMBER results look worse than expected.
 
 ## TL;DR
 
-graphstore is six engines. You have to feed data into the right ones. Schema first, deferred embeddings, entity graph for multi-hop, `put_summary` for BM25, REMEMBER + RECALL fusion for non-trivial questions, `__confidence__` not `importance`, and timestamps are a trap unless you know what you're doing.
+graphstore is three storage engines (graph, vector, document) unified by a DSL, plus feature layers on top. You have to feed data into the right ones. Schema first, deferred embeddings, entity graph for multi-hop, `put_summary` for BM25, REMEMBER + RECALL fusion for non-trivial questions, `__confidence__` not `importance`, and timestamps are a trap unless you know what you're doing.
 
 When in doubt, reach for Pattern A above and adapt.

@@ -24,9 +24,51 @@ It is designed for agent frameworks, LLM applications, and research tools that n
 
 ## 🏗️ Architecture
 
-<div align="center">
-<img src="assets/engines.svg" alt="graphstore six engines architecture" width="100%">
-</div>
+Three storage engines, one typed DSL, a layered feature set on top, and a pair of optional subsystems.
+
+```text
+              ┌─────────────────────────────────────────┐
+              │        DSL — Lark LALR(1) grammar       │
+              │    one query language for everything    │
+              └────────────────────┬────────────────────┘
+                                   │
+              ┌────────────────────┼────────────────────┐
+              ▼                    ▼                    ▼
+        ┌──────────┐         ┌──────────┐         ┌──────────┐
+        │  Graph   │         │  Vector  │         │ Document │
+        ├──────────┤         ├──────────┤         ├──────────┤
+        │ numpy    │         │ usearch  │         │ SQLite   │
+        │ columns  │         │  HNSW    │         │ FTS5 BM25│
+        │ scipy CSR│         │  cosine  │         │ blobs    │
+        │ + indices│         │          │         │ + summary│
+        └──────────┘         └──────────┘         └──────────┘
+              ▲                    ▲                    ▲
+              └────────────────────┼────────────────────┘
+                                   │
+                         ┌─────────┴──────────┐
+                         │  Ingest pipeline   │
+                         │  markitdown · pdf  │
+                         │  docling · vision  │
+                         └────────────────────┘
+```
+
+**Layered features** (reach into the three engines via the DSL):
+
+| Feature | What it does | Where it lives |
+|---|---|---|
+| **Beliefs** | `ASSERT` / `RETRACT` / `PROPAGATE` with confidence, source, retraction | reserved columns on Graph |
+| **Evolution** | `SYS EVOLVE` WHEN/THEN rules — self-tuning on live signals (opt-in) | `EvolutionEngine` + SQLite history |
+| **Snapshots** | `SYS SNAPSHOT` / `SYS ROLLBACK` — full-state rewind | in-memory store snapshots |
+| **Cron** | `SYS CRON ADD/LIST/RUN` — scheduled DSL queries | persistent cron_jobs table |
+| **WAL** | append → replay on open, auto-checkpoint at 50k | SQLite WAL + blobs |
+| **Ceiling** | pre-flight RAM guard, self-calibrating per-node estimate | `check_ceiling` on every write |
+
+**Optional subsystems** (off by default):
+
+| Subsystem | What it adds | Toggle |
+|---|---|---|
+| **Vault** | markdown notebook synced into Graph | `GraphStore(vault="./notes")` |
+| **Voice** | Moonshine STT + Piper TTS | `GraphStore(voice=True)` |
 
 ---
 
@@ -525,12 +567,16 @@ All numbers measured at 100k nodes on a mid-range laptop (no GPU).
 | Snapshot | 1.8 ms |
 | Memory per node | 66 bytes (columns) + ~1 KB (vector) |
 
-**Retrieval quality** (LongMemEval, 500 sessions, R@5):
+**Retrieval quality** (LongMemEval-S, 500 records, bge-small-en-v1.5, CPU-only):
 
-| System | R@5 |
+| System | Accuracy / R@5 |
 |---|---|
-| graphstore (model2vec default) | 94.7% |
+| **graphstore (skill adapter + REMEMBER)** | **97.6%** |
 | MemPalace | 96.6% |
+| OMEGA | 95.4% |
+| MemMachine | 93.0% |
+
+Full methodology, category breakdown, comparison to the public leaderboard, and reproduction instructions: see [**BENCHMARKS.md**](BENCHMARKS.md).
 
 ---
 
