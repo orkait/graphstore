@@ -23,3 +23,12 @@ benchmarks/*.log
 benchmarks/results_*.jsonl
 benchmarks/results_*.summary.json
 benchmarks/mempalace-results/
+# Autoresearch working state — tool output, not source
+.autoresearch/
+autoresearch/
+# Baseline/best captures inside algos (autoresearch artefacts)
+graphstore/algos/*.baseline
+graphstore/algos/*.best
+
+# Benchmark run artifacts
+benchmarks/results/

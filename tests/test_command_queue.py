@@ -109,9 +109,9 @@ def test_queue_submit_after_shutdown_raises():
         q.submit("too late")
 
 
-def test_graphstore_threaded_execute():
-    """GraphStore(threaded=True) executes queries correctly."""
-    gs = GraphStore(threaded=True)
+def test_graphstore_queued_execute():
+    """GraphStore(queued=True) executes queries correctly."""
+    gs = GraphStore(queued=True)
     result = gs.execute('CREATE NODE "test_t" kind = "item" name = "hello"')
     assert result.kind == "node"
     assert result.data["name"] == "hello"
@@ -121,9 +121,9 @@ def test_graphstore_threaded_execute():
     gs.close()
 
 
-def test_graphstore_threaded_background():
+def test_graphstore_queued_background():
     """submit_background returns a Future that resolves."""
-    gs = GraphStore(threaded=True)
+    gs = GraphStore(queued=True)
     gs.execute('CREATE NODE "bg_test" kind = "item" name = "x"')
     future = gs.submit_background('NODE "bg_test"')
     assert isinstance(future, Future)
@@ -132,18 +132,18 @@ def test_graphstore_threaded_background():
     gs.close()
 
 
-def test_graphstore_not_threaded_rejects_background():
-    """submit_background without threaded=True raises."""
+def test_graphstore_not_queued_rejects_background():
+    """submit_background without queued=True raises."""
     gs = GraphStore()
     import pytest
-    with pytest.raises(RuntimeError, match="threaded"):
+    with pytest.raises(RuntimeError, match="queued"):
         gs.submit_background('SYS STATS')
     gs.close()
 
 
 def test_graphstore_concurrent_access():
-    """Multiple threads can safely call execute on threaded GraphStore."""
-    gs = GraphStore(threaded=True)
+    """Multiple threads can safely call execute on queued GraphStore."""
+    gs = GraphStore(queued=True)
     errors = []
     results = []
 
@@ -166,11 +166,11 @@ def test_graphstore_concurrent_access():
     gs.close()
 
 
-def test_graphstore_default_not_threaded():
+def test_graphstore_default_not_queued():
     """Default GraphStore has no queue overhead."""
     gs = GraphStore()
     assert gs._queue is None
-    result = gs.execute('CREATE NODE "nothread" kind = "item"')
+    result = gs.execute('CREATE NODE "noqueue" kind = "item"')
     assert result.kind == "node"
     gs.close()
 

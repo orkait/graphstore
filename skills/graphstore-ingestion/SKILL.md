@@ -297,7 +297,7 @@ The context manager is per-call. If you have 500 records and call `ingest(record
 
 ### G10. Single-writer is a hard rule
 
-There is no concurrency in the write path. `threaded=True` installs a submission queue with a single worker. If you try to call `execute` from two threads on a `threaded=False` GraphStore, you will get silent corruption of `id_to_slot` and `_edges_by_type`. This is architectural and will not be fixed — see `skills/.../docs/single-writer.md` (TODO) or the README thread safety section.
+There is no concurrency in the write path. `queued=True` installs a submission queue with a single worker (the flag name is honest — it's a queue, not parallelism). If you try to call `execute` from two threads on a `queued=False` GraphStore, you will get silent corruption of `id_to_slot` and `_edges_by_type`. This is architectural and will not be fixed — see `skills/.../docs/single-writer.md` (TODO) or the README thread safety section.
 
 ## Patterns by use case
 
@@ -429,7 +429,7 @@ Run through this top to bottom when REMEMBER results look worse than expected.
 - Override `__updated_at__` unless you actually have real timestamps
 - Use REMEMBER and then wonder why your graph edges are ignored
 - Stuff arbitrary scores into `importance` expecting REMEMBER to read them
-- Run two writer threads on `threaded=False`
+- Run two writer threads on `queued=False`
 
 ## TL;DR
 

@@ -304,16 +304,12 @@ class EvolutionEngine:
         write_counter = getattr(gs._optimizer, "_write_counter", 0)
         write_rate = write_counter / uptime_minutes
 
-        # Edge density
         try:
             edge_mats = getattr(store, "edge_matrices", None)
-            if edge_mats is not None:
-                total_nnz = getattr(edge_mats, "nnz", 0)
-            else:
-                total_nnz = 0
+            total_edges = edge_mats.total_edges if edge_mats is not None else 0
         except Exception:
-            total_nnz = 0
-        edge_density = total_nnz / max(node_count, 1)
+            total_edges = 0
+        edge_density = total_edges / max(node_count, 1)
 
         # WAL pending
         wal_pending = gs._wal.pending_count if gs._conn else 0
@@ -354,15 +350,17 @@ class EvolutionEngine:
             return gs._optimizer._optimize_interval
         if name == "ceiling_mb":
             return gs._ceiling_bytes // 1_000_000
+        if name == "similarity_threshold":
+            val = gs._executor._similarity_threshold
+            return val if val is not None else gs._config.vector.similarity_threshold
+        if name == "duplicate_threshold":
+            val = gs._sys_executor._duplicate_threshold_override
+            return val if val is not None else gs._config.vector.duplicate_threshold
+        if name == "protected_kinds":
+            val = gs._sys_executor._protected_kinds
+            return val if val is not None else set(gs._config.core.protected_kinds)
         if name in self._live_params:
             return self._live_params[name]
-        # Fallback to config
-        if name == "similarity_threshold":
-            return self._live_params.get("similarity_threshold", gs._config.vector.similarity_threshold)
-        if name == "duplicate_threshold":
-            return self._live_params.get("duplicate_threshold", gs._config.vector.duplicate_threshold)
-        if name == "protected_kinds":
-            return self._live_params.get("protected_kinds", set(gs._config.core.protected_kinds))
         return None
 
     def _set_param(self, name: str, value) -> str:
@@ -412,14 +410,19 @@ class EvolutionEngine:
             gs._optimizer._optimize_interval = value
             return "applied"
 
-        if name in ("similarity_threshold", "duplicate_threshold"):
+        if name == "similarity_threshold":
             value = _clamp(float(value), spec.get("min"), spec.get("max"))
-            self._live_params[name] = value
+            gs._executor._similarity_threshold = value
+            return "applied"
+
+        if name == "duplicate_threshold":
+            value = _clamp(float(value), spec.get("min"), spec.get("max"))
+            gs._sys_executor._duplicate_threshold_override = value
             return "applied"
 
         if name == "protected_kinds":
             kinds = set(value) | _ALWAYS_PROTECTED
-            self._live_params["protected_kinds"] = kinds
+            gs._sys_executor._protected_kinds = kinds
             return "applied"
 
         return "skipped:unknown"
@@ -457,7 +460,11 @@ class EvolutionEngine:
         if kinds is None:
             kinds = set()
         kinds = set(kinds) | {element}
-        self._live_params[name] = kinds
+        if name == "protected_kinds":
+            kinds |= _ALWAYS_PROTECTED
+            self._gs._sys_executor._protected_kinds = kinds
+        else:
+            self._live_params[name] = kinds
         return "applied"
 
     def _remove_from_param(self, name: str, element: str) -> str:
@@ -469,7 +476,11 @@ class EvolutionEngine:
         if kinds is None:
             return "skipped:not_found"
         kinds = set(kinds) - {element}
-        self._live_params[name] = kinds
+        if name == "protected_kinds":
+            kinds |= _ALWAYS_PROTECTED
+            self._gs._sys_executor._protected_kinds = kinds
+        else:
+            self._live_params[name] = kinds
         return "applied"
 
     # -----------------------------------------------------------------------

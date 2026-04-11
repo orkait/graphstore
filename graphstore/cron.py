@@ -2,7 +2,7 @@
 
 Registers DSL queries to run on cron schedules. Jobs persist in SQLite
 and survive restarts. Uses croniter for full cron expression support.
-Requires threaded=True (submits via command queue).
+Requires queued=True (submits via command queue).
 """
 
 import time

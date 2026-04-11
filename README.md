@@ -232,7 +232,7 @@ SYS ROLLBACK TO "before-hypothesis"
 ### Schedule maintenance automatically
 
 ```python
-g = GraphStore(path="./brain", threaded=True)
+g = GraphStore(path="./brain", queued=True)
 
 # Persist cron jobs in SQLite - they survive restarts
 g.execute('SYS CRON ADD "expire-ttl"  SCHEDULE "@hourly"      QUERY "SYS EXPIRE"')
@@ -240,7 +240,7 @@ g.execute('SYS CRON ADD "nightly-opt" SCHEDULE "0 3 * * *"    QUERY "SYS OPTIMIZ
 g.execute('SYS CRON ADD "vault-sync"  SCHEDULE "*/5 * * * *"  QUERY "VAULT SYNC"')
 ```
 
-Full cron expressions, `@hourly`, `@daily`, `@weekly` all work. Requires `threaded=True`.
+Full cron expressions, `@hourly`, `@daily`, `@weekly` all work. Requires `queued=True`.
 
 ---
 
@@ -380,17 +380,17 @@ gs.discard_trace()
 
 graphstore is single-writer by design. The storage engine assumes one writer at a time - no MVCC, no row-level locking.
 
-`threaded=True` gives you a thread-safe submission queue, not concurrent execution. Multiple caller threads can share one instance; every `execute()` call is serialized through one daemon worker.
+`queued=True` installs a single-worker submission queue in front of the write path. It is a thread-safety guarantee, not parallelism. Multiple caller threads can share one instance; every `execute()` call is serialized through one daemon worker. It also starts the cron scheduler.
 
 ```python
-gs = GraphStore(path="./brain", threaded=True)
+gs = GraphStore(path="./brain", queued=True)
 
 result = gs.execute('RECALL FROM "cue" DEPTH 3')   # blocks caller, returns Result
 future = gs.submit_background('SYS OPTIMIZE')       # queues behind interactive work
 future = gs.submit_background('SYS CONNECT')
 ```
 
-With `threaded=False` (the default), you are responsible for not calling `execute()` from multiple threads simultaneously.
+With `queued=False` (the default), you are responsible for not calling `execute()` from multiple threads simultaneously.
 
 </details>
 
@@ -543,7 +543,7 @@ g = GraphStore(
     path="./brain",       # where to persist (None = in-memory only)
     ceiling_mb=256,       # memory ceiling for the graph
     embedder="default",   # "default" (model2vec) or a custom Embedder instance
-    threaded=True,        # enable thread-safe queue + cron scheduler
+    queued=True,          # single-worker submission queue + cron scheduler
     voice=False,          # True to enable built-in STT/TTS
     vault="./notes",      # path to markdown vault (None = disabled)
     retention={           # blob lifecycle - when to archive/delete file bytes
