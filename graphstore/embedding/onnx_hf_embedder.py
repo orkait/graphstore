@@ -1,9 +1,106 @@
 """Generic HuggingFace ONNX embedder using tokenizers + onnxruntime."""
 
-import numpy as np
+import ctypes
+import glob
+import os
+import sys
 from pathlib import Path
+
+import numpy as np
+
 from graphstore.embedding.base import Embedder
 from graphstore.embedding.postprocess import l2_normalize, truncate_dims
+
+
+_CU12_PRELOADED = False
+
+
+def _preload_cu12_libs() -> None:
+    """Preload nvidia-*-cu12 shared libs so onnxruntime-gpu can find them.
+
+    The PyPI onnxruntime-gpu wheel is linked against CUDA 12 sonames
+    (libcublasLt.so.12, libcudart.so.12, libcudnn.so.9). On systems
+    without a matching CUDA 12 install (e.g. hosts on CUDA 13.x), users
+    typically install the nvidia-*-cu12 pip wheels alongside. This
+    helper dlopens the libs from the installed wheel locations via
+    ctypes so ORT's session loader resolves them without requiring
+    the user to manually set LD_LIBRARY_PATH.
+
+    Idempotent — safe to call multiple times.
+    """
+    global _CU12_PRELOADED
+    if _CU12_PRELOADED:
+        return
+
+    site_packages = [p for p in sys.path if p.endswith("site-packages")]
+    for sp in site_packages:
+        nvidia_root = Path(sp) / "nvidia"
+        if not nvidia_root.exists():
+            continue
+        # Order matters: cublas and cudnn depend on cuda_runtime.
+        for sub, patterns in [
+            ("cuda_runtime/lib", ["libcudart.so.12"]),
+            ("cuda_nvrtc/lib", ["libnvrtc.so.12"]),
+            ("nvjitlink/lib", ["libnvJitLink.so.12"]),
+            ("cublas/lib", ["libcublasLt.so.12", "libcublas.so.12"]),
+            ("cufft/lib", ["libcufft.so.11"]),
+            ("curand/lib", ["libcurand.so.10"]),
+            ("cudnn/lib", ["libcudnn.so.9"]),
+        ]:
+            lib_dir = nvidia_root / sub
+            if not lib_dir.exists():
+                continue
+            for pat in patterns:
+                for match in sorted(glob.glob(str(lib_dir / pat))):
+                    try:
+                        ctypes.CDLL(match, mode=ctypes.RTLD_GLOBAL)
+                    except OSError:
+                        pass
+    _CU12_PRELOADED = True
+
+
+def _resolve_providers(providers: list[str] | str | None) -> list[str]:
+    """Pick onnxruntime execution providers with sensible fallbacks.
+
+    Resolution order:
+        1. Explicit ``providers`` argument (list or comma string)
+        2. ``GRAPHSTORE_ORT_PROVIDERS`` env var (comma string)
+        3. ``GRAPHSTORE_GPU=1`` env var → try CUDA/Tensorrt first
+        4. Default → CPU only
+
+    Unavailable providers are silently dropped — if CUDA is requested
+    but the installed onnxruntime wheel is CPU-only, we fall back to
+    CPU rather than erroring.
+    """
+    wanted: list[str] = []
+    if providers is not None:
+        if isinstance(providers, str):
+            wanted = [p.strip() for p in providers.split(",") if p.strip()]
+        else:
+            wanted = list(providers)
+    else:
+        env_providers = os.environ.get("GRAPHSTORE_ORT_PROVIDERS")
+        if env_providers:
+            wanted = [p.strip() for p in env_providers.split(",") if p.strip()]
+        elif os.environ.get("GRAPHSTORE_GPU") == "1":
+            wanted = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        else:
+            wanted = ["CPUExecutionProvider"]
+
+    # Preload CUDA 12 shared libs from nvidia-*-cu12 pip wheels before
+    # onnxruntime probes its provider plugins — otherwise get_available_providers
+    # may silently drop CUDAExecutionProvider because the cuda provider .so
+    # fails its dlopen of libcublasLt.so.12 / libcudnn.so.9 / libcudart.so.12.
+    if any(p in ("CUDAExecutionProvider", "TensorrtExecutionProvider") for p in wanted):
+        _preload_cu12_libs()
+
+    import onnxruntime as ort
+    available = set(ort.get_available_providers())
+
+    resolved = [p for p in wanted if p in available]
+    if "CPUExecutionProvider" not in resolved:
+        resolved.append("CPUExecutionProvider")
+    return resolved
 
 
 class OnnxHFEmbedder(Embedder):
@@ -12,6 +109,11 @@ class OnnxHFEmbedder(Embedder):
     Uses `tokenizers` for tokenization and `onnxruntime` for inference.
     Supports asymmetric query/document prefixes, Matryoshka truncation,
     and both mean and last-token pooling (for encoder vs decoder models).
+
+    GPU: pass ``providers=["CUDAExecutionProvider", "CPUExecutionProvider"]``
+    or set ``GRAPHSTORE_GPU=1`` in the environment. Requires the
+    ``onnxruntime-gpu`` wheel (install via ``pip install graphstore[gpu]``).
+    Falls back to CPU silently if CUDA is unavailable.
     """
 
     def __init__(
@@ -23,6 +125,7 @@ class OnnxHFEmbedder(Embedder):
         max_length: int = 512,
         pooling_mode: str = "mean",
         onnx_file: str | None = None,
+        providers: list[str] | str | None = None,
     ):
         try:
             import onnxruntime as ort
@@ -69,7 +172,11 @@ class OnnxHFEmbedder(Embedder):
                 raise FileNotFoundError(f"No .onnx file found in {model_dir}")
             onnx_path = onnx_files[0]
 
-        self._session = ort.InferenceSession(str(onnx_path))
+        self._providers = _resolve_providers(providers)
+        self._session = ort.InferenceSession(
+            str(onnx_path),
+            providers=self._providers,
+        )
         self._input_names = {i.name for i in self._session.get_inputs()}
         self._needs_token_type_ids = "token_type_ids" in self._input_names
         self._needs_position_ids = "position_ids" in self._input_names
@@ -78,7 +185,6 @@ class OnnxHFEmbedder(Embedder):
         # inputs and require a prefill pass with empty KV cache. Cache the
         # per-layer shape spec so _encode can build zero tensors on demand.
         self._kv_cache_specs: list = []
-        self._hidden_output_idx: int = 0
         for inp in self._session.get_inputs():
             if inp.name.startswith("past_key_values."):
                 shape = inp.shape
@@ -86,8 +192,19 @@ class OnnxHFEmbedder(Embedder):
                 head_dim = shape[3] if isinstance(shape[3], int) else None
                 dtype = np.float16 if inp.type == "tensor(float16)" else np.float32
                 self._kv_cache_specs.append((inp.name, num_heads, head_dim, dtype))
-        if self._kv_cache_specs:
-            for i, out in enumerate(self._session.get_outputs()):
+
+        # Output selection priority:
+        #   1. sentence_embedding — SBERT-style exports with pooling baked in
+        #   2. last_hidden_state / anything containing "hidden" — raw 3D hidden states
+        #   3. first output — fallback
+        outputs = self._session.get_outputs()
+        self._hidden_output_idx = 0
+        for i, out in enumerate(outputs):
+            if out.name == "sentence_embedding":
+                self._hidden_output_idx = i
+                break
+        else:
+            for i, out in enumerate(outputs):
                 if out.name == "last_hidden_state" or "hidden" in out.name:
                     self._hidden_output_idx = i
                     break
