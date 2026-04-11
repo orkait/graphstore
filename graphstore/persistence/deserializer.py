@@ -172,7 +172,7 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     if sentinel_row is not None:
         import logging as _logging
         _logger = _logging.getLogger(__name__)
-        _logger.warning("compaction sentinel found — running in-memory recovery")
+        _logger.warning("compaction sentinel found - running in-memory recovery")
         try:
             from graphstore.core.optimizer import compact_tombstones
             _vs = getattr(store, "vectors", None)

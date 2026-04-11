@@ -11,7 +11,7 @@
       "litellm_prefix": "ollama_chat",
       "models": {
         "qwen3-coder-next:cloud": { "notes": "Coder-optimized. Fast. Primary." },
-        "glm-5.1:cloud":          { "notes": "Thinking model. Slow — manual only via --model." },
+        "glm-5.1:cloud":          { "notes": "Thinking model. Slow - manual only via --model." },
         "minimax-m2.7:cloud":     { "notes": "Verified fast via --model." }
       },
       "model_fallback_order": [
@@ -28,7 +28,7 @@
         "qwen/qwen3-coder-next:nitro":  { "notes": "OpenRouter :nitro = highest-throughput provider priority." },
         "z-ai/glm-5.1:nitro":           { "notes": "Thinking model via OpenRouter." },
         "minimax/minimax-m2.7:nitro":   { "notes": "Via OpenRouter." },
-        "google/gemini-3.1-pro-preview":{ "notes": "Preview model — try via --model for high-quality exploration." }
+        "google/gemini-3.1-pro-preview":{ "notes": "Preview model - try via --model for high-quality exploration." }
       },
       "model_fallback_order": [
         "qwen/qwen3-coder-next:nitro",

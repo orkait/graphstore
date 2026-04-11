@@ -614,7 +614,7 @@ class SystemExecutor:
         store._count = snap["count"]
         store._active_context = snap.get("active_context")
 
-        # Restore vector state — mutate the runtime container so every
+        # Restore vector state - mutate the runtime container so every
         # component sees the new VectorStore through their shared ref.
         if snap.get("vector_index") is not None:
             from graphstore.vector.store import VectorStore

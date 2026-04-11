@@ -28,7 +28,7 @@ Three storage engines, one typed DSL, a layered feature set on top, and a pair o
 
 ```text
               ┌─────────────────────────────────────────┐
-              │        DSL — Lark LALR(1) grammar       │
+              │        DSL - Lark LALR(1) grammar       │
               │    one query language for everything    │
               └────────────────────┬────────────────────┘
                                    │
@@ -57,9 +57,9 @@ Three storage engines, one typed DSL, a layered feature set on top, and a pair o
 | Feature | What it does | Where it lives |
 |---|---|---|
 | **Beliefs** | `ASSERT` / `RETRACT` / `PROPAGATE` with confidence, source, retraction | reserved columns on Graph |
-| **Evolution** | `SYS EVOLVE` WHEN/THEN rules — self-tuning on live signals (opt-in) | `EvolutionEngine` + SQLite history |
-| **Snapshots** | `SYS SNAPSHOT` / `SYS ROLLBACK` — full-state rewind | in-memory store snapshots |
-| **Cron** | `SYS CRON ADD/LIST/RUN` — scheduled DSL queries | persistent cron_jobs table |
+| **Evolution** | `SYS EVOLVE` WHEN/THEN rules - self-tuning on live signals (opt-in) | `EvolutionEngine` + SQLite history |
+| **Snapshots** | `SYS SNAPSHOT` / `SYS ROLLBACK` - full-state rewind | in-memory store snapshots |
+| **Cron** | `SYS CRON ADD/LIST/RUN` - scheduled DSL queries | persistent cron_jobs table |
 | **WAL** | append → replay on open, auto-checkpoint at 50k | SQLite WAL + blobs |
 | **Ceiling** | pre-flight RAM guard, self-calibrating per-node estimate | `check_ceiling` on every write |
 
@@ -80,7 +80,7 @@ Three storage engines, one typed DSL, a layered feature set on top, and a pair o
 pip install graphstore
 ```
 
-This is the lightweight core: numpy, scipy, usearch, lark, msgspec. Five runtime deps, no torch, no PDF parser, no HTTP server. The graph + vector + doc engines are fully functional — you can create nodes/edges, run BFS/Dijkstra paths, query by kind/property, and persist via WAL+snapshots out of the box.
+This is the lightweight core: numpy, scipy, usearch, lark, msgspec. Five runtime deps, no torch, no PDF parser, no HTTP server. The graph + vector + doc engines are fully functional - you can create nodes/edges, run BFS/Dijkstra paths, query by kind/property, and persist via WAL+snapshots out of the box.
 
 For anything beyond the core engine, opt into an extra:
 
@@ -107,15 +107,15 @@ pip install 'graphstore[playground]'
 pip install 'graphstore[gpu]'
 ```
 
-Extras compose — `pip install 'graphstore[embed-default,ingest,vault,scheduler]'` gets you a full agent-memory stack. When a feature is used without its extra installed, graphstore raises a targeted `ImportError` pointing at the right `pip install` recipe, not a cryptic `ModuleNotFoundError`.
+Extras compose - `pip install 'graphstore[embed-default,ingest,vault,scheduler]'` gets you a full agent-memory stack. When a feature is used without its extra installed, graphstore raises a targeted `ImportError` pointing at the right `pip install` recipe, not a cryptic `ModuleNotFoundError`.
 
 <details>
 <summary><strong>Full extras reference</strong></summary>
 
 | Extra | What it adds |
 |---|---|
-| `embed-default` | model2vec — zero-config CPU embedder |
-| `embed-fastembed` | fastembed — ~30 pre-exported ONNX encoder models |
+| `embed-default` | model2vec - zero-config CPU embedder |
+| `embed-fastembed` | fastembed - ~30 pre-exported ONNX encoder models |
 | `ingest` | markitdown + pymupdf + pymupdf4llm (~80 MB, PDF/DOCX/HTML → markdown) |
 | `ingest-pro` | docling + openai (heavier PDF + vision via LLM) |
 | `scheduler` | croniter (cron-expression parsing for `SYS CRON ADD`) |

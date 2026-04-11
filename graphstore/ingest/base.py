@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from graphstore.algos.chunker import Chunk  # noqa: F401 — re-export
+from graphstore.algos.chunker import Chunk  # noqa: F401 - re-export
 
 
 @dataclass

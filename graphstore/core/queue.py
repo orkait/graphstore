@@ -65,7 +65,7 @@ class CommandQueue:
         """Log failed background jobs."""
         exc = future.exception()
         if exc is not None:
-            logger.warning("background job failed: %s — %s: %s", query, type(exc).__name__, exc)
+            logger.warning("background job failed: %s - %s: %s", query, type(exc).__name__, exc)
 
     def shutdown(self) -> None:
         """Stop the worker thread. Idempotent."""

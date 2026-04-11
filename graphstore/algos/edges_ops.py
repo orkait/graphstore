@@ -49,7 +49,7 @@ def cascade_filter_edges(
         removed_slots: set of slot indices to cascade-remove.
 
     Returns:
-        (new_edges_by_type, any_removed) — new dict is filtered, empty
+        (new_edges_by_type, any_removed) - new dict is filtered, empty
         etype lists are dropped. `any_removed` is True iff anything was
         filtered out.
     """
@@ -79,7 +79,7 @@ def rewire_edges_source_target(
         tgt_slot: destination slot.
 
     Returns:
-        (new_edges_by_type, rewire_count) — rewired dict and the number
+        (new_edges_by_type, rewire_count) - rewired dict and the number
         of edges whose src or tgt changed.
     """
     new_edges: dict = {}
@@ -141,7 +141,7 @@ def build_typed_csrs(
 ) -> tuple:
     """Build per-type CSR matrices + per-type edge data lists from raw edges.
 
-    Single-pass src/tgt/weight extraction — one list scan per edge type
+    Single-pass src/tgt/weight extraction - one list scan per edge type
     instead of three list comprehensions.
 
     Args:

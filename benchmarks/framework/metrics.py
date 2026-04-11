@@ -144,7 +144,7 @@ class QualityMetrics:
         The session-based path exists because LongMemEval's preference and
         some other categories have long synthesized gold answers that never
         appear verbatim in the haystack. Checking "did we retrieve from the
-        right session" is the honest test — matches the real LongMemEval
+        right session" is the honest test - matches the real LongMemEval
         protocol where the LLM-as-judge grades the downstream answer based
         on whether relevant context was recalled.
         """

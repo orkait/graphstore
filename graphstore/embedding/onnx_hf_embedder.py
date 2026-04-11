@@ -26,7 +26,7 @@ def _preload_cu12_libs() -> None:
     ctypes so ORT's session loader resolves them without requiring
     the user to manually set LD_LIBRARY_PATH.
 
-    Idempotent — safe to call multiple times.
+    Idempotent - safe to call multiple times.
     """
     global _CU12_PRELOADED
     if _CU12_PRELOADED:
@@ -68,7 +68,7 @@ def _resolve_providers(providers: list[str] | str | None) -> list[str]:
         3. ``GRAPHSTORE_GPU=1`` env var → try CUDA/Tensorrt first
         4. Default → CPU only
 
-    Unavailable providers are silently dropped — if CUDA is requested
+    Unavailable providers are silently dropped - if CUDA is requested
     but the installed onnxruntime wheel is CPU-only, we fall back to
     CPU rather than erroring.
     """
@@ -88,7 +88,7 @@ def _resolve_providers(providers: list[str] | str | None) -> list[str]:
             wanted = ["CPUExecutionProvider"]
 
     # Preload CUDA 12 shared libs from nvidia-*-cu12 pip wheels before
-    # onnxruntime probes its provider plugins — otherwise get_available_providers
+    # onnxruntime probes its provider plugins - otherwise get_available_providers
     # may silently drop CUDAExecutionProvider because the cuda provider .so
     # fails its dlopen of libcublasLt.so.12 / libcudnn.so.9 / libcudart.so.12.
     if any(p in ("CUDAExecutionProvider", "TensorrtExecutionProvider") for p in wanted):
@@ -156,7 +156,7 @@ class OnnxHFEmbedder(Embedder):
         self._tokenizer.enable_padding(pad_id=0)
         self._tokenizer.enable_truncation(max_length=max_length)
 
-        # Load ONNX model — prefer explicit file from manifest if provided.
+        # Load ONNX model - prefer explicit file from manifest if provided.
         if onnx_file:
             candidate = model_dir / onnx_file
             if not candidate.exists():
@@ -194,9 +194,9 @@ class OnnxHFEmbedder(Embedder):
                 self._kv_cache_specs.append((inp.name, num_heads, head_dim, dtype))
 
         # Output selection priority:
-        #   1. sentence_embedding — SBERT-style exports with pooling baked in
-        #   2. last_hidden_state / anything containing "hidden" — raw 3D hidden states
-        #   3. first output — fallback
+        #   1. sentence_embedding - SBERT-style exports with pooling baked in
+        #   2. last_hidden_state / anything containing "hidden" - raw 3D hidden states
+        #   3. first output - fallback
         outputs = self._session.get_outputs()
         self._hidden_output_idx = 0
         for i, out in enumerate(outputs):

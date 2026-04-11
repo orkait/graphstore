@@ -35,7 +35,7 @@ def _format_session_for_ingest(item: CorpusItem) -> str:
     Wraps the conversation in a minimal markdown structure so the heading
     chunker produces one logical chunk for the whole session / turn.
     Plain text (no headings) falls through to chunk_by_paragraph, which
-    splits on double newlines — also fine for conversations.
+    splits on double newlines - also fine for conversations.
     """
     return item.text
 
@@ -230,7 +230,7 @@ def _result_rows(result, item_by_id: dict[str, CorpusItem]) -> list[dict]:
     rows = []
     for node in result.data:
         corpus_id = node["id"]
-        # Native ingest returns chunk/section node IDs — strip the suffix to get corpus_id.
+        # Native ingest returns chunk/section node IDs - strip the suffix to get corpus_id.
         item = item_by_id.get(corpus_id) or item_by_id.get(_corpus_id_from_node_id(corpus_id))
         if item is None:
             continue
@@ -335,7 +335,7 @@ def run_benchmark(
                         _ingest_corpus_item(gs, item, ingest_dir)
                 else:
                     _register_benchmark_kind(gs)
-                    # Defer embeddings and flush in batches — critical for
+                    # Defer embeddings and flush in batches - critical for
                     # transformer embedders (EmbeddingGemma, Harrier) where
                     # per-call inference overhead dominates.
                     with gs.deferred_embeddings(batch_size=64):
@@ -456,7 +456,7 @@ def _resolve_embedder(name: str | None):
     if name in ("embeddinggemma", "embeddinggemma-256"):
         from graphstore.registry.installer import load_installed_embedder, install_embedder, is_installed
         if not is_installed("embeddinggemma-300m"):
-            print("[embedder] embeddinggemma-300m not installed — running: graphstore install-embedder embeddinggemma-300m", flush=True)
+            print("[embedder] embeddinggemma-300m not installed - running: graphstore install-embedder embeddinggemma-300m", flush=True)
             install_embedder("embeddinggemma-300m")
         print("[embedder] loading embeddinggemma-300m (256d Matryoshka)", flush=True)
         return load_installed_embedder("embeddinggemma-300m", dims=256)
@@ -464,7 +464,7 @@ def _resolve_embedder(name: str | None):
     if name == "embeddinggemma-768":
         from graphstore.registry.installer import load_installed_embedder, install_embedder, is_installed
         if not is_installed("embeddinggemma-300m"):
-            print("[embedder] embeddinggemma-300m not installed — running: graphstore install-embedder embeddinggemma-300m", flush=True)
+            print("[embedder] embeddinggemma-300m not installed - running: graphstore install-embedder embeddinggemma-300m", flush=True)
             install_embedder("embeddinggemma-300m")
         print("[embedder] loading embeddinggemma-300m (768d full)", flush=True)
         return load_installed_embedder("embeddinggemma-300m", dims=768)
@@ -472,12 +472,12 @@ def _resolve_embedder(name: str | None):
     if name in ("harrier", "harrier-0.6b"):
         from graphstore.registry.installer import load_installed_embedder, install_embedder, is_installed
         if not is_installed("harrier-oss-v1-0.6b"):
-            print("[embedder] harrier-oss-v1-0.6b not installed — running: graphstore install-embedder harrier-oss-v1-0.6b", flush=True)
+            print("[embedder] harrier-oss-v1-0.6b not installed - running: graphstore install-embedder harrier-oss-v1-0.6b", flush=True)
             install_embedder("harrier-oss-v1-0.6b")
         print("[embedder] loading harrier-oss-v1-0.6b (1024d, last-token pooling)", flush=True)
         return load_installed_embedder("harrier-oss-v1-0.6b", dims=1024)
 
-    # FastEmbed shortcuts — strong encoder models with pre-exported ONNX.
+    # FastEmbed shortcuts - strong encoder models with pre-exported ONNX.
     _FASTEMBED_ALIASES = {
         "bge-large":       "BAAI/bge-large-en-v1.5",
         "bge-base":        "BAAI/bge-base-en-v1.5",
@@ -511,23 +511,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("dataset")
     parser.add_argument("--mode", choices=["remember", "similar", "lexical", "hybrid"], default="remember")
     parser.add_argument("--ingest-mode", choices=["flat", "native"], default="flat",
-                        help="flat: CREATE NODE per session — 89.1%% R@5 overall (default); native: INGEST pipeline with auto-chunking — better on single-session-user (+15.6pp) but worse on single-session-preference (-30pp) and overall (-3.6pp R@5)")
+                        help="flat: CREATE NODE per session - 89.1%% R@5 overall (default); native: INGEST pipeline with auto-chunking - better on single-session-user (+15.6pp) but worse on single-session-preference (-30pp) and overall (-3.6pp R@5)")
     parser.add_argument("--embedder", default=None,
                         help=(
                             "Embedder to use. Options:\n"
-                            "  default                        — model2vec M2V_base_output (256d)\n"
-                            "  model2vec:<hf-id>              — any model2vec HuggingFace model\n"
+                            "  default                        - model2vec M2V_base_output (256d)\n"
+                            "  model2vec:<hf-id>              - any model2vec HuggingFace model\n"
                             "                                   e.g. model2vec:minishlab/potion-retrieval-32M\n"
-                            "  embeddinggemma                 — EmbeddingGemma-300M ONNX (256d Matryoshka)\n"
-                            "  embeddinggemma-768             — EmbeddingGemma-300M ONNX (768d full)\n"
-                            "  harrier                        — Microsoft Harrier-OSS-v1 0.6B ONNX (1024d, MTEB 69.0)\n"
-                            "  bge-large / bge-base / bge-small — BAAI bge-en-v1.5 via fastembed\n"
-                            "  mxbai-large                    — mixedbread mxbai-embed-large-v1 (1024d)\n"
-                            "  snowflake-l / snowflake-m      — Snowflake arctic-embed (1024d / 768d)\n"
-                            "  jina-v2                        — jina-embeddings-v2-base-en (768d)\n"
-                            "  nomic-v1.5                     — nomic-embed-text-v1.5 (768d, 8k context)\n"
-                            "  minilm-l6                      — sentence-transformers/all-MiniLM-L6-v2 (384d)\n"
-                            "  fastembed:<hf-id>              — any fastembed-supported HuggingFace model\n"
+                            "  embeddinggemma                 - EmbeddingGemma-300M ONNX (256d Matryoshka)\n"
+                            "  embeddinggemma-768             - EmbeddingGemma-300M ONNX (768d full)\n"
+                            "  harrier                        - Microsoft Harrier-OSS-v1 0.6B ONNX (1024d, MTEB 69.0)\n"
+                            "  bge-large / bge-base / bge-small - BAAI bge-en-v1.5 via fastembed\n"
+                            "  mxbai-large                    - mixedbread mxbai-embed-large-v1 (1024d)\n"
+                            "  snowflake-l / snowflake-m      - Snowflake arctic-embed (1024d / 768d)\n"
+                            "  jina-v2                        - jina-embeddings-v2-base-en (768d)\n"
+                            "  nomic-v1.5                     - nomic-embed-text-v1.5 (768d, 8k context)\n"
+                            "  minilm-l6                      - sentence-transformers/all-MiniLM-L6-v2 (384d)\n"
+                            "  fastembed:<hf-id>              - any fastembed-supported HuggingFace model\n"
                         ))
     parser.add_argument("--granularity", choices=["session", "turn"], default="session")
     parser.add_argument("--limit", type=int)

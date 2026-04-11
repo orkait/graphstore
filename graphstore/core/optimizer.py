@@ -153,7 +153,7 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
     if document_store is not None:
         conn = document_store._conn
 
-        # Build live-slot temp table — used for both orphan deletion and remap.
+        # Build live-slot temp table - used for both orphan deletion and remap.
         conn.execute(
             "CREATE TEMP TABLE _live_slots (slot INT PRIMARY KEY)"
         )

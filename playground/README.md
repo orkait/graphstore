@@ -44,8 +44,8 @@ Three resizable panels:
 
 ### Editor
 - Custom syntax highlighting for the graphstore DSL
-- **Ctrl+Enter** — run selected text (or current line)
-- **Ctrl+Shift+Enter** — run all queries
+- **Ctrl+Enter** - run selected text (or current line)
+- **Ctrl+Shift+Enter** - run all queries
 - Supports `BEGIN...COMMIT` batch blocks
 - Comments with `//`
 
@@ -61,9 +61,9 @@ Three resizable panels:
 - Wrapped in a card with inline node filter/search
 
 ### View Modes
-- **Live** — graph updates after every mutation, always shows full graph
-- **Query Result** — graph shows only nodes/edges returned by the last read query
-- **Highlight** — full graph visible, query results highlighted with blue glow, rest dimmed
+- **Live** - graph updates after every mutation, always shows full graph
+- **Query Result** - graph shows only nodes/edges returned by the last read query
+- **Highlight** - full graph visible, query results highlighted with blue glow, rest dimmed
 
 ### Results Panel
 - Stacked query results (newest on top)
@@ -79,9 +79,9 @@ Three resizable panels:
 - Default example (Class Hierarchy) auto-loads and executes on first visit
 
 ### Settings
-- **Graph** — view mode, layout algorithm, layout direction, node separation, rank separation, edge labels, minimap
-- **Store** — memory ceiling (64–1024 MB)
-- **Query** — cost threshold, explain-before-execute toggle
+- **Graph** - view mode, layout algorithm, layout direction, node separation, rank separation, edge labels, minimap
+- **Store** - memory ceiling (64–1024 MB)
+- **Query** - cost threshold, explain-before-execute toggle
 
 ### Examples
 Four pre-loaded example scripts accessible from the toolbar dropdown:

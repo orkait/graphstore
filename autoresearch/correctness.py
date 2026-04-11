@@ -255,7 +255,7 @@ def check_correctness(candidate_code: str, baseline_code: str, algo: str) -> str
     Returns None if all cases match.
     """
     if algo not in _DISPATCH:
-        return None  # no correctness coverage for this algo — skip gate
+        return None  # no correctness coverage for this algo - skip gate
 
     try:
         baseline_mod = _load_module(f"{algo}_baseline_oracle", baseline_code)

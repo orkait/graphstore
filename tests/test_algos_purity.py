@@ -54,7 +54,7 @@ def test_algos_file_has_only_pure_imports(path: Path):
             f"(prefix {top!r} is on FORBIDDEN_PREFIXES in benchmarks/algos/allowlist.py)"
         )
         assert top in allowed, (
-            f"{path.name}: unexpected import {m!r} — "
+            f"{path.name}: unexpected import {m!r} - "
             f"add {top!r} to benchmarks/algos/allowlist.py "
             f"(STDLIB, CORE, or OPTIONAL) if it's genuinely pure"
         )

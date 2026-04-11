@@ -95,7 +95,7 @@ class WALManager:
                 if len(self._replay_errors) < 50:
                     self._replay_errors.append(err)
                 logger.warning(
-                    "WAL replay statement failed: %s: %s — %s",
+                    "WAL replay statement failed: %s: %s - %s",
                     err["error_type"], err["error"], err["statement"],
                 )
         if self._replay_errors:

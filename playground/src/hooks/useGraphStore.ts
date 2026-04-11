@@ -257,7 +257,7 @@ export const useGraphStore = create<GraphStoreState>()(
         try {
           await api.reset()
         } catch {
-          toast.error('Reset failed', { description: 'Could not reset graph — is the server running?' })
+          toast.error('Reset failed', { description: 'Could not reset graph - is the server running?' })
         }
         set({
           graph: { nodes: [], edges: [] },

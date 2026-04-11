@@ -376,7 +376,7 @@ class FilteringMixin:
     def _try_column_order_by(self, nodes: list[dict], field: str,
                               descending: bool, limit: int | None,
                               offset: int | None) -> list[dict] | None:
-        """Column-accelerated ORDER BY — delegates to algos.sort.topk_from_column."""
+        """Column-accelerated ORDER BY - delegates to algos.sort.topk_from_column."""
         from graphstore.algos.sort import topk_from_column
 
         col_info = self.store.columns.get_column(field, self.store._next_slot)
@@ -410,7 +410,7 @@ class FilteringMixin:
                                descending: bool, limit: int | None,
                                offset: int | None,
                                fallback_predicate=None) -> np.ndarray | None:
-        """Sort slot indices by column values — delegates to algos.sort."""
+        """Sort slot indices by column values - delegates to algos.sort."""
         from graphstore.algos.sort import topk_from_column
 
         col_info = self.store.columns.get_column(field, self.store._next_slot)

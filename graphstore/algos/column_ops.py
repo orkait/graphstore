@@ -47,7 +47,7 @@ def eval_mask(
 ) -> np.ndarray | None:
     """Boolean mask for a comparison predicate on a column slice.
 
-    Returns None when the op is unsupported for the column dtype — caller
+    Returns None when the op is unsupported for the column dtype - caller
     must fall back to Python evaluation.
 
     For interned string columns, ``intern_lookup`` / ``has_string`` are

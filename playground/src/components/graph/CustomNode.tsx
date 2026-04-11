@@ -18,7 +18,7 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
   const degree = (data.degree as number) || 0
   const kindName = getKindTokenName(kind)
 
-  // Read hover state — returns a primitive boolean, no new objects
+  // Read hover state - returns a primitive boolean, no new objects
   const isHoverTarget = useFlowStore((st) => st.hoveredNodeId === id)
   const isHoverNeighbor = useFlowStore((st) => {
     const hid = st.hoveredNodeId
@@ -102,7 +102,7 @@ export const CustomNode = memo(function CustomNode({ id, data }: NodeProps) {
   // Cluster mode: circular Obsidian-style nodes
   if (layoutMode === 'cluster') {
     const label = data.label as string
-    // Size based on label length + degree — ensure text fits
+    // Size based on label length + degree - ensure text fits
     const baseSize = Math.max(50, label.length * 6 + 20)
     const size = baseSize + Math.min(degree * 4, 24)
     return (

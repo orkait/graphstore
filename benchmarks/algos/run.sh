@@ -58,7 +58,7 @@ Usage: $0 <mode> [extra pytest args]
 
 Modes:
   run              Run benchmarks, autosave result under .benchmarks/<machine>/
-  baseline         Save as 'baseline' — the reference to compare against
+  baseline         Save as 'baseline' - the reference to compare against
   compare          Compare current against saved baseline, fail if any algo >10% slower
   gate             Strict gate: fail if any algo >5% slower (for CI)
   list             List saved benchmark runs

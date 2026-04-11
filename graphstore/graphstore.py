@@ -139,7 +139,7 @@ class GraphStore:
             from graphstore.registry.installer import set_cache_dir
             set_cache_dir(cfg.vector.model_cache_dir)
 
-        # Ingestor registry — only constructed when custom ingestors passed.
+        # Ingestor registry - only constructed when custom ingestors passed.
         # When None, the handler falls through to router.ingest_file() (preserves "direct" fast-path).
         self._ingestor_registry = None
         if ingestors:
@@ -150,14 +150,14 @@ class GraphStore:
                     inst.supported_extensions = [ext]
                 if not hasattr(inst, 'name') or not inst.name:
                     inst.name = f"custom_{ext}"
-                # Directly map the dict key extension — preserves user intent
+                # Directly map the dict key extension - preserves user intent
                 self._ingestor_registry._instances[inst.name] = inst
                 self._ingestor_registry._ext_map[ext] = inst.name
 
         # Custom chunker (None → handler uses chunk_by_heading from chunker.py)
         self._chunker = chunker
 
-        # Store / schema / conn / vector_store — local vars folded into RuntimeState below
+        # Store / schema / conn / vector_store - local vars folded into RuntimeState below
         p = self._path
         _vector_store = None
         if p is not None:
@@ -310,7 +310,7 @@ class GraphStore:
         self._optimizer._evolution_engine = self._evolution_engine
         self._sys_executor._evolution_engine = self._evolution_engine
 
-        # Single-worker submission queue (not parallelism) — gives
+        # Single-worker submission queue (not parallelism) - gives
         # thread-safe caller side even though writes stay serialized.
         self._queued = queued
         self._queue = None
