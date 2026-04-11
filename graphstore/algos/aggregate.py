@@ -95,7 +95,7 @@ def group_count_distinct(
     """Per-group distinct count.
 
     Unlike COUNT/SUM/AVG/MIN/MAX this does NOT have a single-shot numpy
-    primitive — we walk each group with a mask, unique, and len. For
+    primitive - we walk each group with a mask, unique, and len. For
     small group counts this is fine; for very wide GROUP BYs consider a
     sort-then-adjacent-diff approach.
     """

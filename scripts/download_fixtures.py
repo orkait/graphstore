@@ -291,7 +291,7 @@ def download_voice():
         "https://openslr.trmal.net/resources/64/mr_in_female.zip",
         "OpenSLR 64 Marathi (712MB)")
 
-    # Gujarati skipped — 895MB archive, requires >2GB free disk for extraction
+    # Gujarati skipped - 895MB archive, requires >2GB free disk for extraction
 
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
     print(f"  manifest.json ({len(manifest)} clips, 5 languages)")

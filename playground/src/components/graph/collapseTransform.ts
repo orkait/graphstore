@@ -141,7 +141,7 @@ export function collapseTransform(
         outEdges.push({ ...e, source: gid, kind: e.kind })
       }
     } else {
-      // Both collapsed — aggregate as cross-group edge
+      // Both collapsed - aggregate as cross-group edge
       const srcGid = nodeToGroup.get(e.source)
       const tgtGid = nodeToGroup.get(e.target)
       if (srcGid && tgtGid && srcGid !== tgtGid) {

@@ -96,7 +96,7 @@ def bfs_traverse(
 ) -> list[tuple[int, int]]:
     """BFS from start up to max_depth via sparse matrix-power.
 
-    One CSR.T @ bool matvec per hop — O(nnz) per level, vectorized.
+    One CSR.T @ bool matvec per hop - O(nnz) per level, vectorized.
     Returns (node_index, depth) pairs including (start, 0).
     """
     n = matrix.shape[0]
@@ -262,7 +262,7 @@ def propagate_values(
         blocked_slots: optional set of slot indices to skip entirely.
 
     Returns:
-        (updated_slots, new_values) — lists giving the slot indices and
+        (updated_slots, new_values) - lists giving the slot indices and
         newly computed values in order. Caller writes back to columns.
 
     Note:

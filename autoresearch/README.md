@@ -66,12 +66,12 @@ noisy re-measurements can artificially raise the baseline, making regressed
 candidates look like wins.
 
 ```python
-# Drift refresh — re-measure current baseline_code
+# Drift refresh - re-measure current baseline_code
 if fresh_score < best_score:
-    best_score = fresh_score          # tighter measurement — trust it
+    best_score = fresh_score          # tighter measurement - trust it
     baseline_result = fresh
 else:
-    # Fresh is worse — noise, keep stored best
+    # Fresh is worse - noise, keep stored best
     pass
 ```
 
@@ -117,14 +117,14 @@ Max LLM calls per `(algo, model)` = `6 hypotheses × attempts_per_hypothesis`
 ### 4. Tiered bench with min-based measurement
 
 `pytest-benchmark` reports `min`, `median`, `mean`, `stddev`. For latency
-microbenchmarks, **min is the correct statistic** — background noise (GC,
+microbenchmarks, **min is the correct statistic** - background noise (GC,
 context switches, thermal, CPU contention) only slows runs down, never
 speeds them up. `bench_one.py` was updated to report `min_us` instead of
 `mean_us`.
 
 The tiered bench does:
 
-1. **Quick bench** (1x, fewer samples) to filter obvious losers — reject if
+1. **Quick bench** (1x, fewer samples) to filter obvious losers - reject if
    quick_score > `best_score * noise_tolerance` (default `1.02`)
 2. **Full bench** (min of `full_bench_repeats`, default 3) to confirm anything
    plausible
@@ -246,7 +246,7 @@ python -m autoresearch.run_loop --algo compact   --iterations 18 --model z-ai/gl
 `config.json` is re-read on every iteration. You can edit `active_model`,
 `noise_tolerance`, `attempts_per_hypothesis`, or `max_iterations` while a
 loop is running and the changes take effect on the next iteration. CLI
-overrides (`--model`, `--provider`) are sticky — they are re-applied after
+overrides (`--model`, `--provider`) are sticky - they are re-applied after
 every config reload.
 
 ## Retroactive verification (critical)
@@ -304,7 +304,7 @@ change), and **target-function-only AST comparison** for the others.
 3. Register the algo in `benchmarks/algos/bench_one.py::ALGO_TO_FILE` and
    `ALGO_TO_BENCH`
 4. Add an input generator in `autoresearch/correctness.py::_DISPATCH` for
-   the algo — follow the pattern of the existing entries, using small
+   the algo - follow the pattern of the existing entries, using small
    deterministic inputs that exercise the public functions
 5. Run `python -m autoresearch.run_loop --algo <name> --iterations 18 --model <model>`
 

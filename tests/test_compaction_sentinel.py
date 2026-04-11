@@ -76,7 +76,7 @@ def test_compaction_sentinel_recovery_from_mid_run_crash(tmp_path):
     _write_sentinel(gs._conn, pre_next_slot=10, pre_live_count=5)
     gs.close()
 
-    # Reopen — sentinel recovery should fire automatically.
+    # Reopen - sentinel recovery should fire automatically.
     gs2 = GraphStore(path=str(tmp_path))
 
     # In-memory recovery should have compacted the store.
@@ -128,7 +128,7 @@ def test_compaction_sentinel_no_tombstones_is_noop(tmp_path):
     _write_sentinel(gs._conn, pre_next_slot=10, pre_live_count=10)
     gs.close()
 
-    # Reopen — recovery should succeed as a no-op.
+    # Reopen - recovery should succeed as a no-op.
     gs2 = GraphStore(path=str(tmp_path))
     assert len(gs2._store.node_tombstones) == 0
     assert gs2._store._count == 10
@@ -180,7 +180,7 @@ def test_compact_tombstones_safe_inmemory_conn_none(tmp_path):
         gs.execute(f'CREATE NODE "n{i}" name = "item_{i}" kind = "item"')
     gs.execute('DELETE NODE "n0"')
 
-    # schema is present but conn is None — should fall through cleanly.
+    # schema is present but conn is None - should fall through cleanly.
     result = compact_tombstones_safe(
         gs._store, gs._schema, None,
         gs._vector_store, gs._document_store,

@@ -48,7 +48,7 @@ OPTIONAL: dict[str, dict[str, str]] = {
     },
     "simsimd": {
         "pypi": "simsimd",
-        "hint": "SIMD-accelerated vector ops — cosine, dot, euclidean, hamming. typically 5-10x faster than numpy for small vectors. used by usearch internally.",
+        "hint": "SIMD-accelerated vector ops - cosine, dot, euclidean, hamming. typically 5-10x faster than numpy for small vectors. used by usearch internally.",
     },
     "mmh3": {
         "pypi": "mmh3",

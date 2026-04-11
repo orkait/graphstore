@@ -45,7 +45,7 @@ def _apparmor_userns_blocks_cuda() -> bool:
     """True if Ubuntu 24.04+ apparmor userns restriction is active.
 
     When set, cudaGetDeviceCount() fails with error 304 from any
-    venv-isolated process — the exact reason every first-time GPU run
+    venv-isolated process - the exact reason every first-time GPU run
     on a fresh 24.04 box mysteriously breaks.
     """
     path = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
@@ -60,7 +60,7 @@ def _system_cuda_libs_present() -> bool:
     """Filesystem-only probe: are all required cu12 sonames in a path
     the dynamic linker will search?
 
-    No dlopen — dlopen caches by soname and would pollute later fallback
+    No dlopen - dlopen caches by soname and would pollute later fallback
     attempts with partial loads if one lib is missing. We only check
     existence on disk.
     """
@@ -88,14 +88,14 @@ def _preload_cu12_libs() -> None:
     Strategy:
         1. Non-Linux: no-op. cu12 wheels are Linux x86_64 only.
         2. Ubuntu 24.04 apparmor userns restriction active: raise a
-           targeted error with the sysctl fix — otherwise the user
+           targeted error with the sysctl fix - otherwise the user
            would hit an opaque "CUDA failure 304" at session creation.
         3. System already has the libs in a standard search path:
            skip preload. ORT's own dlopen will find them.
         4. nvidia-*-cu12 pip wheels installed alongside onnxruntime-gpu:
            dlopen each lib from the wheel location so subsequent
            ORT provider loads resolve the same soname to our wheel.
-        5. None of the above: do nothing — ORT will raise a clear
+        5. None of the above: do nothing - ORT will raise a clear
            "libcublasLt.so.12 not found" at session creation which
            points users at ``pip install graphstore[gpu]``.
 
@@ -144,7 +144,7 @@ def _resolve_providers(providers: list[str] | str | None) -> list[str]:
         3. ``GRAPHSTORE_GPU=1`` env var → try CUDA/Tensorrt first
         4. Default → CPU only
 
-    Unavailable providers are silently dropped — if CUDA is requested
+    Unavailable providers are silently dropped - if CUDA is requested
     but the installed onnxruntime wheel is CPU-only, we fall back to
     CPU rather than erroring.
     """
@@ -164,7 +164,7 @@ def _resolve_providers(providers: list[str] | str | None) -> list[str]:
             wanted = ["CPUExecutionProvider"]
 
     # Preload CUDA 12 shared libs from nvidia-*-cu12 pip wheels before
-    # onnxruntime probes its provider plugins — otherwise get_available_providers
+    # onnxruntime probes its provider plugins - otherwise get_available_providers
     # may silently drop CUDAExecutionProvider because the cuda provider .so
     # fails its dlopen of libcublasLt.so.12 / libcudnn.so.9 / libcudart.so.12.
     if any(p in ("CUDAExecutionProvider", "TensorrtExecutionProvider") for p in wanted):
@@ -190,9 +190,9 @@ class OnnxHFEmbedder(Embedder):
     ``providers=["CUDAExecutionProvider", "CPUExecutionProvider"]``.
 
     Two install paths:
-        - ``pip install 'graphstore[gpu]'``     — zero-config, bundles
+        - ``pip install 'graphstore[gpu]'``     - zero-config, bundles
           onnxruntime-gpu plus the nvidia-*-cu12 runtime wheels.
-        - ``pip install 'graphstore[gpu-ort]'`` — leaner, assumes the
+        - ``pip install 'graphstore[gpu-ort]'`` - leaner, assumes the
           host already has CUDA 12 / cuDNN 9 in a standard search path
           (system install, conda env, or LD_LIBRARY_PATH).
 
@@ -241,7 +241,7 @@ class OnnxHFEmbedder(Embedder):
         self._tokenizer.enable_padding(pad_id=0)
         self._tokenizer.enable_truncation(max_length=max_length)
 
-        # Load ONNX model — prefer explicit file from manifest if provided.
+        # Load ONNX model - prefer explicit file from manifest if provided.
         if onnx_file:
             candidate = model_dir / onnx_file
             if not candidate.exists():
@@ -279,9 +279,9 @@ class OnnxHFEmbedder(Embedder):
                 self._kv_cache_specs.append((inp.name, num_heads, head_dim, dtype))
 
         # Output selection priority:
-        #   1. sentence_embedding — SBERT-style exports with pooling baked in
-        #   2. last_hidden_state / anything containing "hidden" — raw 3D hidden states
-        #   3. first output — fallback
+        #   1. sentence_embedding - SBERT-style exports with pooling baked in
+        #   2. last_hidden_state / anything containing "hidden" - raw 3D hidden states
+        #   3. first output - fallback
         outputs = self._session.get_outputs()
         self._hidden_output_idx = 0
         for i, out in enumerate(outputs):

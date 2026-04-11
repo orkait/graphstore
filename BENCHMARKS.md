@@ -73,12 +73,12 @@ graphstore is #1 and using the weakest-to-moderate embedder of the pack.
 
 The skill-compliant adapter gains ~55 percentage points over a naive graphstore adapter (`kind = "memory"`, no schema, no FTS population, no graph, plain `REMEMBER`). Breakdown:
 
-1. **Schema-first ingestion** — `SYS REGISTER NODE KIND "message" ... EMBED content` pre-allocates typed columns and wires auto-embed through the schema engine instead of the DOCUMENT blob path.
-2. **BM25 via `DocumentStore.put_summary`** — the single biggest lever. Populates the FTS5 `doc_fts` virtual table so REMEMBER's BM25 leg actually contributes 20% of its fusion weight.
-3. **Per-category query dispatch** — multi-session questions fuse REMEMBER with `RECALL FROM <entity>`, knowledge-update questions fuse REMEMBER with `NODES ORDER BY __updated_at__ DESC`.
-4. **Entity graph** — regex extraction creates `entity` nodes and `mentions` edges so `RECALL` walks cross-session.
-5. **Multi-kind schema** — `session`, `message`, `entity` as separate kinds with `WHERE kind = "message"` filter on REMEMBER so entity/session nodes don't compete for vector slots.
-6. **Session-based scoring** — hits count if a retrieved node's session field contains the answer_session_id; matches LongMemEval's actual LLM-as-judge protocol better than naive substring matching.
+1. **Schema-first ingestion** - `SYS REGISTER NODE KIND "message" ... EMBED content` pre-allocates typed columns and wires auto-embed through the schema engine instead of the DOCUMENT blob path.
+2. **BM25 via `DocumentStore.put_summary`** - the single biggest lever. Populates the FTS5 `doc_fts` virtual table so REMEMBER's BM25 leg actually contributes 20% of its fusion weight.
+3. **Per-category query dispatch** - multi-session questions fuse REMEMBER with `RECALL FROM <entity>`, knowledge-update questions fuse REMEMBER with `NODES ORDER BY __updated_at__ DESC`.
+4. **Entity graph** - regex extraction creates `entity` nodes and `mentions` edges so `RECALL` walks cross-session.
+5. **Multi-kind schema** - `session`, `message`, `entity` as separate kinds with `WHERE kind = "message"` filter on REMEMBER so entity/session nodes don't compete for vector slots.
+6. **Session-based scoring** - hits count if a retrieved node's session field contains the answer_session_id; matches LongMemEval's actual LLM-as-judge protocol better than naive substring matching.
 
 All of this is documented in [`skills/graphstore-ingestion/SKILL.md`](skills/graphstore-ingestion/SKILL.md).
 
@@ -114,18 +114,18 @@ Expect ~4 hours wall clock on 12 CPUs. Peak RAM ~2.4 GB. Host must be Linux or m
 
 ### Known quirks from this run
 
-1. **Docker Desktop virtual filesystem** — on the host machine used for this run, Docker Desktop routes bind mounts through its internal VM, so files written to `/results` inside the container ended up in the VM's view of that path rather than on the real host FS. The result files had to be rescued with `docker cp`. A clean native Docker / podman install does not have this issue.
-2. **fastembed cache corruption on `bge-base-en-v1.5`** — a parallel queued run crashed with `NoSuchFile` on `model_optimized.onnx` — the cache download had partially failed. Workaround: delete `~/graphstore-models/cache/models--qdrant--bge-base-en-v1.5-onnx-q` and re-run.
-3. **`bge-large-en-v1.5` was too slow on 12 CPUs** — ~240 s per record vs 30 s for bge-small. Full 500 would take ~33 hours. The 3× quality improvement wasn't worth the 8× compute. Killed. A GPU path would make it tractable but it isn't needed to beat the leaderboard.
+1. **Docker Desktop virtual filesystem** - on the host machine used for this run, Docker Desktop routes bind mounts through its internal VM, so files written to `/results` inside the container ended up in the VM's view of that path rather than on the real host FS. The result files had to be rescued with `docker cp`. A clean native Docker / podman install does not have this issue.
+2. **fastembed cache corruption on `bge-base-en-v1.5`** - a parallel queued run crashed with `NoSuchFile` on `model_optimized.onnx` - the cache download had partially failed. Workaround: delete `~/graphstore-models/cache/models--qdrant--bge-base-en-v1.5-onnx-q` and re-run.
+3. **`bge-large-en-v1.5` was too slow on 12 CPUs** - ~240 s per record vs 30 s for bge-small. Full 500 would take ~33 hours. The 3× quality improvement wasn't worth the 8× compute. Killed. A GPU path would make it tractable but it isn't needed to beat the leaderboard.
 
 ### What's **not** in this number
 
 - No cloud API calls. No OpenAI / Anthropic / Gemini inference.
 - No GPU.
 - No LLM extraction at ingest time (which is Mem0's approach).
-- No prompt engineering on the query side — the question goes straight into `REMEMBER` as-is.
+- No prompt engineering on the query side - the question goes straight into `REMEMBER` as-is.
 - No query reformulation or multi-hop rewriting.
-- No per-dataset tuning — same adapter would run on LoCoMo, BEIR, AMB.
+- No per-dataset tuning - same adapter would run on LoCoMo, BEIR, AMB.
 
 ---
 
@@ -151,9 +151,9 @@ Each harness has its own detailed README linked below.
 
 | System | Status | Adapter file |
 |---|---|---|
-| `graphstore` | ✅ full — skill-compliant | `adapters/graphstore_.py` |
-| `chroma-bm25` | ✅ full — dense (chromadb) + sparse (rank-bm25) + RRF fusion | `adapters/chroma_bm25.py` |
-| `llamaindex` | ✅ full — VectorStoreIndex default path | `adapters/llamaindex_.py` |
+| `graphstore` | ✅ full - skill-compliant | `adapters/graphstore_.py` |
+| `chroma-bm25` | ✅ full - dense (chromadb) + sparse (rank-bm25) + RRF fusion | `adapters/chroma_bm25.py` |
+| `llamaindex` | ✅ full - VectorStoreIndex default path | `adapters/llamaindex_.py` |
 | `mem0` | ✅ full | `adapters/mem0.py` |
 | `letta` | stub | `adapters/letta.py` |
 
@@ -190,11 +190,11 @@ python -m benchmarks.framework.cli run \
 
 Results land in `benchmarks/framework/results/` as three files per run:
 
-- `<system>_longmemeval_s_<timestamp>.json` — full structured result (quality, latency percentiles, memory, cost)
-- `<system>_longmemeval_s_<timestamp>.csv` — flat row for spreadsheets
-- `<system>_longmemeval_s_<timestamp>.md` — human-readable leaderboard
+- `<system>_longmemeval_s_<timestamp>.json` - full structured result (quality, latency percentiles, memory, cost)
+- `<system>_longmemeval_s_<timestamp>.csv` - flat row for spreadsheets
+- `<system>_longmemeval_s_<timestamp>.md` - human-readable leaderboard
 
-**Docker** — there's a `benchmarks/framework/Dockerfile.bench` with chromadb, llama-index, fastembed, and graphstore pre-installed. Build once, run any adapter. See `benchmarks/framework/scripts/bench_scheduler.sh` for a cron-friendly queue runner (parameterized via `GS_MODELS` / `GS_REPO` env vars).
+**Docker** - there's a `benchmarks/framework/Dockerfile.bench` with chromadb, llama-index, fastembed, and graphstore pre-installed. Build once, run any adapter. See `benchmarks/framework/scripts/bench_scheduler.sh` for a cron-friendly queue runner (parameterized via `GS_MODELS` / `GS_REPO` env vars).
 
 **Full details:** see [`benchmarks/framework/README.md`](benchmarks/framework/README.md) for the adapter contract, metrics definitions, writing-a-new-adapter guide, and the ground rules for publishing numbers honestly.
 
@@ -231,8 +231,8 @@ uv run python benchmarks/longmemeval.py /tmp/longmemeval-data/longmemeval_s_clea
 
 Two strategies for loading corpus items into graphstore:
 
-- `flat` **(default)**: `CREATE NODE` with the full session text as one blob — one vector per session.
-- `native`: `INGEST` pipeline — auto-chunks each session by paragraph, embeds each chunk individually, populates FTS properly.
+- `flat` **(default)**: `CREATE NODE` with the full session text as one blob - one vector per session.
+- `native`: `INGEST` pipeline - auto-chunks each session by paragraph, embeds each chunk individually, populates FTS properly.
 
 **Full-run results (500 questions, 470 scored, REMEMBER mode, model2vec):**
 
@@ -252,16 +252,16 @@ Two strategies for loading corpus items into graphstore:
 | knowledge-update | 94.4% | **100.0%** | native |
 | single-session-assistant | **98.2%** | 89.3% | flat |
 
-**Why flat is the default:** it wins overall (93.2% vs 91.3% R@10) and on 4/6 question types. native excels only on `single-session-user` (+15.6pp) — buried-fact questions in long mixed-topic conversations — but pays for it with a severe regression on `single-session-preference` (-30pp) and a -1.9pp overall loss.
+**Why flat is the default:** it wins overall (93.2% vs 91.3% R@10) and on 4/6 question types. native excels only on `single-session-user` (+15.6pp) - buried-fact questions in long mixed-topic conversations - but pays for it with a severe regression on `single-session-preference` (-30pp) and a -1.9pp overall loss.
 
 Use `--ingest-mode native` only when your workload is dominated by single-session long conversations where the answer is a specific buried fact.
 
 #### Retrieval modes
 
-- `remember` — 5-signal fusion (vector + BM25 + recency + confidence + recall frequency)
-- `similar`  — dense-only retrieval
-- `lexical`  — BM25-only retrieval
-- `hybrid`   — simple RRF fusion of similar + lexical
+- `remember` - 5-signal fusion (vector + BM25 + recency + confidence + recall frequency)
+- `similar`  - dense-only retrieval
+- `lexical`  - BM25-only retrieval
+- `hybrid`   - simple RRF fusion of similar + lexical
 
 **REMEMBER vs SIMILAR depends on embedder strength:**
 
@@ -285,13 +285,13 @@ With a weak embedder, BM25 fusion in REMEMBER adds ~19pp over pure vector. With 
 | `nomic-v1.5` | nomic-ai/nomic-embed-text-v1.5 | 768 | encoder | via fastembed, 8k context |
 | `embeddinggemma` | Google EmbeddingGemma-300M | 256 (Matryoshka) | encoder, mean pooling | slow on CPU |
 | `embeddinggemma-768` | Google EmbeddingGemma-300M | 768 | encoder, mean pooling | slower, higher quality |
-| `harrier` | Microsoft Harrier-OSS-v1 0.6B | 1024 | decoder, last-token pooling | blocked — needs `onnxruntime-genai` re-export |
-| `fastembed:<hf-id>` | any fastembed-supported model | varies | — | pass the HF ID directly |
+| `harrier` | Microsoft Harrier-OSS-v1 0.6B | 1024 | decoder, last-token pooling | blocked - needs `onnxruntime-genai` re-export |
+| `fastembed:<hf-id>` | any fastembed-supported model | varies | - | pass the HF ID directly |
 | `model2vec:<hf-id>` | any model2vec HF model | varies | static distilled | e.g. `model2vec:minishlab/potion-retrieval-32M` |
 
 **Install:** `pip install graphstore[fastembed]` unlocks the fastembed models.
 
-#### Historical reference — legacy driver best numbers
+#### Historical reference - legacy driver best numbers
 
 These are the legacy driver's best configurations and are kept for historical context. The modern headline number (97.6%) is produced by the framework adapter above.
 
@@ -344,9 +344,9 @@ with gs.deferred_embeddings(batch_size=64):
 
 ### 3. Algos pytest-benchmark (`benchmarks/algos/`)
 
-**Use this for tuning pure primitives.** Micro-benchmarks over every function in `graphstore/algos/` — graph traversal, compaction, BM25 fusion, aggregation, column predicates, FTS5 sanitize, materialization, string GC, and more.
+**Use this for tuning pure primitives.** Micro-benchmarks over every function in `graphstore/algos/` - graph traversal, compaction, BM25 fusion, aggregation, column predicates, FTS5 sanitize, materialization, string GC, and more.
 
-- Synthetic numpy inputs (fixed seeds) — no GraphStore fixture, no SQLite, no I/O
+- Synthetic numpy inputs (fixed seeds) - no GraphStore fixture, no SQLite, no I/O
 - Parametrized by input size (1k / 10k / 100k nodes)
 - Grouped by function; saved baselines for regression comparison
 - LLM-friendly `bench_one.py` per-algo metric emitter + `dump_env.py` package manifest for autoresearch workflows

@@ -22,11 +22,11 @@ This framework's ground rule is: **every adapter uses the ingestion pattern the 
 
 For graphstore specifically, the adapter uses:
 
-- **Schema pre-registration** — `SYS REGISTER NODE KIND "memory" REQUIRED session:string, role:string, content:string OPTIONAL importance:float, position:int EMBED content`. This pre-allocates typed columns (int32_interned / int64 / float64), validates writes, and tells graphstore which field to auto-embed. Without this, CREATE would infer column types lazily on first write — a real throughput hit at scale.
-- **Deferred embeddings** — ingestion is wrapped in `gs.deferred_embeddings(batch_size=128)` so the embedder is called in batches instead of per-node. This is a 4-10x speedup on transformer embedders.
-- **Hybrid retrieval via REMEMBER** — graphstore's 5-signal fusion (vector + BM25 + recency + confidence + recall frequency) is the query primitive, not bare `SIMILAR TO`.
-- **Vectorized importance scoring** — per-message importance is computed in a single numpy pass over content lengths, feeding REMEMBER's confidence weight.
-- **CSR lazy rebuild** — edges are accumulated raw during ingestion; the CSR sparse matrix is only built on the first read, avoiding a rebuild per-edge.
+- **Schema pre-registration** - `SYS REGISTER NODE KIND "memory" REQUIRED session:string, role:string, content:string OPTIONAL importance:float, position:int EMBED content`. This pre-allocates typed columns (int32_interned / int64 / float64), validates writes, and tells graphstore which field to auto-embed. Without this, CREATE would infer column types lazily on first write - a real throughput hit at scale.
+- **Deferred embeddings** - ingestion is wrapped in `gs.deferred_embeddings(batch_size=128)` so the embedder is called in batches instead of per-node. This is a 4-10x speedup on transformer embedders.
+- **Hybrid retrieval via REMEMBER** - graphstore's 5-signal fusion (vector + BM25 + recency + confidence + recall frequency) is the query primitive, not bare `SIMILAR TO`.
+- **Vectorized importance scoring** - per-message importance is computed in a single numpy pass over content lengths, feeding REMEMBER's confidence weight.
+- **CSR lazy rebuild** - edges are accumulated raw during ingestion; the CSR sparse matrix is only built on the first read, avoiding a rebuild per-edge.
 
 When you write a new adapter, apply the same principle: use the features the system's maintainers tell you to use.
 
@@ -74,9 +74,9 @@ python -m benchmarks.framework.cli run \
 
 Results land in `benchmarks/framework/results/` as three files per run:
 
-- `graphstore_longmemeval_s_<timestamp>.json` — full structured result
-- `graphstore_longmemeval_s_<timestamp>.csv` — flat row for spreadsheets
-- `graphstore_longmemeval_s_<timestamp>.md` — human-readable leaderboard
+- `graphstore_longmemeval_s_<timestamp>.json` - full structured result
+- `graphstore_longmemeval_s_<timestamp>.csv` - flat row for spreadsheets
+- `graphstore_longmemeval_s_<timestamp>.md` - human-readable leaderboard
 
 ## What the runner measures
 
@@ -166,7 +166,7 @@ Read these before publishing any numbers.
 
 ## References
 
-- [LongMemEval](https://github.com/xiaowu0162/LongMemEval) — the benchmark we start with
-- [LoCoMo](https://snap-research.github.io/locomo/) — very long-term conversations
-- [Agent Memory Benchmark](https://agentmemorybenchmark.ai) — the 2026 manifesto for apples-to-apples
-- [GraphRAG-Bench (ICLR 2026)](https://github.com/GraphRAG-Bench/GraphRAG-Benchmark) — for graph-based systems
+- [LongMemEval](https://github.com/xiaowu0162/LongMemEval) - the benchmark we start with
+- [LoCoMo](https://snap-research.github.io/locomo/) - very long-term conversations
+- [Agent Memory Benchmark](https://agentmemorybenchmark.ai) - the 2026 manifesto for apples-to-apples
+- [GraphRAG-Bench (ICLR 2026)](https://github.com/GraphRAG-Bench/GraphRAG-Benchmark) - for graph-based systems

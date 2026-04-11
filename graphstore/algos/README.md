@@ -16,7 +16,7 @@ GraphStore instance, callable from anywhere in the codebase.
    their arguments.
 
 4. **Determinism.** Same input → same output. No wall-clock reads inside
-   algos — caller passes `now_ms` if needed.
+   algos - caller passes `now_ms` if needed.
 
 5. **Explicit `__all__`.** Each module declares its public surface.
 
@@ -33,7 +33,7 @@ GraphStore instance, callable from anywhere in the codebase.
 | `spreading.py` | `spreading_activation` | `dsl/handlers/intelligence.py::_recall` |
 | `text.py` | `fts5_sanitize`, `tokenize_unicode` | `document/store.py` |
 
-## Design pattern — Functional Core / Imperative Shell
+## Design pattern - Functional Core / Imperative Shell
 
 - **Pure core** = this package. Computes what should happen.
 - **Imperative shell** = `core/store.py`, `dsl/handlers/*`, `core/optimizer.py`.

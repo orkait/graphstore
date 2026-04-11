@@ -1,5 +1,5 @@
 """
-Algo Autoresearch — Scientific ratchet loop for graphstore/algos/.
+Algo Autoresearch - Scientific ratchet loop for graphstore/algos/.
 
 Design principles:
   - Baseline is sacred: never modified until a statistically confirmed winner
@@ -43,7 +43,7 @@ _config_mtime: float = 0
 
 
 # ---------------------------------------------------------------------------
-# Hypothesis taxonomy — hard API-level constraints, not labels
+# Hypothesis taxonomy - hard API-level constraints, not labels
 # ---------------------------------------------------------------------------
 
 HYPOTHESIS_TYPES: list[dict] = [
@@ -204,7 +204,7 @@ def load_config() -> dict:
             _config_cache = migrate_config(raw)
             _config_mtime = mtime
     except (FileNotFoundError, json.JSONDecodeError) as e:
-        print(f"  Config load failed: {e} — using cached")
+        print(f"  Config load failed: {e} - using cached")
     return _config_cache  # type: ignore[return-value]
 
 
@@ -269,7 +269,7 @@ def load_checkpoint(algo: str) -> bool:
             algo_path(algo).write_text(_checkpoint["baseline_code"])
         return True
     except Exception as e:
-        print(f"  Checkpoint load failed: {e} — starting fresh")
+        print(f"  Checkpoint load failed: {e} - starting fresh")
         return False
 
 
@@ -335,7 +335,7 @@ def run_bench_repeated(algo: str, fast: bool, repeats: int) -> dict | None:
 
     Taking the MIN across repeats filters transient noise (GC, context switches,
     parallel loop CPU contention). Min is the correct statistic for latency
-    microbenchmarks — noise only makes runs slower, never faster.
+    microbenchmarks - noise only makes runs slower, never faster.
     """
     best: dict | None = None
     best_score = float("inf")
@@ -376,7 +376,7 @@ def run_bench_tiered(
         return quick, "rejected"
 
     print(f"  Quick bench plausible ({quick_score:.2f} us vs best {best_score:.2f} us) "
-          f"— running full bench (min of {full_repeats})...")
+          f"- running full bench (min of {full_repeats})...")
     full = run_bench_repeated(algo, fast=False, repeats=full_repeats)
     if full is None:
         return quick, "failed"
@@ -415,7 +415,7 @@ def check_purity(code: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Staleness detection — AST of target function only
+# Staleness detection - AST of target function only
 # ---------------------------------------------------------------------------
 
 def fn_ast_dump(code: str, fn_name: str) -> str:
@@ -479,7 +479,7 @@ def fresh_attempts() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# LLM — clean room prompt
+# LLM - clean room prompt
 # ---------------------------------------------------------------------------
 
 def get_env_manifest() -> str:
@@ -521,13 +521,13 @@ def build_prompt(
 ## Environment
 {env_manifest}
 
-## Proven baseline — graphstore/algos/{algo}.py
+## Proven baseline - graphstore/algos/{algo}.py
 ```python
 {baseline_code}
 ```
 
 ## Bottleneck
-Function `{bottleneck_fn}` costs {bottleneck_us:.0f} us — {pct:.0f}% of total latency.
+Function `{bottleneck_fn}` costs {bottleneck_us:.0f} us - {pct:.0f}% of total latency.
 All other functions are fast. Focus exclusively on `{bottleneck_fn}`.
 
 ## Hypothesis: {hypothesis['name']}
@@ -740,7 +740,7 @@ def run_loop(
               f"attempts={attempts}")
     else:
         initial_full_repeats = int(config.get("full_bench_repeats", 3))
-        print(f"No checkpoint — measuring baseline (min of {initial_full_repeats} full benches)...")
+        print(f"No checkpoint - measuring baseline (min of {initial_full_repeats} full benches)...")
         baseline_code = algo_path(algo).read_text()
         baseline_result = run_bench_repeated(algo, fast=False, repeats=initial_full_repeats)
         if baseline_result is None:
@@ -778,7 +778,7 @@ def run_loop(
             break
 
         # Re-measure baseline every 10 iters (drift control).
-        # CRITICAL: best_score is MONOTONIC — drift refresh may only *tighten* it.
+        # CRITICAL: best_score is MONOTONIC - drift refresh may only *tighten* it.
         # If the fresh measurement is worse, it's noise (CPU contention, GC, etc),
         # not a real regression in baseline_code. We keep the stored best so that
         # candidates are judged against the tightest valid measurement of the current
@@ -796,7 +796,7 @@ def run_loop(
                 else:
                     baseline_measured_at = i
                     print(f"  Drift check: fresh={fresh_score:.2f} us worse than stored "
-                          f"best={best_score:.2f} us — keeping stored (noise)")
+                          f"best={best_score:.2f} us - keeping stored (noise)")
 
         attempts_per_hypothesis = int(config.get("attempts_per_hypothesis", 3))
 
@@ -817,7 +817,7 @@ def run_loop(
         # Clear recent_asts on hypothesis switch (avoids cross-hypothesis stale contamination)
         if hypothesis["name"] != last_hypothesis:
             if recent_asts:
-                print(f"  Hypothesis switched {last_hypothesis!r} → {hypothesis['name']!r} — clearing recent_asts")
+                print(f"  Hypothesis switched {last_hypothesis!r} → {hypothesis['name']!r} - clearing recent_asts")
                 recent_asts = []
             last_hypothesis = hypothesis["name"]
 
@@ -867,7 +867,7 @@ def run_loop(
                 })
                 continue
 
-            # Correctness gate — candidate must produce the same output as
+            # Correctness gate - candidate must produce the same output as
             # baseline on deterministic test inputs. Drift = attempt failure.
             from autoresearch.correctness import check_correctness
             correctness_err = check_correctness(candidate, baseline_code, algo)
@@ -884,7 +884,7 @@ def run_loop(
                 })
                 continue
 
-            # AST staleness gate — scope_widen compares whole file (helpers may change)
+            # AST staleness gate - scope_widen compares whole file (helpers may change)
             use_whole_file = h_name == "scope_widen"
             if is_stale(candidate, baseline_code, recent_asts, bottleneck_fn_name, whole_file=use_whole_file):
                 _bump_attempt()
@@ -904,7 +904,7 @@ def run_loop(
             else:
                 recent_asts = (recent_asts + [fn_ast_dump(candidate, bottleneck_fn_name)])[-3:]
 
-            # Isolated bench — baseline always restored in finally
+            # Isolated bench - baseline always restored in finally
             result = None
             tier = "failed"
             try:
@@ -930,7 +930,7 @@ def run_loop(
             }
 
             if score < best_score and result is not None and tier != "failed":
-                # WIN — reset all attempts, new baseline gets fresh budget
+                # WIN - reset all attempts, new baseline gets fresh budget
                 entry["result"] = "win"
                 print(f"  WIN: {score:.2f} us via {h_name} on {bottleneck_fn_name}")
                 baseline_code = candidate
@@ -972,14 +972,14 @@ def run_loop(
         except IterationTimeout:
             hn = hypothesis["name"]
             attempts[hn] = attempts.get(hn, 0) + 1
-            print(f"  TIMEOUT — restoring baseline "
+            print(f"  TIMEOUT - restoring baseline "
                   f"(attempts: {attempts[hn]}/{attempts_per_hypothesis})")
             algo_path(algo).write_text(baseline_code)
             timeout_count += 1
         except Exception as e:
             hn = hypothesis["name"]
             attempts[hn] = attempts.get(hn, 0) + 1
-            print(f"  Error: {e} — restoring baseline "
+            print(f"  Error: {e} - restoring baseline "
                   f"(attempts: {attempts[hn]}/{attempts_per_hypothesis})")
             algo_path(algo).write_text(baseline_code)
         finally:
@@ -1009,7 +1009,7 @@ def run_loop(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Algo autoresearch — scientific ratchet")
+    parser = argparse.ArgumentParser(description="Algo autoresearch - scientific ratchet")
     parser.add_argument("--algo", default=None, help="Algo name (overrides config)")
     parser.add_argument("--iterations", type=int, default=None,
                         help="Run this many iterations from where we resume (relative, not absolute)")

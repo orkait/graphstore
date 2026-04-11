@@ -1,4 +1,4 @@
-"""Cost estimation adapter — wraps graphstore.algos.cost with domain shapes.
+"""Cost estimation adapter - wraps graphstore.algos.cost with domain shapes.
 
 Translates MatchPattern / EdgeMatrices into the edge_types list + get_matrix
 callable that the pure algos.cost layer expects.

@@ -1,4 +1,4 @@
-"""Visibility mask primitives — tombstones, TTL, retraction, context."""
+"""Visibility mask primitives - tombstones, TTL, retraction, context."""
 
 import numpy as np
 

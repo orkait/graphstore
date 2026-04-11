@@ -10,7 +10,7 @@ from graphstore import GraphStore
 from graphstore.core.errors import BatchRollback, CeilingExceeded
 
 
-# ── Test 1: Full workflow — schema, bulk load, query, mutate, verify ──
+# ── Test 1: Full workflow - schema, bulk load, query, mutate, verify ──
 
 
 def test_full_workflow(tmp_path):
@@ -113,7 +113,7 @@ def test_wal_recovery(tmp_path):
     g._conn.close()
     g._runtime.conn = None
 
-    # Reopen — the constructor should replay the WAL
+    # Reopen - the constructor should replay the WAL
     with GraphStore(path=db_path) as g2:
         assert g2.node_count == 2
         r = g2.execute('NODE "a"')
@@ -128,7 +128,7 @@ def test_batch_rollback():
     g.execute('CREATE NODE "a" kind = "x" name = "alpha"')
 
     # The second CREATE inside the batch creates "a" again, which
-    # already exists — triggers NodeExists, which causes rollback.
+    # already exists - triggers NodeExists, which causes rollback.
     with pytest.raises(BatchRollback):
         g.execute(
             'BEGIN\n'

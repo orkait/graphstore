@@ -1,7 +1,7 @@
 """Tests for the metacognitive evolution layer (Layer 5).
 
 All 27 spec test cases plus infrastructure tests for Step 1 counter setup.
-Written first (RED phase) — all should fail until implementation is complete.
+Written first (RED phase) - all should fail until implementation is complete.
 """
 import time
 import sqlite3
@@ -328,7 +328,7 @@ def test_priority_ordering():
     signals = engine.compute_signals()
     engine.evaluate(signals)
 
-    # Priority 1 fires first, sets to 0.7. Priority 10 fires next but conflict — skipped.
+    # Priority 1 fires first, sets to 0.7. Priority 10 fires next but conflict - skipped.
     # Actually: lowest number = highest priority. Priority 1 wins.
     assert db._sys_executor._eviction_target_ratio == pytest.approx(0.7)
 
@@ -340,21 +340,21 @@ def test_frozen_signals():
     if not hasattr(db, "_evolution_engine"):
         pytest.skip("EvolutionEngine not wired yet")
 
-    # Rules target different params — use compute_signals to verify snapshot
+    # Rules target different params - use compute_signals to verify snapshot
     engine = db._evolution_engine
     snap1 = engine.compute_signals()
     snap2 = engine.compute_signals()
 
     # Two calls to compute_signals at same tick should give consistent readings
-    # (within float rounding — node_count should be identical)
+    # (within float rounding - node_count should be identical)
     assert snap1["node_count"] == snap2["node_count"]
     assert snap1["memory_pct"] == pytest.approx(snap2["memory_pct"], abs=0.01)
 
 
 def test_conflict_detection_at_create():
-    """Test 12: Same param + same priority is unresolvable — must warn at creation."""
+    """Test 12: Same param + same priority is unresolvable - must warn at creation."""
     db = GraphStore(ceiling_mb=100, embedder=None)
-    # Both rules: same param, same priority (default 5) — unresolvable conflict
+    # Both rules: same param, same priority (default 5) - unresolvable conflict
     db.execute(
         'SYS EVOLVE RULE "r1" WHEN memory_pct > 80 THEN SET eviction_target_ratio = 0.6 COOLDOWN 60'
     )
@@ -436,7 +436,7 @@ def test_adjust_until_stops():
 
     engine = db._evolution_engine
 
-    # Run multiple ticks — should stop at 0.5 not go below
+    # Run multiple ticks - should stop at 0.5 not go below
     for _ in range(10):
         signals = engine.compute_signals()
         engine.evaluate(signals)
@@ -534,7 +534,7 @@ def test_remember_weights_normalization():
 
 
 def test_run_action_does_not_raise():
-    """Test 20: THEN RUN never raises — bad DSL fails gracefully."""
+    """Test 20: THEN RUN never raises - bad DSL fails gracefully."""
     db = GraphStore(ceiling_mb=100, embedder=None)
 
     db.execute(
@@ -573,7 +573,7 @@ def test_run_action_executes_dsl():
 
 
 def test_run_action_bad_dsl_graceful():
-    """THEN RUN with unparseable DSL fails gracefully — status 'failed:...' not a crash."""
+    """THEN RUN with unparseable DSL fails gracefully - status 'failed:...' not a crash."""
     db = GraphStore(ceiling_mb=100, embedder=None)
 
     db.execute(
@@ -638,7 +638,7 @@ def test_reentrancy_guard():
     # Manually set _evaluating = True
     engine._evaluating = True
 
-    # Trigger _check_health — should not cause recursive evaluate()
+    # Trigger _check_health - should not cause recursive evaluate()
     try:
         db._optimizer._check_health()
     except Exception as e:

@@ -614,7 +614,7 @@ class TestLiveSlotsVisibility:
         s = self._store_with_node()
         # Set __expires_at__ to 1ms ago (already expired)
         slot = s.id_to_slot[s.string_table.intern("n1")]
-        s.columns.set_reserved(slot, "__expires_at__", 1)  # epoch+1ms — long past
+        s.columns.set_reserved(slot, "__expires_at__", 1)  # epoch+1ms - long past
         nodes = s.get_all_nodes()
         assert nodes == [], "expired node must not appear in get_all_nodes"
 
@@ -686,6 +686,6 @@ class TestLiveSlotsVisibility:
         assert len(slots1) == 1
         # Manually expire the node without triggering _invalidate_live_cache
         s.columns.set_reserved(slot, "__expires_at__", 1)
-        # Cache should NOT be used — node must now be absent
+        # Cache should NOT be used - node must now be absent
         slots2 = s._live_slots()
         assert len(slots2) == 0, "expired node leaked through cache"

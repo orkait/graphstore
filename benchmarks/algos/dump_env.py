@@ -100,14 +100,14 @@ def build_manifest() -> dict:
 
 def render_markdown(manifest: dict) -> str:
     lines = []
-    lines.append("# graphstore/algos — environment manifest")
+    lines.append("# graphstore/algos - environment manifest")
     lines.append("")
     lines.append(f"- python: **{manifest['python']}**")
     lines.append(f"- platform: {manifest['platform']}")
     lines.append("")
     lines.append("> This file lists the **exact packages and versions**")
     lines.append("> available when rewriting a file in `graphstore/algos/`.")
-    lines.append("> Do not import anything not listed here — the purity")
+    lines.append("> Do not import anything not listed here - the purity")
     lines.append("> gate will reject the patch.")
     lines.append("")
 
@@ -115,25 +115,25 @@ def render_markdown(manifest: dict) -> str:
     lines.append("")
     for mod, entry in manifest["core"].items():
         ver = entry["version"] or "MISSING"
-        lines.append(f"- **`{entry['pypi']}=={ver}`** — `import {entry['import_name']}`")
+        lines.append(f"- **`{entry['pypi']}=={ver}`** - `import {entry['import_name']}`")
         lines.append(f"  - {entry['hint']}")
     lines.append("")
 
-    lines.append("## Optional (installed — you may use any of these)")
+    lines.append("## Optional (installed - you may use any of these)")
     lines.append("")
     if manifest["optional_installed"]:
         for mod, entry in manifest["optional_installed"].items():
-            lines.append(f"- **`{entry['pypi']}=={entry['version']}`** — `import {entry['import_name']}`")
+            lines.append(f"- **`{entry['pypi']}=={entry['version']}`** - `import {entry['import_name']}`")
             lines.append(f"  - {entry['hint']}")
     else:
         lines.append("_(none installed)_")
     lines.append("")
 
     if manifest["optional_missing"]:
-        lines.append("## Optional (NOT installed — do NOT import)")
+        lines.append("## Optional (NOT installed - do NOT import)")
         lines.append("")
         for mod, entry in manifest["optional_missing"].items():
-            lines.append(f"- `{entry['pypi']}` — not available in this environment")
+            lines.append(f"- `{entry['pypi']}` - not available in this environment")
         lines.append("")
 
     lines.append("## Python standard library (allowed)")
@@ -151,8 +151,8 @@ def render_markdown(manifest: dict) -> str:
     lines.append("1. Import only from the lists above")
     lines.append("2. No I/O (files, sockets, SQLite, network)")
     lines.append("3. No logging or global state")
-    lines.append("4. Pure functions — do not mutate caller state unless documented")
-    lines.append("5. Deterministic — do not read wall-clock time inside algos")
+    lines.append("4. Pure functions - do not mutate caller state unless documented")
+    lines.append("5. Deterministic - do not read wall-clock time inside algos")
     lines.append("6. Type-hint the public API")
     lines.append("7. Preserve function signatures so existing callers keep working")
     lines.append("")

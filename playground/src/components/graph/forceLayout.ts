@@ -46,7 +46,7 @@ interface ForceLink extends SimulationLinkDatum<ForceNode> {
 }
 
 // ---------------------------------------------------------------------------
-// Live simulation — Obsidian-style elastic physics.
+// Live simulation - Obsidian-style elastic physics.
 //
 // Performance:
 //  - Tick callback reuses node array, only updates position objects
@@ -85,7 +85,7 @@ export function createLiveSimulation(
     .filter(e => nodeMap.has(e.source) && nodeMap.has(e.target))
     .map(e => ({ source: e.source, target: e.target }))
 
-  // Pre-allocate output array — reuse on every tick instead of .map()
+  // Pre-allocate output array - reuse on every tick instead of .map()
   const outputNodes: Node[] = forceNodes.map(fn => ({
     ...fn.rfNode,
     position: { x: fn.x || 0, y: fn.y || 0 },
@@ -109,10 +109,10 @@ export function createLiveSimulation(
     .on('tick', () => {
       tickCount++
       // During initial settling (high alpha), update every tick.
-      // Once cooled, update every 3rd tick — positions barely change.
+      // Once cooled, update every 3rd tick - positions barely change.
       if (simulation.alpha() < 0.05 && tickCount % 3 !== 0) return
 
-      // Mutate pre-allocated output — no new objects
+      // Mutate pre-allocated output - no new objects
       for (let i = 0; i < forceNodes.length; i++) {
         outputNodes[i].position.x = forceNodes[i].x || 0
         outputNodes[i].position.y = forceNodes[i].y || 0

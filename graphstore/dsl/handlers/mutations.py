@@ -449,7 +449,7 @@ class MutationHandlers:
                 count=1,
             )
         except Exception:
-            # Roll back every surface we touched — mirrors _batch.
+            # Roll back every surface we touched - mirrors _batch.
             self.store._edges_by_type = saved_edges
             self.store._edge_keys = saved_edge_keys
             self.store.node_tombstones = saved_tombstones

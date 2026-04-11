@@ -1,4 +1,4 @@
-"""FastEmbed wrapper — Qdrant's lightweight embedder library.
+"""FastEmbed wrapper - Qdrant's lightweight embedder library.
 
 FastEmbed ships pre-exported ONNX weights for ~30 popular embedding models
 (BGE, mxbai, e5, snowflake, jina-v2, MiniLM, nomic) and runs them through
@@ -7,7 +7,7 @@ tokenizers, so adding fastembed is a small delta (~20 MB of Python glue
 and small deps) that unlocks strong encoder embedders without torch.
 
 Use this instead of the custom OnnxHFEmbedder path for any model FastEmbed
-already knows about — FastEmbed handles model downloading, tokenizer setup,
+already knows about - FastEmbed handles model downloading, tokenizer setup,
 asymmetric query/passage prefixes (for e5 and bge), and batched inference.
 """
 
@@ -21,9 +21,9 @@ class FastEmbedEmbedder(Embedder):
 
     FastEmbed exposes three encode methods:
 
-    - ``embed(texts)`` — generic; no prefix applied
-    - ``query_embed(texts)`` — adds the query prefix for asymmetric models
-    - ``passage_embed(texts)`` — adds the passage/document prefix
+    - ``embed(texts)`` - generic; no prefix applied
+    - ``query_embed(texts)`` - adds the query prefix for asymmetric models
+    - ``passage_embed(texts)`` - adds the passage/document prefix
 
     For symmetric models (MiniLM, bge-small-zh) all three produce the same
     output. For asymmetric retrieval models (e5, bge-*-en-v1.5) using

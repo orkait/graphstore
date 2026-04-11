@@ -66,12 +66,12 @@ class CoreStore:
         self._dirty_edges = True
         self._dirty_strings = True
 
-        # Live mask / live slots version cache — invalidated on every mutation
+        # Live mask / live slots version cache - invalidated on every mutation
         self._live_version: int = 0
         self._live_mask_cache: dict[str | None, tuple[int, np.ndarray]] = {}
         self._live_slots_cache: dict[str | None, tuple[int, np.ndarray]] = {}
 
-        # Self-calibrating ceiling estimate — updated every 1000 puts via
+        # Self-calibrating ceiling estimate - updated every 1000 puts via
         # _recalibrate_ceiling_estimate().  Starts at the static default and
         # converges toward the real per-node footprint for this schema.
         self._bytes_per_node_estimate: float = float(BYTES_PER_NODE_ESTIMATE)
@@ -101,7 +101,7 @@ class CoreStore:
 
         Called every 1000 put_node operations.  Uses skip_csr=True to avoid
         triggering an expensive CSR rebuild mid-write.  Vector store memory is
-        NOT included here because CoreStore has no reference to it — the
+        NOT included here because CoreStore has no reference to it - the
         estimate therefore covers the core footprint only (arrays, columns,
         string table, edge lists).  For schemas with no embedder this is
         essentially exact; for schemas with embeddings the ceiling will be
@@ -652,7 +652,7 @@ class CoreStore:
         )
 
     def _has_time_sensitive_visibility(self) -> bool:
-        """True when TTL or retracted columns exist — prevents stale cache hits."""
+        """True when TTL or retracted columns exist - prevents stale cache hits."""
         return (
             self.columns.has_column("__expires_at__")
             or self.columns.has_column("__retracted__")
@@ -750,7 +750,7 @@ class CoreStore:
         return d
 
     def _materialize_bulk(self, slots: np.ndarray) -> list[dict]:
-        """Vectorized bulk materialization — delegates to algos.materialization."""
+        """Vectorized bulk materialization - delegates to algos.materialization."""
         from graphstore.algos.materialization import materialize_bulk
         return materialize_bulk(
             slots=slots,

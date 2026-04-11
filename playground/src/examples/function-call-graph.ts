@@ -1,6 +1,6 @@
 export const functionCallGraph = {
   name: 'Function Call Graph',
-  description: '5 functions with calls edges — diamond + chain pattern',
+  description: '5 functions with calls edges - diamond + chain pattern',
   script: `CREATE NODE "main" kind = "function" name = "main" file = "app.py"
 CREATE NODE "parse_args" kind = "function" name = "parse_args" file = "cli.py"
 CREATE NODE "validate" kind = "function" name = "validate" file = "utils.py"

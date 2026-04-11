@@ -16,7 +16,7 @@ EXTENSION_MAP = {
     "wav": "audio", "mp3": "audio", "ogg": "audio", "flac": "audio",
 }
 
-# Formats only docling can handle — added when docling is installed
+# Formats only docling can handle - added when docling is installed
 _DOCLING_EXCLUSIVE = {
     "tex": "docling",           # LaTeX
     "adoc": "docling",          # AsciiDoc

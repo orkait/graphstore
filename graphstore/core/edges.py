@@ -4,7 +4,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 
 from graphstore.algos.edges_ops import (
-    resize_csr,  # noqa: F401 — re-export
+    resize_csr,  # noqa: F401 - re-export
     build_typed_csrs,
 )
 

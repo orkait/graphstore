@@ -26,22 +26,22 @@ Read this before you touch an ingestion loop.
 
 graphstore is not one thing. It is three storage engines stitched together behind one query language, plus a pile of feature layers that reach into them. Treating it as "just a vector store" leaves most of the value on the table.
 
-**The three storage engines** — each is an independent class with its own state and lifecycle:
+**The three storage engines** - each is an independent class with its own state and lifecycle:
 
-1. **Graph engine** (`graphstore/core/`) — `CoreStore` holds columnar node arrays (numpy), sparse CSR edge matrices (scipy), a string intern table, and tombstone-based deletion. This is the data plane for structured fields + the relationship graph. Every field you set lives in a typed numpy column. `node_ids`, `node_kinds`, `id_to_slot`, `_edges_by_type` are the load-bearing structures.
-2. **Vector engine** (`graphstore/vector/`) — `VectorStore` wraps a usearch HNSW index over `(slot, vector)` pairs with cosine metric. `VectorStore.search(query, k, mask)` returns top-k slot ids filtered by a boolean live mask.
-3. **Document engine** (`graphstore/document/`) — `DocumentStore` is SQLite multi-table storage (`documents`, `summaries`, `doc_metadata`, `images`) with an FTS5 virtual table (`doc_fts`) over summaries. This is where BM25 lives. `put_summary(slot, text, ...)` writes both the row AND the FTS index.
+1. **Graph engine** (`graphstore/core/`) - `CoreStore` holds columnar node arrays (numpy), sparse CSR edge matrices (scipy), a string intern table, and tombstone-based deletion. This is the data plane for structured fields + the relationship graph. Every field you set lives in a typed numpy column. `node_ids`, `node_kinds`, `id_to_slot`, `_edges_by_type` are the load-bearing structures.
+2. **Vector engine** (`graphstore/vector/`) - `VectorStore` wraps a usearch HNSW index over `(slot, vector)` pairs with cosine metric. `VectorStore.search(query, k, mask)` returns top-k slot ids filtered by a boolean live mask.
+3. **Document engine** (`graphstore/document/`) - `DocumentStore` is SQLite multi-table storage (`documents`, `summaries`, `doc_metadata`, `images`) with an FTS5 virtual table (`doc_fts`) over summaries. This is where BM25 lives. `put_summary(slot, text, ...)` writes both the row AND the FTS index.
 
 A single node can live in **all three at once**: row in numpy columns + vector in usearch + entry in FTS5.
 
 **Plus feature layers on top:**
 
-- **DSL** (`graphstore/dsl/`) — Lark LALR(1) grammar compiled to 70+ AST dataclasses, handler-registry dispatch. The unified interface to all three engines.
-- **Embedding** (`graphstore/embedding/`) — pluggable embedder protocol (model2vec default, FastEmbed for BGE/e5/mxbai/nomic, OnnxHF for EmbeddingGemma/Harrier).
-- **Beliefs** — `ASSERT` / `RETRACT` / `PROPAGATE` write reserved columns (`__confidence__`, `__retracted__`, `__source__`) on the Graph engine.
-- **Evolution** (`graphstore/evolve.py`) — `EvolutionEngine`, opt-in. WHEN/THEN rules that self-tune graphstore's own runtime parameters based on live signals.
-- **Ingest pipeline** (`graphstore/ingest/`) — file-to-graph routing (MarkItDown → PyMuPDF4LLM → Docling), chunker, vision. Used by the `INGEST` DSL verb.
-- **Algos** (`graphstore/algos/`) — 17 pure numpy/scipy primitives under a strict purity gate. Tunable in isolation.
+- **DSL** (`graphstore/dsl/`) - Lark LALR(1) grammar compiled to 70+ AST dataclasses, handler-registry dispatch. The unified interface to all three engines.
+- **Embedding** (`graphstore/embedding/`) - pluggable embedder protocol (model2vec default, FastEmbed for BGE/e5/mxbai/nomic, OnnxHF for EmbeddingGemma/Harrier).
+- **Beliefs** - `ASSERT` / `RETRACT` / `PROPAGATE` write reserved columns (`__confidence__`, `__retracted__`, `__source__`) on the Graph engine.
+- **Evolution** (`graphstore/evolve.py`) - `EvolutionEngine`, opt-in. WHEN/THEN rules that self-tune graphstore's own runtime parameters based on live signals.
+- **Ingest pipeline** (`graphstore/ingest/`) - file-to-graph routing (MarkItDown → PyMuPDF4LLM → Docling), chunker, vision. Used by the `INGEST` DSL verb.
+- **Algos** (`graphstore/algos/`) - 17 pure numpy/scipy primitives under a strict purity gate. Tunable in isolation.
 
 **Optional subsystems** (off by default): **Vault** (markdown notebook, `graphstore/vault/`) and **Voice** (Moonshine STT + Piper TTS).
 
@@ -69,7 +69,7 @@ A single node can live in all four at once. When you CREATE a node with `EMBED c
 | `RECALL FROM "id" DEPTH k` | edges | Spreading activation from a known node |
 | `TRAVERSE`, `PATH`, `MATCH` | edges | Graph walks |
 
-**Critical:** `REMEMBER` does NOT use graph edges. Adding edges helps `RECALL`, `TRAVERSE`, `PATH` — NOT `REMEMBER`. If you build a beautiful entity graph and then only call REMEMBER, the graph is invisible. This is the #1 trap.
+**Critical:** `REMEMBER` does NOT use graph edges. Adding edges helps `RECALL`, `TRAVERSE`, `PATH` - NOT `REMEMBER`. If you build a beautiful entity graph and then only call REMEMBER, the graph is invisible. This is the #1 trap.
 
 ## The golden ingestion pattern
 
@@ -90,7 +90,7 @@ gs.execute(
 
 Why:
 
-- `REQUIRED` + typed fields pre-allocate the numpy column with the correct dtype. Without this, graphstore infers the dtype on the first write — which works but locks you in and costs a branch on every subsequent write.
+- `REQUIRED` + typed fields pre-allocate the numpy column with the correct dtype. Without this, graphstore infers the dtype on the first write - which works but locks you in and costs a branch on every subsequent write.
 - `EMBED content` tells the engine "when this kind is created, auto-embed the `content` field". You do not need to pass a `DOCUMENT` clause or call `_embed_and_store` manually. One source of truth.
 - Typed `string` fields become `int32_interned` columns which make `WHERE session = "..."` vectorized-fast via the string table.
 
@@ -132,7 +132,7 @@ Do NOT wrap ingestion in `BEGIN ... COMMIT` (BATCH) for bulk loads. BATCH does a
 
 ### 4. Time is a special column
 
-`__created_at__` and `__updated_at__` are set to wall clock time on every `CREATE NODE` and `UPDATE NODE`. They are reserved. **There is no DSL way to override them** — no `CREATE NODE ... AT "2023-05-30"` syntax.
+`__created_at__` and `__updated_at__` are set to wall clock time on every `CREATE NODE` and `UPDATE NODE`. They are reserved. **There is no DSL way to override them** - no `CREATE NODE ... AT "2023-05-30"` syntax.
 
 REMEMBER's recency signal is `exp(-age_days / 30)` where `age_days = (now - __updated_at__) / day_ms`. If all your nodes get `now_ms` at ingest, every node has `recency = 1.0` → the recency signal contributes no differential ranking → effectively 4-signal fusion.
 
@@ -150,7 +150,7 @@ This is a private API. It's the right tool when you have true timestamps (docume
 
 Every `CREATE EDGE` appends to `_edges_by_type` and sets `_edges_dirty = True`. On the first read that needs the CSR matrix, `_rebuild_edges` fires and reconstructs the whole thing. This is O(total_edges).
 
-Bulk-create all edges before the first read. Do not interleave CREATE EDGE with NODE / TRAVERSE queries — you'll trigger a rebuild per interleaving point.
+Bulk-create all edges before the first read. Do not interleave CREATE EDGE with NODE / TRAVERSE queries - you'll trigger a rebuild per interleaving point.
 
 ### 6. Chain messages with `next` edges
 
@@ -163,7 +163,7 @@ for i in range(n - 1):
 
 ### 7. If you want cross-session reasoning, build an entity graph
 
-This is the step most ingestion loops skip. Graphstore can do things a vector store cannot — but only if the graph is actually built.
+This is the step most ingestion loops skip. Graphstore can do things a vector store cannot - but only if the graph is actually built.
 
 ```python
 # Regex-based capitalized-phrase extraction is fine for a first pass.
@@ -188,7 +188,7 @@ Then at query time:
 recall = gs.execute('RECALL FROM "ent:max" DEPTH 2 LIMIT 20')
 ```
 
-Now RECALL surfaces every message that mentions Max across every session. No vector store can do this without ALSO running cross-session similarity — which is noisier and slower.
+Now RECALL surfaces every message that mentions Max across every session. No vector store can do this without ALSO running cross-session similarity - which is noisier and slower.
 
 **Do NOT `EMBED name` on entity nodes.** Short entity names make bad vectors (one or two tokens). Let entities live in the graph layer only. If you need entity → vector routes, go through the messages that mention them.
 
@@ -198,7 +198,7 @@ Now RECALL surfaces every message that mentions Max across every session. No vec
 
 - `INGEST "file.pdf" ...` (via the ingest engine)
 - `DocumentStore.put_summary(slot, text, ...)` (direct Python API)
-- `CREATE NODE ... DOCUMENT "text"` does NOT add to `doc_fts` — it only writes to the `documents` blob table
+- `CREATE NODE ... DOCUMENT "text"` does NOT add to `doc_fts` - it only writes to the `documents` blob table
 
 If you use plain `CREATE NODE` (no INGEST, no put_summary), **you have no BM25 signal**. REMEMBER degrades to vector + recency + confidence + recall_count.
 
@@ -252,7 +252,7 @@ Use when: you have an anchor concept (entity, topic, person) and want everything
 
 ### `TRAVERSE`, `PATH`, `ANCESTORS`, `DESCENDANTS`, `MATCH`
 
-Deterministic graph walks without activation scoring. Use for structured queries over the graph — "what called this function", "path from A to B", "all children of this parent".
+Deterministic graph walks without activation scoring. Use for structured queries over the graph - "what called this function", "path from A to B", "all children of this parent".
 
 ## Gotchas we learned the hard way
 
@@ -268,7 +268,7 @@ Deterministic graph walks without activation scoring. Use for structured queries
 
 For temporal-reasoning questions, real `__updated_at__` values let `exp(-age_days/30)` discriminate. But if the data is years old (say, a 2023 conversation dataset being evaluated in 2026), every message's recency collapses to `exp(-1100/30) ≈ 0`. The signal is dead AND the ranking is subtly disturbed if some sessions happen to be closer to the question date than the answer-bearing session.
 
-For static benchmarks, leaving the default wall-clock `now_ms` on every node produces a uniform `recency = 1.0` which contributes zero differential signal — BUT it does not hurt. For temporal benchmarks, you need real timestamps AND you need to be thoughtful about which values land where.
+For static benchmarks, leaving the default wall-clock `now_ms` on every node produces a uniform `recency = 1.0` which contributes zero differential signal - BUT it does not hurt. For temporal benchmarks, you need real timestamps AND you need to be thoughtful about which values land where.
 
 **Rule of thumb:** override timestamps only when you KNOW the question-time vs data-time relationship. Otherwise leave them at wall clock.
 
@@ -307,7 +307,7 @@ The context manager is per-call. If you have 500 records and call `ingest(record
 
 ### G10. Single-writer is a hard rule
 
-There is no concurrency in the write path. `queued=True` installs a submission queue with a single worker (the flag name is honest — it's a queue, not parallelism). If you try to call `execute` from two threads on a `queued=False` GraphStore, you will get silent corruption of `id_to_slot` and `_edges_by_type`. This is architectural and will not be fixed — see `skills/.../docs/single-writer.md` (TODO) or the README thread safety section.
+There is no concurrency in the write path. `queued=True` installs a submission queue with a single worker (the flag name is honest - it's a queue, not parallelism). If you try to call `execute` from two threads on a `queued=False` GraphStore, you will get silent corruption of `id_to_slot` and `_edges_by_type`. This is architectural and will not be fixed - see `skills/.../docs/single-writer.md` (TODO) or the README thread safety section.
 
 ## Patterns by use case
 
@@ -412,10 +412,10 @@ Run through this top to bottom when REMEMBER results look worse than expected.
 1. **Is `doc_fts` actually populated?** Run `SELECT COUNT(*) FROM doc_fts`. If zero, your BM25 leg is dead. Either switch to INGEST or call `put_summary` per node. Expected: ~1 row per message/chunk.
 2. **Do your nodes have vectors?** Run `gs._vector_store.count()`. Should match your live message count. If zero, your embedder silently failed or the schema EMBED field isn't set correctly.
 3. **Is `__confidence__` set anywhere?** If not, the confidence signal contributes a flat 1.0 (default) which is fine but uninformative. Set it via ASSERT or `set_reserved` if you have ground-truth confidence scores.
-4. **Is `__updated_at__` all equal to wall-clock ingest time?** Then recency contributes a flat 1.0. That is actually fine for static corpora — see G3. Only fix this if you actually need temporal discrimination.
+4. **Is `__updated_at__` all equal to wall-clock ingest time?** Then recency contributes a flat 1.0. That is actually fine for static corpora - see G3. Only fix this if you actually need temporal discrimination.
 5. **Are you calling REMEMBER for a graph-shaped question?** Multi-session and multi-entity questions want RECALL, not REMEMBER. The fix is to combine both in your adapter.
 6. **Did you filter out the answer with `WHERE`?** A WHERE clause applied post-candidates can shrink results to zero. Remove the filter and see if results come back. A common mistake is `WHERE role = "user"` when the answer lives in an assistant turn.
-7. **Are your edges actually reaching the CSR matrix?** Run a single `TRAVERSE FROM "any_node" DEPTH 1` and verify you see neighbors. If not, the edge builder hasn't flushed yet — do a no-op query to trigger `_ensure_edges_built`.
+7. **Are your edges actually reaching the CSR matrix?** Run a single `TRAVERSE FROM "any_node" DEPTH 1` and verify you see neighbors. If not, the edge builder hasn't flushed yet - do a no-op query to trigger `_ensure_edges_built`.
 8. **Is your embedder dimension mismatch?** If you swap embedders mid-run, the vector index gets poisoned with mixed-dim vectors. `SYS REEMBED` fixes it.
 9. **Are you competing for vector slots with non-content nodes?** If you EMBED entity / session / metadata nodes, they contaminate vector search results. Remove EMBED from any kind that isn't the primary content.
 10. **Are you using `importance` expecting REMEMBER to read it?** It doesn't. Use `__confidence__`.

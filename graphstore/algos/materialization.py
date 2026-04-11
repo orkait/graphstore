@@ -34,7 +34,7 @@ def materialize_bulk(
         dtypes: {field_name: "int32_interned" | "int64" | "float64" | ...}.
 
     Returns:
-        list[dict] — each dict has "id", "kind", plus any present field values.
+        list[dict] - each dict has "id", "kind", plus any present field values.
         Reserved fields (name starts AND ends with "_") are skipped.
     """
     if len(slots) == 0:

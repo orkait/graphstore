@@ -1,7 +1,7 @@
 """LlamaIndex VectorStoreIndex baseline adapter.
 
 Uses llama-index-core's VectorStoreIndex with a SimpleVectorStore and a
-fastembed-backed embedder. No LLM — retrieval only. Represents "just use
+fastembed-backed embedder. No LLM - retrieval only. Represents "just use
 LlamaIndex's default memory/retrieval pattern."
 
 Same bge-small embedder as graphstore and chroma for apples-to-apples.

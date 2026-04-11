@@ -147,7 +147,7 @@ class EvolutionEngine:
     def __init__(self, gs, conn, config):
         """
         Args:
-            gs: GraphStore instance (live ref; not weakref — engine lifetime == gs lifetime)
+            gs: GraphStore instance (live ref; not weakref - engine lifetime == gs lifetime)
             conn: sqlite3.Connection or None (in-memory mode)
             config: EvolutionConfig
         """
@@ -157,7 +157,7 @@ class EvolutionEngine:
         self._rules: dict[str, EvolutionRule] = {}
         self._evaluating = False
 
-        # Params with no live runtime field — tracked here
+        # Params with no live runtime field - tracked here
         self._live_params: dict = {}
 
         self._load_from_db()
@@ -195,7 +195,7 @@ class EvolutionEngine:
         if rule.cooldown < self._config.min_cooldown:
             rule.cooldown = self._config.min_cooldown
 
-        # Conflict detection: warn only when same param + same priority — that is
+        # Conflict detection: warn only when same param + same priority - that is
         # a genuinely unresolvable conflict (execution order becomes insertion-
         # dependent). Different priorities on the same param is intentional design;
         # the priority system resolves it at runtime.
@@ -206,7 +206,7 @@ class EvolutionEngine:
                 for ea in er.actions:
                     if ea.kind == action.kind and ea.param == action.param:
                         warnings.warn(
-                            f"Rule '{rule.name}': unresolvable conflict with rule '{er.name}' —"
+                            f"Rule '{rule.name}': unresolvable conflict with rule '{er.name}' -"
                             f" both target param '{action.param}' via '{action.kind}' at priority {rule.priority}",
                             UserWarning, stacklevel=3,
                         )
@@ -504,7 +504,7 @@ class EvolutionEngine:
                 key=lambda r: r.priority,
             )
 
-            # Phase 1: collect firing rules (frozen snapshot — no side effects yet)
+            # Phase 1: collect firing rules (frozen snapshot - no side effects yet)
             pending: list[tuple[EvolutionRule, list[Action]]] = []
             for rule in enabled:
                 now = time.time()
@@ -527,7 +527,7 @@ class EvolutionEngine:
                     key = (action.kind, action.param) if action.kind != "run" else ("run", action.param)
                     prev = self._get_param(action.param) if action.kind != "run" else None
 
-                    # Conflict check (only for set/adjust — not run/add/remove)
+                    # Conflict check (only for set/adjust - not run/add/remove)
                     if action.kind in ("set", "adjust") and key in claimed:
                         rule_events.append({"param": action.param, "status": "skipped:conflict"})
                         continue
@@ -564,7 +564,7 @@ class EvolutionEngine:
                 events.append(event)
 
             # Phase 3: execute RUN commands
-            # Reentrancy guard (self._evaluating = True) is still active — prevents
+            # Reentrancy guard (self._evaluating = True) is still active - prevents
             # recursive evolution firing if a RUN action triggers _check_health.
             for rule_name, cmd in run_queue:
                 try:

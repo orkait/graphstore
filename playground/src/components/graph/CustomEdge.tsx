@@ -23,7 +23,7 @@ export const CustomEdge = memo(function CustomEdge(props: EdgeProps) {
   const kind = (data?.kind as string) || ''
   const color = getEdgeColor(kind)
 
-  // Primitive selectors — stable, no unnecessary re-renders
+  // Primitive selectors - stable, no unnecessary re-renders
   const hoveredNodeId = useFlowStore((st) => st.hoveredNodeId)
   const highlightedEdges = useGraphStore((st) => st.highlightedEdges)
   const highlightedNodeIds = useGraphStore((st) => st.highlightedNodeIds)
