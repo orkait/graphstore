@@ -375,11 +375,10 @@ def compact_tombstones_safe(
     vector_store=None,
     document_store=None,
 ) -> dict:
-    """Crash-safe compact_tombstones: pre/post checkpoint + sentinel sandwich.
-
-    On crash mid-compaction, deserializer.load() re-runs compact in-memory
-    from the pre-compaction blobs; GraphStore.__init__ finishes DocStore
-    orphan cleanup and clears the sentinel.
+    """Crash-safe compact_tombstones using an atomic ATTACH transaction.
+    
+    Eliminates the double-checkpoint IO trap. If a crash occurs, SQLite 
+    rolls back both the blobs and the documents DB automatically.
     """
     if conn is None:
         return compact_tombstones(store, vector_store, document_store)
@@ -387,29 +386,154 @@ def compact_tombstones_safe(
         return {"compacted": 0}
 
     from graphstore.persistence.serializer import checkpoint as _checkpoint
-    import json, time
 
-    # Phase 1: flush pre-compaction state
-    _checkpoint(store, schema, conn, force=True)
-
-    # Phase 2: mark sentinel
     n = store._next_slot
-    live_count = n - len(store.node_tombstones)
-    conn.execute(
-        "INSERT OR REPLACE INTO metadata VALUES ('compaction_sentinel', ?)",
-        (json.dumps({"ts": time.time(), "pre_next_slot": n, "pre_live_count": live_count}),),
-    )
-    conn.commit()
+    live_mask = _algo_build_live_mask(store.node_ids, store.node_tombstones, n)
+    old_to_new, new_count = _algo_slot_remap_plan(live_mask)
+    live_slots_arr = np.nonzero(live_mask)[0]
 
-    # Phase 3: compact
-    result = compact_tombstones(store, vector_store, document_store)
+    if new_count == n:
+        return {"compacted": 0}
 
-    # Phase 4: flush post state + clear sentinel
-    _checkpoint(store, schema, conn, force=True)
-    conn.execute("DELETE FROM metadata WHERE key = 'compaction_sentinel'")
-    conn.commit()
+    old_to_new_dict = {int(old): int(old_to_new[old]) for old in live_slots_arr}
 
-    return result
+    attached = False
+    if document_store is not None and not document_store._temp:
+        # Flush any pending transactions in DocumentStore before attaching
+        document_store._conn.commit()
+        conn.execute(f"ATTACH DATABASE '{document_store._path}' AS docs")
+        attached = True
+
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+
+        # 1. Atomic Document Remapping via ATTACH
+        if attached:
+            conn.execute("CREATE TEMP TABLE _live_slots (slot INT PRIMARY KEY)")
+            conn.executemany("INSERT INTO _live_slots VALUES (?)", [(s,) for s in old_to_new_dict.keys()])
+
+            _ORPHAN_COLS = [
+                ("docs.documents", "slot"),
+                ("docs.summaries", "slot"),
+                ("docs.images", "slot"),
+                ("docs.doc_metadata", "doc_slot"),
+            ]
+            for tbl, col in _ORPHAN_COLS:
+                conn.execute(
+                    f"DELETE FROM {tbl} WHERE {col} >= 0 AND {col} < ? "
+                    f"AND {col} NOT IN (SELECT slot FROM _live_slots)",
+                    (n,),
+                )
+
+            remapped = [(old, new) for old, new in old_to_new_dict.items() if old != new]
+            if remapped:
+                conn.execute("CREATE TEMP TABLE _slot_remap (old_slot INT PRIMARY KEY, new_slot INT)")
+                conn.executemany("INSERT INTO _slot_remap VALUES (?,?)", remapped)
+
+                _REMAP_COLS = [
+                    ("docs.documents", "slot"),
+                    ("docs.summaries", "slot"),
+                    ("docs.summaries", "doc_slot"),
+                    ("docs.images", "slot"),
+                    ("docs.doc_metadata", "doc_slot"),
+                ]
+                for tbl, col in _REMAP_COLS:
+                    conn.execute(f"UPDATE {tbl} SET {col} = -(({col}) + 1) WHERE {col} IN (SELECT old_slot FROM _slot_remap)")
+                for tbl, col in _REMAP_COLS:
+                    conn.execute(f"UPDATE {tbl} SET {col} = (SELECT new_slot FROM _slot_remap WHERE old_slot = -(({tbl}.{col}) + 1)) WHERE {col} IN (SELECT -(old_slot + 1) FROM _slot_remap)")
+
+                conn.execute("DROP TABLE _slot_remap")
+            conn.execute("DROP TABLE _live_slots")
+
+            conn.execute("DELETE FROM docs.doc_fts")
+            rows = conn.execute("SELECT slot, summary FROM docs.summaries").fetchall()
+            for slot, summary in rows:
+                conn.execute("INSERT INTO docs.doc_fts (rowid, summary) VALUES (?, ?)", (slot, summary))
+
+        # 2. In-Memory Array Remapping
+        new_capacity = max(new_count * 2, store._capacity)
+        new_ids = np.full(new_capacity, -1, dtype=np.int32)
+        new_ids[:new_count] = store.node_ids[live_slots_arr]
+        new_kinds = np.zeros(new_capacity, dtype=np.int32)
+        new_kinds[:new_count] = store.node_kinds[live_slots_arr]
+
+        new_columns = {}
+        new_presences = {}
+        for field in list(store.columns._columns.keys()):
+            old_col = store.columns._columns[field]
+            old_pres = store.columns._presence[field]
+            dtype_str = store.columns._dtypes[field]
+            new_col = store.columns._make_sentinel_array(dtype_str, new_capacity)
+            new_pres = np.zeros(new_capacity, dtype=bool)
+            new_col[:new_count] = old_col[live_slots_arr]
+            new_pres[:new_count] = old_pres[live_slots_arr]
+            new_columns[field] = new_col
+            new_presences[field] = new_pres
+
+        new_edges = {}
+        for etype in list(store._edges_by_type.keys()):
+            remapped_edges = _algo_apply_slot_remap(store._edges_by_type[etype], old_to_new, n)
+            if remapped_edges:
+                new_edges[etype] = remapped_edges
+
+        # Vector Remapping
+        if vector_store is not None:
+            old_vectors = {}
+            for old_slot in live_slots_arr:
+                old_slot = int(old_slot)
+                if vector_store.has_vector(old_slot):
+                    old_vectors[old_slot] = vector_store.get_vector(old_slot)
+
+            vector_store._has_vector = np.zeros(new_capacity, dtype=bool)
+            vector_store._capacity = new_capacity
+            from usearch.index import Index
+            vector_store._index = Index(ndim=vector_store._dims, metric="cos", dtype="f32")
+            for old_slot, vec in old_vectors.items():
+                new_slot = old_to_new_dict[old_slot]
+                vector_store._index.add(new_slot, vec)
+                vector_store._has_vector[new_slot] = True
+
+        # 3. Apply to Store Pointers
+        store.node_ids = new_ids
+        store.node_kinds = new_kinds
+        store._capacity = new_capacity
+        store.node_tombstones.clear()
+        store.id_to_slot = {}
+        for slot in range(new_count):
+            str_id = int(new_ids[slot])
+            if str_id >= 0:
+                store.id_to_slot[str_id] = slot
+
+        for field in list(store.columns._columns.keys()):
+            store.columns._columns[field] = new_columns[field]
+            store.columns._presence[field] = new_presences[field]
+        store.columns._capacity = new_capacity
+
+        store._edges_by_type = new_edges
+        store._edge_keys = {(s, t, k) for k, edges in store._edges_by_type.items() for s, t, _d in edges}
+        store._next_slot = new_count
+        store._edges_dirty = True
+        store._ensure_edges_built()
+
+        for field in list(store._indexed_fields):
+            store.add_index(field)
+
+        store._dirty_nodes = True
+        store._dirty_columns = True
+        store._dirty_edges = True
+        store._dirty_strings = True
+
+        # 4. Atomic Flush of GraphStore Blobs
+        _checkpoint(store, schema, conn, force=True)
+
+    except Exception as e:
+        conn.execute("ROLLBACK")
+        raise e
+    finally:
+        if attached:
+            conn.execute("DETACH DATABASE docs")
+
+    return {"compacted": n - new_count}
 
 
 def optimize_all(

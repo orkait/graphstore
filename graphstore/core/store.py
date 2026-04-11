@@ -437,7 +437,13 @@ class CoreStore:
             (src_slot, tgt_slot, edge_data)
         )
         self._edge_data_idx.setdefault(kind, {})[(src_slot, tgt_slot)] = edge_data
-        self._edges_dirty = True
+        
+        # Add to dynamic edge buffer (L0) instead of forcing full CSR rebuild
+        weight = float(edge_data.get("weight", 1.0))
+        self._edge_matrices.add_dynamic(src_slot, tgt_slot, kind, self._next_slot, weight)
+        if self._edge_matrices._pending_edge_count > 10000:
+            self._edges_dirty = True
+            
         self._dirty_edges = True
         self._dirty_strings = True
         self._invalidate_live_cache()

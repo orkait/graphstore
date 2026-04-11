@@ -44,7 +44,9 @@ def topk_slot_order(
     k = min(eff_offset + eff_limit, total)
     if 0 < k < total:
         if descending:
-            part_idx = np.argpartition(-values, k)[:k]
+            # Partition largest k items to the end (no copy/negation overhead)
+            part_idx = np.argpartition(values, -k)[-k:]
+            # Sort only those k items descending
             sorted_idx = part_idx[np.argsort(-values[part_idx])]
         else:
             part_idx = np.argpartition(values, k)[:k]

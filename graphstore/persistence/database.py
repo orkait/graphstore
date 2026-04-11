@@ -33,6 +33,12 @@ def _create_tables(conn: sqlite3.Connection):
             timestamp REAL NOT NULL,
             statement TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS failed_wal_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp REAL NOT NULL,
+            statement TEXT NOT NULL,
+            error_msg TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS query_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp REAL NOT NULL,

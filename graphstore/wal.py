@@ -18,12 +18,13 @@ class WALManager:
 
     def __init__(self, runtime: RuntimeState, executor,
                  wal_hard_limit: int, auto_checkpoint_threshold: int,
-                 log_retention_days: int):
+                 log_retention_days: int, strict_recovery: bool = False):
         self._runtime = runtime
         self._executor = executor
         self._wal_hard_limit = wal_hard_limit
         self._auto_checkpoint_threshold = auto_checkpoint_threshold
         self._log_retention_days = log_retention_days
+        self._strict_recovery = strict_recovery
         self._replay_errors: list[dict] = []
 
     @property
@@ -76,17 +77,22 @@ class WALManager:
         conn = self._conn
         if conn is None:
             return
-        rows = conn.execute("SELECT statement FROM wal ORDER BY seq").fetchall()
+        rows = conn.execute("SELECT seq, statement FROM wal ORDER BY seq").fetchall()
         if not rows:
             return
         self._replay_errors.clear()
-        for (statement,) in rows:
+        
+        for seq, statement in rows:
             try:
                 ast = parse(statement)
                 if isinstance(ast, ast_nodes.CreateNode):
                     ast = ast_nodes.UpsertNode(id=ast.id, fields=ast.fields)
                 self._executor.execute(ast)
             except Exception as e:
+                if self._strict_recovery:
+                    logger.error(f"Fatal error during WAL replay (strict_recovery=True): {e}")
+                    raise GraphStoreError(f"Fatal recovery error on statement: {statement}") from e
+                    
                 err = {
                     "statement": statement[:500],
                     "error_type": type(e).__name__,
@@ -98,9 +104,21 @@ class WALManager:
                     "WAL replay statement failed: %s: %s - %s",
                     err["error_type"], err["error"], err["statement"],
                 )
+                
+                # Insert into dead letter queue
+                try:
+                    conn.execute(
+                        "INSERT INTO failed_wal_entries (timestamp, statement, error_msg) VALUES (?, ?, ?)",
+                        (time.time(), statement, err["error"])
+                    )
+                    conn.execute("DELETE FROM wal WHERE seq = ?", (seq,))
+                    conn.commit()
+                except Exception as dlq_e:
+                    logger.error(f"Failed to log to dead letter queue: {dlq_e}")
+                    
         if self._replay_errors:
             logger.warning(
-                "WAL replay completed with %d error(s). See SYS STATUS for details.",
+                "WAL replay completed with %d error(s). See SYS FAILED QUERIES for details.",
                 len(self._replay_errors),
             )
         if rows:
