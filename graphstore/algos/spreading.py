@@ -34,21 +34,25 @@ def spreading_activation(
     Returns a float64 activation array of the same length as live_mask.
     """
     n = len(live_mask)
-    activation = np.zeros(n, dtype=np.float64)
+    activation = np.zeros(n, dtype=np.float32)
     if cue_slot < 0 or cue_slot >= n:
-        return activation
+        return activation.astype(np.float64)
     activation[cue_slot] = 1.0
 
-    live_f = live_mask.astype(np.float64)
+    live_f = live_mask.astype(np.float32)
+    decay_f = np.float32(decay)
+    
     for _ in range(depth):
-        spread = matrix_t.dot(activation) * decay
-        activation = activation + spread
-        activation[:n] *= live_f
-
+        spread = matrix_t.dot(activation) * decay_f
+        activation += spread
+        np.multiply(activation, live_f, out=activation)
+    
     if importance is not None:
-        activation *= importance[:len(activation)]
+        imp_len = len(activation)
+        np.multiply(activation, importance[:imp_len].astype(np.float32), out=activation)
     if recency is not None:
-        activation *= recency[:len(activation)]
+        rec_len = len(activation)
+        np.multiply(activation, recency[:rec_len].astype(np.float32), out=activation)
 
     activation[cue_slot] = 0.0
-    return activation
+    return activation.astype(np.float64)
