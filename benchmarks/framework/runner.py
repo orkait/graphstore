@@ -37,6 +37,7 @@ def run_benchmark(
     config: dict[str, Any] | None = None,
     progress_every: int = 10,
     on_interrupt: Callable[[RunResult], None] | None = None,
+    qa_eval: bool = False,
 ) -> RunResult:
     """Run a full per-record pass.
 
@@ -117,15 +118,38 @@ def run_benchmark(
             if qres.tokens_used:
                 result.cost.query_tokens += qres.tokens_used
 
+            if qa_eval and qres.retrieved_memories:
+                from .llm_judge import generate_answer, judge_answer
+                answer = generate_answer(rec.question.question, qres.retrieved_memories)
+                correct = judge_answer(
+                    rec.question.question,
+                    rec.question.gold_answers,
+                    answer,
+                    category=rec.question.category,
+                )
+                if correct:
+                    result.quality.llm_judge_sum += 1.0
+                result.quality.llm_judge_n += 1
+                cat = rec.question.category
+                if cat and cat in result.quality._categories:
+                    bucket = result.quality._categories[cat]
+                    bucket.qa_n += 1
+                    if correct:
+                        bucket.qa_hits += 1
+
             if (i + 1) % progress_every == 0 or (i + 1) == n_records:
                 result.memory.snapshot_peak()
                 elapsed = time.perf_counter() - t0
                 rate = (i + 1) / elapsed if elapsed else 0
                 eta_s = (n_records - (i + 1)) / rate if rate else 0
+                qa_str = ""
+                if result.quality.llm_judge_n > 0:
+                    qa_str = f" qa={result.quality.llm_judge:.3f}"
                 print(
                     f"  [{adapter.name}] {i + 1}/{n_records} "
                     f"acc={result.quality.accuracy:.3f} "
-                    f"r@k={result.quality.recall_at_k:.3f} "
+                    f"r@k={result.quality.recall_at_k:.3f}"
+                    f"{qa_str} "
                     f"elapsed={elapsed:.0f}s eta={eta_s:.0f}s"
                 )
     except Exception:

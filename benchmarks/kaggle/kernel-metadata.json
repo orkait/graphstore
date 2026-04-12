@@ -1,0 +1,13 @@
+{
+  "id": "superkaiii/graphstore-chroma-jina-500",
+  "title": "GraphStore Chroma-BM25 Jina v5 Nano 500 records",
+  "code_file": "chroma_jina_500.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "competition_sources": [],
+  "dataset_sources": [],
+  "kernel_sources": []
+}
