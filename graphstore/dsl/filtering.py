@@ -46,10 +46,10 @@ class FilteringMixin:
             actual = data.get(expr.field)
             return actual in expr.values
         elif isinstance(expr, SimilarCondition):
-            # Semantic similarity cannot be evaluated per-node in a pure Python predicate
-            # without an active search context. We return False to indicate it must be
-            # handled by the vectorized query planner.
-            return False
+            # SIMILAR() requires vector search - cannot evaluate per-node.
+            # If we reach here, the vectorized path didn't handle it.
+            # Return True to pass through (don't silently reject).
+            return True
         elif isinstance(expr, DegreeCondition):
             return self._eval_degree_condition(expr, data)
         elif isinstance(expr, AndExpr):
@@ -302,9 +302,11 @@ class FilteringMixin:
             # search() returns (slots, distances)
             # We want dist <= 1.0 - threshold (since distance is 1.0 - sim)
             max_dist = 1.0 - expr.threshold
-            # We'll use a large k and adaptive search to find items matching base_mask
+            # Search with adaptive oversample - let the loop find all matches
+            search_k = min(n, int(base_mask.sum()))
             slots, dists = self._vector_store.search(
-                query_vec, k=min(n, 1000), mask=base_mask, oversample_factor=10
+                query_vec, k=max(search_k, 1), mask=base_mask,
+                oversample_factor=getattr(self, '_search_oversample', 10),
             )
             if len(slots) == 0:
                 return np.zeros(n, dtype=bool)
