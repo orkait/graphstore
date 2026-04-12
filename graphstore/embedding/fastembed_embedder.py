@@ -17,6 +17,7 @@ class FastEmbedEmbedder(Embedder):
         model_name: str,
         cache_dir: str | None = None,
         threads: int | None = None,
+        providers: list[str] | None = None,
     ):
         try:
             from fastembed import TextEmbedding
@@ -26,12 +27,16 @@ class FastEmbedEmbedder(Embedder):
                 "Install with: pip install 'graphstore[embed-fastembed]'"
             ) from e
 
+        kwargs: dict = dict(model_name=model_name)
+        if cache_dir:
+            kwargs["cache_dir"] = cache_dir
+        if threads:
+            kwargs["threads"] = threads
+        if providers:
+            kwargs["providers"] = providers
+
         self._model_name = model_name
-        self._model = TextEmbedding(
-            model_name=model_name,
-            cache_dir=cache_dir,
-            threads=threads,
-        )
+        self._model = TextEmbedding(**kwargs)
         self._dims = int(self._model.embedding_size)
 
     @property
