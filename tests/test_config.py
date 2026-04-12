@@ -68,13 +68,13 @@ class TestConfigFileIO:
         assert cfg == GraphStoreConfig()
 
     def test_saved_file_is_pretty_json(self, tmp_path):
-        cfg = GraphStoreConfig()
+        cfg = GraphStoreConfig(core=CoreConfig(ceiling_mb=128))
         path = tmp_path / "graphstore.json"
         save_config(cfg, path)
         content = path.read_text()
         parsed = json.loads(content)
         assert "core" in parsed
-        assert parsed["core"]["ceiling_mb"] == 256
+        assert parsed["core"]["ceiling_mb"] == 128
 
 
 class TestMergeKwargs:

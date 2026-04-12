@@ -165,6 +165,42 @@ class EdgeMatrices:
         self._dynamic_transpose_cache[edge_type] = result
         return result
 
+    def get_combined_transpose_split(self) -> tuple[csr_matrix | None, csr_matrix | None]:
+        """Cached transpose of combined-all matrix. Returns (base, delta) to avoid O(N) merge."""
+        base = None
+        if self._combined_all is not None:
+            if self._combined_transpose is None:
+                self._combined_transpose = self._combined_all.T.tocsr()
+            base = self._combined_transpose
+
+        if self._pending_edge_count == 0:
+            return base, None
+
+        srcs = []
+        tgts = []
+        data_list = []
+        for etype in self._dynamic_in:
+            for tgt, srcs_list in self._dynamic_in[etype].items():
+                for src in srcs_list:
+                    tgts.append(tgt)
+                    srcs.append(src)
+                    data_list.append(self._dynamic_weights.get(etype, {}).get((src, tgt), 1.0))
+
+        if not srcs:
+            return base, None
+
+        data = np.array(data_list, dtype=np.float32)
+        n = self._num_nodes
+        if base is not None:
+            n = max(n, base.shape[0])
+            
+        delta = csr_matrix((data, (tgts, srcs)), shape=(n, n))
+        
+        if base is not None and base.shape[0] < n:
+            base = resize_csr(base, n)
+            
+        return base, delta
+
     def get_combined_transpose(self) -> csr_matrix | None:
         """Cached transpose of combined-all matrix. Used by RECALL spreading activation."""
         if self._dynamic_combined_transpose is not None:

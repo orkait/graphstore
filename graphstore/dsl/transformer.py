@@ -7,6 +7,7 @@ from graphstore.dsl.ast_nodes import (
     ContainsCondition,
     LikeCondition,
     InCondition,
+    SimilarCondition,
     DegreeCondition,
     NotExpr,
     AndExpr,
@@ -528,8 +529,11 @@ class DSLTransformer(Transformer):
 
     def in_cond(self, args):
         field = str(args[0])
-        values = list(args[1:])
+        values = args[1:]
         return InCondition(field=field, values=values)
+
+    def similar_cond(self, args):
+        return SimilarCondition(field=str(args[0]), query=self._str(args[1]), threshold=float(args[2]))
 
     def degree_condition(self, args):
         degree_type = args[0]

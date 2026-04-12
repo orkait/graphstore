@@ -8,6 +8,7 @@ from graphstore.dsl.ast_nodes import (
     ContainsCondition,
     DegreeCondition,
     InCondition,
+    SimilarCondition,
     LikeCondition,
     NotExpr,
     OrExpr,
@@ -44,6 +45,11 @@ class FilteringMixin:
         elif isinstance(expr, InCondition):
             actual = data.get(expr.field)
             return actual in expr.values
+        elif isinstance(expr, SimilarCondition):
+            # Semantic similarity cannot be evaluated per-node in a pure Python predicate
+            # without an active search context. We return False to indicate it must be
+            # handled by the vectorized query planner.
+            return False
         elif isinstance(expr, DegreeCondition):
             return self._eval_degree_condition(expr, data)
         elif isinstance(expr, AndExpr):
@@ -179,13 +185,26 @@ class FilteringMixin:
         """Extract kind value from WHERE clause, including AND expressions."""
         if where is None:
             return None
-        expr = where.expr
+        expr = where if not hasattr(where, 'expr') else where.expr
         if isinstance(expr, Condition) and expr.field == "kind" and expr.op == "=":
             return expr.value
         if isinstance(expr, AndExpr):
             for op in expr.operands:
                 if isinstance(op, Condition) and op.field == "kind" and op.op == "=":
                     return op.value
+        return None
+
+    def _extract_similar_from_where(self, where) -> SimilarCondition | None:
+        """Extract SimilarCondition from WHERE clause, including AND expressions."""
+        if where is None:
+            return None
+        expr = where if not hasattr(where, 'expr') else where.expr
+        if isinstance(expr, SimilarCondition):
+            return expr
+        if isinstance(expr, AndExpr):
+            for op in expr.operands:
+                if isinstance(op, SimilarCondition):
+                    return op
         return None
 
     def _is_simple_kind_filter(self, where) -> bool:
@@ -200,15 +219,13 @@ class FilteringMixin:
         if isinstance(expr, Condition) and expr.field == "kind" and expr.op == "=":
             return None
         if isinstance(expr, AndExpr):
-            remaining = [
-                op for op in expr.operands
-                if not (isinstance(op, Condition) and op.field == "kind" and op.op == "=")
-            ]
-            if len(remaining) == 0:
+            new_ops = [op for op in expr.operands
+                       if not (isinstance(op, Condition) and op.field == "kind" and op.op == "=")]
+            if not new_ops:
                 return None
-            if len(remaining) == 1:
-                return remaining[0]
-            return AndExpr(operands=remaining)
+            if len(new_ops) == 1:
+                return new_ops[0]
+            return AndExpr(operands=new_ops)
         return expr
 
     def _contains_degree_condition(self, expr) -> bool:
@@ -272,6 +289,29 @@ class FilteringMixin:
             mask = columns.get_mask_in(expr.field, expr.values, n)
             if mask is None:
                 return None
+            return mask & base_mask
+
+        elif isinstance(expr, SimilarCondition):
+            if not self._vector_store or not self._embedder:
+                return None
+            # Vectorize the threshold constraint
+            query_vec = self._embedder.encode_queries([expr.query])[0]
+            # Use a large k to get all potentially similar nodes, then filter by threshold
+            # Since we have an adaptive oversampling loop, we can use it.
+            # But for a hard threshold, we want EVERYTHING above score.
+            # search() returns (slots, distances)
+            # We want dist <= 1.0 - threshold (since distance is 1.0 - sim)
+            max_dist = 1.0 - expr.threshold
+            # We'll use a large k and adaptive search to find items matching base_mask
+            slots, dists = self._vector_store.search(
+                query_vec, k=min(n, 1000), mask=base_mask, oversample_factor=10
+            )
+            if len(slots) == 0:
+                return np.zeros(n, dtype=bool)
+            
+            mask = np.zeros(n, dtype=bool)
+            valid = dists <= max_dist
+            mask[slots[valid]] = True
             return mask & base_mask
 
         elif isinstance(expr, AndExpr):

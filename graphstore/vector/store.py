@@ -47,16 +47,24 @@ class VectorStore:
             return np.array([], dtype=np.int64), np.array([], dtype=np.float32)
 
         if mask is not None:
-            # Oversample and filter
-            oversample = min(k * oversample_factor, count)
-            results = self._index.search(query, oversample)
-            valid = []
-            for key, dist in zip(results.keys, results.distances):
-                key = int(key)
-                if key < len(mask) and mask[key]:
-                    valid.append((key, float(dist)))
-                    if len(valid) >= k:
-                        break
+            # Adaptive oversample and filter
+            current_oversample = min(k * oversample_factor, count)
+            max_oversample = min(count, max(current_oversample * 16, 10000))
+            
+            while True:
+                results = self._index.search(query, current_oversample)
+                valid = []
+                for key, dist in zip(results.keys, results.distances):
+                    key = int(key)
+                    if key < len(mask) and mask[key]:
+                        valid.append((key, float(dist)))
+                        if len(valid) >= k:
+                            break
+                
+                if len(valid) >= k or current_oversample >= max_oversample or current_oversample >= count:
+                    break
+                current_oversample = min(current_oversample * 2, count)
+
             if not valid:
                 return np.array([], dtype=np.int64), np.array([], dtype=np.float32)
             slots = np.array([v[0] for v in valid], dtype=np.int64)

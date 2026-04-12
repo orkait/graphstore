@@ -1,5 +1,7 @@
 """MATCH pattern handlers."""
 
+import numpy as np
+
 from graphstore.dsl.handlers._registry import handles
 from graphstore.dsl.ast_nodes import MatchQuery, MatchPattern
 from graphstore.core.types import Result
@@ -49,16 +51,30 @@ class PatternHandlers:
                 return [], []
             current_slots = [start_slot]
         else:
-            all_nodes = self.store.get_all_nodes()
+            n_total = self.store._next_slot
+            mask = self._compute_live_mask(n_total)
+            kind = self._extract_kind_from_where(first_step.where)
+            if kind:
+                mask &= self.store._live_mask(kind)
+            
+            remaining = None
             if first_step.where:
-                all_nodes = [
-                    n for n in all_nodes if self._eval_where(first_step.where, n)
-                ]
-            current_slots = []
-            for n in all_nodes:
-                s = self._resolve_slot(n["id"])
-                if s is not None:
-                    current_slots.append(s)
+                remaining = self._strip_kind_from_expr(first_step.where)
+                if remaining:
+                    col_mask = self._try_column_filter(remaining, mask, n_total)
+                    if col_mask is not None:
+                        mask = col_mask
+                        remaining = None # fully handled
+            
+            current_slots = np.where(mask)[0].tolist()
+            if remaining:
+                # slow path fallback for remaining non-vectorizable filters
+                all_nodes = self.store._materialize_bulk(np.array(current_slots, dtype=np.int32))
+                filtered_slots = []
+                for i, node in enumerate(all_nodes):
+                    if self._eval_where(remaining, node):
+                        filtered_slots.append(current_slots[i])
+                current_slots = filtered_slots
 
         if not current_slots:
             return [], []
