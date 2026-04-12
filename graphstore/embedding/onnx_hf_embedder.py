@@ -251,6 +251,7 @@ class OnnxHFEmbedder(Embedder):
         pooling_mode: str = "mean",
         onnx_file: str | None = None,
         providers: list[str] | str | None = None,
+        gpu_mem_limit: int | None = None,
     ):
         try:
             import onnxruntime as ort
@@ -302,15 +303,30 @@ class OnnxHFEmbedder(Embedder):
             p in self._providers
             for p in ("CUDAExecutionProvider", "TensorrtExecutionProvider")
         )
+
+        provider_options = None
+        if gpu_mem_limit and uses_gpu:
+            provider_options = [
+                {"gpu_mem_limit": str(gpu_mem_limit)}
+                if p == "CUDAExecutionProvider" else {}
+                for p in self._providers
+            ]
+
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+        sess_kwargs: dict = {
+            "sess_options": sess_options,
+            "providers": self._providers,
+        }
+        if provider_options:
+            sess_kwargs["provider_options"] = provider_options
+
         model_bytes = _patch_gqa_for_cuda(onnx_path) if uses_gpu else None
         if model_bytes:
-            self._session = ort.InferenceSession(
-                model_bytes, providers=self._providers,
-            )
+            self._session = ort.InferenceSession(model_bytes, **sess_kwargs)
         else:
-            self._session = ort.InferenceSession(
-                str(onnx_path), providers=self._providers,
-            )
+            self._session = ort.InferenceSession(str(onnx_path), **sess_kwargs)
         self._input_names = {i.name for i in self._session.get_inputs()}
         self._needs_token_type_ids = "token_type_ids" in self._input_names
         self._needs_position_ids = "position_ids" in self._input_names
@@ -387,21 +403,7 @@ class OnnxHFEmbedder(Embedder):
         input_ids = np.array([e.ids for e in encoded], dtype=np.int64)
         attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
 
-        feed = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-        }
-        if self._needs_token_type_ids:
-            feed["token_type_ids"] = np.zeros_like(input_ids)
-        if self._needs_position_ids:
-            pos = attention_mask.cumsum(axis=1) - 1
-            feed["position_ids"] = np.maximum(pos, 0)
-        if self._kv_cache_specs:
-            for name, num_heads, head_dim, dtype in self._kv_cache_specs:
-                feed[name] = np.zeros((input_ids.shape[0], num_heads, 0, head_dim), dtype=dtype)
-
-        outputs = self._session.run(None, feed)
-        embeddings = outputs[self._hidden_output_idx]
+        embeddings = self._encode_feed_dict(input_ids, attention_mask)
 
         # Some ONNX exports (e.g. Harrier fp16) bake the SentenceTransformer
         # pooling head into the graph and return (batch, hidden_dim) directly.
@@ -424,3 +426,20 @@ class OnnxHFEmbedder(Embedder):
             pooled = l2_normalize(pooled)
 
         return pooled.astype(np.float32)
+
+    def _encode_feed_dict(self, input_ids: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
+        feed = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+        }
+        if self._needs_token_type_ids:
+            feed["token_type_ids"] = np.zeros_like(input_ids)
+        if self._needs_position_ids:
+            pos = attention_mask.cumsum(axis=1) - 1
+            feed["position_ids"] = np.maximum(pos, 0)
+        if self._kv_cache_specs:
+            for name, num_heads, head_dim, dtype in self._kv_cache_specs:
+                feed[name] = np.zeros((input_ids.shape[0], num_heads, 0, head_dim), dtype=dtype)
+        outputs = self._session.run(None, feed)
+        return outputs[self._hidden_output_idx]
+
