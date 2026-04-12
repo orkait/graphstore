@@ -17,13 +17,11 @@ WORKDIR /repo
 COPY pyproject.toml /repo/pyproject.toml
 RUN pip install \
         "numpy>=1.24" "scipy>=1.10" "lark>=1.1" "usearch>=2.0" \
-        "model2vec>=0.4" "msgspec>=0.18" "croniter>=6.0" "orjson>=3.11.8" \
-        "pyyaml>=6.0" "markitdown>=0.1" "pymupdf4llm>=0.1" "pymupdf>=1.20" \
-        "fastapi>=0.135.1" "httpx>=0.28.1" \
+        "model2vec>=0.4" "msgspec>=0.18" \
         "fastembed>=0.8" "psutil>=5.9" \
         "chromadb>=0.5" "rank-bm25>=0.2.2" \
-        "llama-index-core>=0.12" "llama-index-embeddings-fastembed>=0.3" \
-        "tokenizers>=0.20" "onnxruntime>=1.23"
+        "tokenizers>=0.20" "onnxruntime>=1.23" \
+        "llama-cpp-python>=0.3"
 
 COPY graphstore /repo/graphstore
 COPY benchmarks /repo/benchmarks

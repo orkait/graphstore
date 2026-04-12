@@ -40,13 +40,39 @@ class ChromaBM25Adapter:
         self._doc_texts: list[str] = []
         self._doc_meta: list[dict] = []
         self._emb_fn = None
+        self._external_embedder = self.config.get("_embedder_instance")
         self._embed_model = self.config.get(
             "embedder_model", "BAAI/bge-small-en-v1.5"
         )
         short = self._embed_model.split("/")[-1]
-        self.name = f"chroma-bm25-{short}"
+        emb_type = self.config.get("embedder", "fastembed")
+        self.name = f"chroma-bm25-{emb_type}-{short}"
 
     def _build_embedder(self):
+        if self._external_embedder is not None:
+            ext = self._external_embedder
+
+            class _ExternalFn:
+                def __call__(self, input):
+                    if isinstance(input, str):
+                        input = [input]
+                    return ext.encode_documents(input).tolist()
+
+                def embed_query(self, input):
+                    if isinstance(input, str):
+                        input = [input]
+                    return ext.encode_queries(input).tolist()
+
+                def embed_documents(self, input):
+                    if isinstance(input, str):
+                        input = [input]
+                    return ext.encode_documents(input).tolist()
+
+                def name(self) -> str:
+                    return ext.name
+
+            return _ExternalFn()
+
         try:
             import chromadb.utils.embedding_functions as ef
 

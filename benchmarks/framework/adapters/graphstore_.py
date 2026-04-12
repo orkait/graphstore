@@ -102,6 +102,19 @@ def _build_embedder(config: dict[str, Any]):
             dims=config.get("embedder_output_dims"),
             providers=providers,
         )
+    if name == "gguf":
+        from graphstore.embedding.llamacpp_embedder import LlamaCppEmbedder
+        gguf_path = config.get("embedder_gguf_path")
+        if not gguf_path:
+            raise ValueError("embedder=gguf requires embedder_gguf_path")
+        return LlamaCppEmbedder(
+            model_path=gguf_path,
+            n_ctx=int(config.get("embedder_max_length", 2048)),
+            n_gpu_layers=int(config.get("embedder_gpu_layers", 0)),
+            output_dims=config.get("embedder_output_dims"),
+            query_prefix=config.get("embedder_query_prefix", ""),
+            doc_prefix_template=config.get("embedder_doc_prefix", ""),
+        )
     raise ValueError(f"unknown embedder: {name!r}")
 
 

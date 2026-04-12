@@ -32,7 +32,7 @@ def main() -> int:
                    help="at most this many records per category")
     p.add_argument("--k", type=int, default=5)
     p.add_argument("--embedder", default="fastembed",
-                   choices=["model2vec", "fastembed", "onnx", "installed"])
+                   choices=["model2vec", "fastembed", "onnx", "installed", "gguf"])
     p.add_argument("--embedder-model", default="BAAI/bge-small-en-v1.5")
     p.add_argument("--embedder-model-dir", default=None,
                    help="local dir for onnx embedder (tokenizer.json + onnx/*.onnx)")
@@ -43,9 +43,14 @@ def main() -> int:
     p.add_argument("--embedder-pooling", default="mean",
                    choices=["mean", "last_token"])
     p.add_argument("--embedder-threads", type=int, default=None)
+    p.add_argument("--embedder-gguf-path", default=None,
+                   help="path to .gguf file for gguf embedder")
+    p.add_argument("--embedder-gpu-layers", type=int, default=0,
+                   help="n_gpu_layers for gguf embedder (-1 = all)")
+    p.add_argument("--embedder-query-prefix", default="",
+                   help="query prefix for gguf embedder")
     p.add_argument("--gpu", action="store_true",
-                   help="enable onnxruntime CUDA provider for ONNX embedders "
-                        "(requires graphstore[gpu] install)")
+                   help="enable onnxruntime CUDA provider for ONNX embedders")
     p.add_argument("--ceiling-mb", type=int, default=3072)
     p.add_argument("--cache-dir", default="/cache/fastembed")
     p.add_argument("--run-tag", default="")
@@ -83,9 +88,21 @@ def main() -> int:
         "embedder_pooling": args.embedder_pooling,
         "embedder_threads": args.embedder_threads,
         "embedder_gpu": args.gpu,
+        "embedder_gguf_path": args.embedder_gguf_path,
+        "embedder_gpu_layers": args.embedder_gpu_layers,
+        "embedder_query_prefix": args.embedder_query_prefix,
         "ceiling_mb": args.ceiling_mb,
         "cache_dir": args.cache_dir,
     }
+    if args.embedder == "gguf" and args.system != "graphstore":
+        from graphstore.embedding.llamacpp_embedder import LlamaCppEmbedder
+        adapter_config["_embedder_instance"] = LlamaCppEmbedder(
+            model_path=args.embedder_gguf_path,
+            n_ctx=args.embedder_max_length,
+            n_gpu_layers=args.embedder_gpu_layers,
+            output_dims=args.embedder_output_dims,
+            query_prefix=args.embedder_query_prefix,
+        )
     adapter = adapter_cls(config=adapter_config)
     print(f"system: {adapter.name} v{adapter.version}")
     print(f"config: {adapter_config}")
