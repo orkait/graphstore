@@ -47,7 +47,12 @@ def _apparmor_userns_blocks_cuda() -> bool:
     When set, cudaGetDeviceCount() fails with error 304 from any
     venv-isolated process - the exact reason every first-time GPU run
     on a fresh 24.04 box mysteriously breaks.
+
+    Inside a Docker container (detected via /.dockerenv), skip the check:
+    GPU access comes through CDI device injection, not the userns path.
     """
+    if os.path.exists("/.dockerenv"):
+        return False
     path = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
     try:
         with open(path) as f:
@@ -179,6 +184,43 @@ def _resolve_providers(providers: list[str] | str | None) -> list[str]:
     return resolved
 
 
+def _patch_gqa_for_cuda(onnx_path: str | Path) -> bytes | None:
+    """Patch GroupQueryAttention nodes for CUDA compatibility.
+
+    The onnx-community exports of decoder-based embedding models (Harrier,
+    Qwen3-Embedding) use an 11-input GQA variant with position_ids (input 9)
+    and attention_bias (input 10). ORT's CUDA kernel only supports the
+    9-input form (github.com/microsoft/onnxruntime/issues/24043, open since
+    March 2025). We strip the 2 unsupported inputs at load time so the
+    original export works on GPU without a manual re-export.
+
+    Returns serialized model bytes if patching was needed, None otherwise.
+    Requires the ``onnx`` package (36 MB, no torch).
+    """
+    try:
+        import onnx
+    except ImportError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "onnx package not installed - cannot patch GroupQueryAttention "
+            "for CUDA. Decoder models may fail on GPU. "
+            "Fix: pip install onnx"
+        )
+        return None
+
+    model = onnx.load(str(onnx_path))
+    patched = False
+    for node in model.graph.node:
+        if node.op_type == "GroupQueryAttention" and len(node.input) > 9:
+            while len(node.input) > 9:
+                node.input.pop()
+            patched = True
+
+    if not patched:
+        return None
+    return model.SerializeToString()
+
+
 class OnnxHFEmbedder(Embedder):
     """HuggingFace ONNX model embedder. No torch required.
 
@@ -186,19 +228,11 @@ class OnnxHFEmbedder(Embedder):
     Supports asymmetric query/document prefixes, Matryoshka truncation,
     and both mean and last-token pooling (for encoder vs decoder models).
 
-    GPU (Linux x86_64 only): set ``GRAPHSTORE_GPU=1`` or pass
-    ``providers=["CUDAExecutionProvider", "CPUExecutionProvider"]``.
-
-    Two install paths:
-        - ``pip install 'graphstore[gpu]'``     - zero-config, bundles
-          onnxruntime-gpu plus the nvidia-*-cu12 runtime wheels.
-        - ``pip install 'graphstore[gpu-ort]'`` - leaner, assumes the
-          host already has CUDA 12 / cuDNN 9 in a standard search path
-          (system install, conda env, or LD_LIBRARY_PATH).
-
-    Falls back to CPU silently if CUDA is unavailable. Raises a targeted
-    error on Ubuntu 24.04 if apparmor's unprivileged-userns restriction
-    is blocking cudaGetDeviceCount().
+    GPU: set ``GRAPHSTORE_GPU=1`` or pass explicit providers. Install
+    ``graphstore[gpu]`` (bundles cu12 wheels) or ``graphstore[gpu-ort]``
+    (bring your own CUDA 12). Decoder models with GroupQueryAttention
+    are auto-patched at load time for CUDA compatibility - no manual
+    re-export needed.
     """
 
     def __init__(
@@ -258,10 +292,19 @@ class OnnxHFEmbedder(Embedder):
             onnx_path = onnx_files[0]
 
         self._providers = _resolve_providers(providers)
-        self._session = ort.InferenceSession(
-            str(onnx_path),
-            providers=self._providers,
+        uses_gpu = any(
+            p in self._providers
+            for p in ("CUDAExecutionProvider", "TensorrtExecutionProvider")
         )
+        model_bytes = _patch_gqa_for_cuda(onnx_path) if uses_gpu else None
+        if model_bytes:
+            self._session = ort.InferenceSession(
+                model_bytes, providers=self._providers,
+            )
+        else:
+            self._session = ort.InferenceSession(
+                str(onnx_path), providers=self._providers,
+            )
         self._input_names = {i.name for i in self._session.get_inputs()}
         self._needs_token_type_ids = "token_type_ids" in self._input_names
         self._needs_position_ids = "position_ids" in self._input_names
@@ -335,14 +378,8 @@ class OnnxHFEmbedder(Embedder):
 
     def _encode(self, texts: list[str]) -> np.ndarray:
         encoded = self._tokenizer.encode_batch(texts)
-        max_len = max(len(e.ids) for e in encoded)
-        batch = len(encoded)
-
-        input_ids = np.zeros((batch, max_len), dtype=np.int64)
-        attention_mask = np.zeros((batch, max_len), dtype=np.int64)
-        for i, e in enumerate(encoded):
-            input_ids[i, :len(e.ids)] = e.ids
-            attention_mask[i, :len(e.attention_mask)] = e.attention_mask
+        input_ids = np.array([e.ids for e in encoded], dtype=np.int64)
+        attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
 
         feed = {
             "input_ids": input_ids,
@@ -352,8 +389,7 @@ class OnnxHFEmbedder(Embedder):
             feed["token_type_ids"] = np.zeros_like(input_ids)
         if self._needs_position_ids:
             pos = attention_mask.cumsum(axis=1) - 1
-            pos = np.maximum(pos, 0)
-            feed["position_ids"] = pos.astype(np.int64)
+            feed["position_ids"] = np.maximum(pos, 0)
         if self._kv_cache_specs:
             for name, num_heads, head_dim, dtype in self._kv_cache_specs:
                 feed[name] = np.zeros((batch, num_heads, 0, head_dim), dtype=dtype)
@@ -376,7 +412,7 @@ class OnnxHFEmbedder(Embedder):
             pooled = (embeddings * mask_expanded).sum(axis=1) / mask_expanded.sum(axis=1)
 
         # Matryoshka truncation + renormalize
-        if self._output_dims and self._output_dims < pooled.shape[1]:
+        if self._output_dims < pooled.shape[1]:
             pooled = truncate_dims(pooled, self._output_dims)
         else:
             pooled = l2_normalize(pooled)

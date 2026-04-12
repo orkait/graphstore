@@ -3,7 +3,7 @@
 import numpy as np
 from graphstore.embedding.base import Embedder
 
-_model_cache: dict[str, object] = {}
+_model_cache: dict = {}
 
 
 class Model2VecEmbedder(Embedder):
@@ -34,12 +34,13 @@ class Model2VecEmbedder(Embedder):
     def dims(self) -> int:
         return self._model.dim
 
-    def encode_documents(self, texts: list[str], titles: list[str | None] | None = None) -> np.ndarray:
+    def _encode(self, texts: list[str]) -> np.ndarray:
         if not texts:
             return np.empty((0, self.dims), dtype=np.float32)
         return self._model.encode(texts).astype(np.float32)
 
+    def encode_documents(self, texts: list[str], titles: list[str | None] | None = None) -> np.ndarray:
+        return self._encode(texts)
+
     def encode_queries(self, texts: list[str]) -> np.ndarray:
-        if not texts:
-            return np.empty((0, self.dims), dtype=np.float32)
-        return self._model.encode(texts).astype(np.float32)
+        return self._encode(texts)
