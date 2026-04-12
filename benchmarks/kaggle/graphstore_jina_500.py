@@ -1,8 +1,6 @@
-"""Kaggle: Chroma-BM25 + Jina v5 Nano on LongMemEval-S (500 records)"""
+"""Kaggle: GraphStore + Jina v5 Nano on LongMemEval-S (500 records)"""
 import subprocess, sys, os
-sys.path.insert(0, os.path.dirname(__file__) or ".")
 
-# Inline config (can't import from Kaggle)
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 EMBED_BATCH_SIZE = 128
 os.environ["HF_TOKEN"] = HF_TOKEN
@@ -32,7 +30,7 @@ subprocess.check_call(["git", "clone", "--depth", "1",
 
 sys.path.insert(0, "/kaggle/working/graphstore")
 sys.argv = ["bench",
-    "--system", "chroma-bm25",
+    "--system", "graphstore",
     "--dataset", "longmemeval",
     "--data-path", "/kaggle/working/longmemeval-data",
     "--variant", "s",
@@ -45,7 +43,7 @@ sys.argv = ["bench",
     "--gpu-mem-limit-gb", "12",
     "--embed-batch-size", str(EMBED_BATCH_SIZE),
     "--out-dir", "/kaggle/working/results",
-    "--run-tag", "chroma-jina-500",
+    "--run-tag", "graphstore-jina-500",
 ]
 from benchmarks.framework.docker_runner import main
 sys.exit(main())

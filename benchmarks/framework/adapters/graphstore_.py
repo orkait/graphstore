@@ -137,6 +137,13 @@ def _build_reranker(config: dict[str, Any]):
             onnx_file=config.get("reranker_onnx_file", "onnx/model_int8.onnx"),
             max_length=int(config.get("reranker_max_length", 512)),
         )
+    if backend == "gguf":
+        from graphstore.embedding.reranker import GGUFReranker
+        return GGUFReranker(
+            model_path=config.get("reranker_model_dir", ""),
+            projector_path=config.get("reranker_projector_path"),
+            n_gpu_layers=int(config.get("reranker_gpu_layers", -1)),
+        )
     return None
 
 
@@ -176,9 +183,13 @@ class GraphStoreAdapter:
             "queued": False,
             "embedder": self._embedder,
         }
+        # GraphStore constructor kwargs (must match __init__ signature)
         for key in ("remember_weights", "search_oversample", "recall_decay",
-                     "similarity_threshold", "retrieval_depth", "recall_depth",
-                     "max_query_entities", "recency_boost_k"):
+                     "similarity_threshold", "duplicate_threshold",
+                     "retrieval_depth", "recall_depth",
+                     "max_query_entities", "recency_boost_k",
+                     "recency_half_life_days", "similar_to_oversample",
+                     "lexical_search_oversample"):
             val = self.config.get(key)
             if val is not None:
                 gs_kwargs[key] = val

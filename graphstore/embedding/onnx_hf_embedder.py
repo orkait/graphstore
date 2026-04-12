@@ -279,7 +279,7 @@ class OnnxHFEmbedder(Embedder):
         if not tok_path.exists():
             raise FileNotFoundError(f"tokenizer.json not found in {model_dir}")
         self._tokenizer = Tokenizer.from_file(str(tok_path))
-        self._tokenizer.enable_padding(pad_id=0)
+        self._tokenizer.enable_padding(pad_id=0, pad_to_multiple_of=128)
         self._tokenizer.enable_truncation(max_length=max_length)
 
         # Load ONNX model - prefer explicit file from manifest if provided.
