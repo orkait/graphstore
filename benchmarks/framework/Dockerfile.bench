@@ -8,9 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     FASTEMBED_CACHE_PATH=/cache/fastembed
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        curl \
-        git \
+        build-essential curl git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /repo
@@ -20,8 +18,11 @@ RUN pip install \
         "model2vec>=0.4" "msgspec>=0.18" \
         "fastembed>=0.8" "psutil>=5.9" \
         "chromadb>=0.5" "rank-bm25>=0.2.2" \
-        "tokenizers>=0.20" "onnxruntime>=1.23" \
-        "llama-cpp-python>=0.3"
+        "tokenizers>=0.20" "onnxruntime>=1.23"
+
+RUN pip install llama-cpp-python \
+        --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 && \
+    pip install nvidia-cuda-runtime-cu12 nvidia-cublas-cu12
 
 COPY graphstore /repo/graphstore
 COPY benchmarks /repo/benchmarks

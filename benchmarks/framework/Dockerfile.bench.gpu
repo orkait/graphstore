@@ -31,7 +31,8 @@ RUN pip install \
         "nvidia-cudnn-cu12>=9.0" \
         "nvidia-cufft-cu12>=11.0" \
         "nvidia-curand-cu12>=10.0" \
-        "nvidia-nvjitlink-cu12>=12.0"
+        "nvidia-nvjitlink-cu12>=12.0" \
+        "onnx>=1.14"
 
 # onnxruntime and onnxruntime-gpu share the same `onnxruntime` python module.
 # fastembed/chromadb pull onnxruntime (CPU) above, leaving a broken mix where

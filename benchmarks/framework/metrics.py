@@ -148,10 +148,10 @@ class QualityMetrics:
         protocol where the LLM-as-judge grades the downstream answer based
         on whether relevant context was recalled.
         """
-        self.n_questions += 1
         gold_lower = [g.strip().lower() for g in gold_answers if g]
         if not gold_lower:
             return
+        self.n_questions += 1
         retrieved_trunc_texts = [r.strip().lower() for r in retrieved[:k]]
         substring_hits = sum(
             1 for g in gold_lower
