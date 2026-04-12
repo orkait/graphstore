@@ -39,10 +39,8 @@ def health_check(store: CoreStore, vector_store=None, document_store=None) -> di
         if cap > 0 and store.node_tombstones:
             has_vec = vector_store._has_vector[:cap]
             tomb_mask = np.zeros(cap, dtype=bool)
-            tomb_arr = np.fromiter(
-                (t for t in store.node_tombstones if t < cap),
-                dtype=np.int32,
-            )
+            tomb_arr = np.fromiter(store.node_tombstones, dtype=np.int32)
+            tomb_arr = tomb_arr[tomb_arr < cap]
             if tomb_arr.size:
                 tomb_mask[tomb_arr] = True
             dead_vectors = int(np.sum(has_vec & tomb_mask))
@@ -133,21 +131,23 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
 
     # Remap vectors
     if vector_store is not None:
-        old_vectors: dict[int, np.ndarray] = {}
+        old_slots = []
+        vecs = []
         for old_slot in live_slots_arr:
             old_slot = int(old_slot)
             if vector_store.has_vector(old_slot):
-                old_vectors[old_slot] = vector_store.get_vector(old_slot)
+                old_slots.append(old_slot)
+                vecs.append(vector_store.get_vector(old_slot))
 
         # Clear and re-add with new slots
         vector_store._has_vector = np.zeros(new_capacity, dtype=bool)
         vector_store._capacity = new_capacity
         from usearch.index import Index
         vector_store._index = Index(ndim=vector_store._dims, metric="cos", dtype="f32")
-        for old_slot, vec in old_vectors.items():
-            new_slot = old_to_new_dict[old_slot]
-            vector_store._index.add(new_slot, vec)
-            vector_store._has_vector[new_slot] = True
+        if old_slots:
+            new_slots = np.array([old_to_new_dict[s] for s in old_slots], dtype=np.int64)
+            vector_store._index.add(new_slots, np.vstack(vecs))
+            vector_store._has_vector[new_slots] = True
 
     # Remap DocumentStore slot keys via temp-table batch (O(1) statements vs O(N))
     if document_store is not None:
@@ -478,20 +478,22 @@ def compact_tombstones_safe(
 
         # Vector Remapping
         if vector_store is not None:
-            old_vectors = {}
+            old_slots = []
+            vecs = []
             for old_slot in live_slots_arr:
                 old_slot = int(old_slot)
                 if vector_store.has_vector(old_slot):
-                    old_vectors[old_slot] = vector_store.get_vector(old_slot)
+                    old_slots.append(old_slot)
+                    vecs.append(vector_store.get_vector(old_slot))
 
             vector_store._has_vector = np.zeros(new_capacity, dtype=bool)
             vector_store._capacity = new_capacity
             from usearch.index import Index
             vector_store._index = Index(ndim=vector_store._dims, metric="cos", dtype="f32")
-            for old_slot, vec in old_vectors.items():
-                new_slot = old_to_new_dict[old_slot]
-                vector_store._index.add(new_slot, vec)
-                vector_store._has_vector[new_slot] = True
+            if old_slots:
+                new_slots = np.array([old_to_new_dict[s] for s in old_slots], dtype=np.int64)
+                vector_store._index.add(new_slots, np.vstack(vecs))
+                vector_store._has_vector[new_slots] = True
 
         # 3. Apply to Store Pointers
         store.node_ids = new_ids

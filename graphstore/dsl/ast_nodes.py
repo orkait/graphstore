@@ -26,6 +26,12 @@ class InCondition:
     values: list
 
 @dataclass(slots=True)
+class SimilarCondition:
+    query: str
+    threshold: float
+    field: str = "id"  # Usually similarity is on the node content, but we reference the node identifier
+
+@dataclass(slots=True)
 class DegreeCondition:
     degree_type: str   # "INDEGREE" or "OUTDEGREE"
     edge_kind: str | None  # optional edge kind filter
