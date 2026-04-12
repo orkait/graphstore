@@ -120,7 +120,7 @@ def _build_embedder(config: dict[str, Any]):
 
 
 def _build_reranker(config: dict[str, Any]):
-    backend = config.get("reranker", "").lower()
+    backend = (config.get("reranker") or "").lower()
     if backend == "flashrank":
         from graphstore.embedding.reranker import FlashRankReranker
         return FlashRankReranker(

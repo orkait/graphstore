@@ -97,6 +97,8 @@ class _CategoryBucket:
     n: int = 0
     hits: int = 0
     recall_sum: float = 0.0
+    qa_hits: int = 0
+    qa_n: int = 0
 
     @property
     def accuracy(self) -> float:
@@ -105,6 +107,10 @@ class _CategoryBucket:
     @property
     def recall_at_k(self) -> float:
         return self.recall_sum / self.n if self.n else 0.0
+
+    @property
+    def qa_accuracy(self) -> float:
+        return self.qa_hits / self.qa_n if self.qa_n else 0.0
 
 
 @dataclass
@@ -202,12 +208,20 @@ class QualityMetrics:
     def llm_judge(self) -> float:
         return self.llm_judge_sum / self.llm_judge_n if self.llm_judge_n else 0.0
 
+    @property
+    def llm_judge_task_averaged(self) -> float:
+        qa_cats = [b for b in self._categories.values() if b.qa_n > 0]
+        if not qa_cats:
+            return 0.0
+        return sum(b.qa_accuracy for b in qa_cats) / len(qa_cats)
+
     def to_dict(self) -> dict:
         by_cat = {
             cat: {
                 "n": b.n,
                 "accuracy": round(b.accuracy, 4),
                 "recall_at_k": round(b.recall_at_k, 4),
+                **({"qa_accuracy": round(b.qa_accuracy, 4), "qa_n": b.qa_n} if b.qa_n > 0 else {}),
             }
             for cat, b in sorted(self._categories.items())
         }
@@ -216,6 +230,7 @@ class QualityMetrics:
             "accuracy": round(self.accuracy, 4),
             "recall_at_k": round(self.recall_at_k, 4),
             "llm_judge": round(self.llm_judge, 4) if self.llm_judge_n else None,
+            "llm_judge_task_averaged": round(self.llm_judge_task_averaged, 4) if self.llm_judge_n else None,
             "by_category": by_cat or None,
         }
 

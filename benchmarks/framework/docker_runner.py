@@ -70,6 +70,8 @@ def main() -> int:
     p.add_argument("--ceiling-mb", type=int, default=3072)
     p.add_argument("--cache-dir", default="/cache/fastembed")
     p.add_argument("--run-tag", default="")
+    p.add_argument("--qa-eval", action="store_true",
+                   help="run LLM-based QA evaluation after retrieval (gemma4:31b-cloud)")
     p.add_argument("--reranker", default=None, choices=["flashrank", "onnx"],
                    help="reranker backend (flashrank=4-34MB CPU, onnx=custom model)")
     p.add_argument("--reranker-model", default="rank-T5-flan",
@@ -252,14 +254,21 @@ def main() -> int:
         config=serializable_config,
         progress_every=10,
         on_interrupt=lambda partial: _save_results(partial, "_partial"),
+        qa_eval=args.qa_eval,
     )
 
     prefix = _save_results(result)
 
     print()
     print("RESULTS")
-    print(f"  overall acc    {result.quality.accuracy:.3f}")
-    print(f"  overall r@5    {result.quality.recall_at_k:.3f}")
+    print(f"  retrieval acc  {result.quality.accuracy:.3f}")
+    print(f"  retrieval r@5  {result.quality.recall_at_k:.3f}")
+    if result.quality.llm_judge_n > 0:
+        print(f"  QA accuracy    {result.quality.llm_judge:.3f} (overall, n={result.quality.llm_judge_n})")
+        qa_cats = [b for b in result.quality._categories.values() if b.qa_n > 0]
+        if qa_cats:
+            task_avg = sum(b.qa_accuracy for b in qa_cats) / len(qa_cats)
+            print(f"  QA task-avg    {task_avg:.3f} (mean of {len(qa_cats)} categories)")
     print(f"  query p50      {result.latency_query.p50:.1f} ms")
     print(f"  query p95      {result.latency_query.p95:.1f} ms")
     print(f"  query p99      {result.latency_query.p99:.1f} ms")
@@ -268,8 +277,10 @@ def main() -> int:
     print(f"  elapsed        {result.total_elapsed_s:.0f} s")
     if result.quality._categories:
         print("  by category:")
+        has_qa = any(b.qa_n > 0 for b in result.quality._categories.values())
         for cat, b in sorted(result.quality._categories.items()):
-            print(f"    {cat:<30} n={b.n:<3} acc={b.accuracy:.3f} r@k={b.recall_at_k:.3f}")
+            qa_str = f" qa={b.qa_accuracy:.3f}" if has_qa and b.qa_n > 0 else ""
+            print(f"    {cat:<30} n={b.n:<3} acc={b.accuracy:.3f} r@k={b.recall_at_k:.3f}{qa_str}")
     print()
     print(f"results: {prefix}.{{json,csv,md}}")
     return 0

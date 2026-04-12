@@ -26,14 +26,38 @@ class LlamaIndexAdapter:
         self._tmpdir: Path | None = None
         self._index = None
         self._retriever = None
+        self._external_embedder = self.config.get("_embedder_instance")
         self._embed_model_name = self.config.get(
             "embedder_model", "BAAI/bge-small-en-v1.5"
         )
         self._embed_model = None
         short = self._embed_model_name.split("/")[-1]
-        self.name = f"llamaindex-{short}"
+        emb_type = self.config.get("embedder", "fastembed")
+        self.name = f"llamaindex-{emb_type}-{short}"
 
     def _build_embed_model(self):
+        if self._external_embedder is not None:
+            from llama_index.core.embeddings import BaseEmbedding
+
+            ext = self._external_embedder
+
+            class _ExternalEmbedModel(BaseEmbedding):
+                model_name: str = "external"
+
+                def _get_query_embedding(self, query: str) -> list[float]:
+                    return ext.encode_queries([query])[0].tolist()
+
+                def _get_text_embedding(self, text: str) -> list[float]:
+                    return ext.encode_documents([text])[0].tolist()
+
+                async def _aget_query_embedding(self, query: str) -> list[float]:
+                    return self._get_query_embedding(query)
+
+                async def _aget_text_embedding(self, text: str) -> list[float]:
+                    return self._get_text_embedding(text)
+
+            return _ExternalEmbedModel()
+
         from llama_index.embeddings.fastembed import FastEmbedEmbedding
 
         return FastEmbedEmbedding(
