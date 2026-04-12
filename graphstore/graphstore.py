@@ -136,6 +136,19 @@ class GraphStore:
                 import logging
                 logging.getLogger(__name__).warning("embedder init failed: %s", e)
                 _embedder = None
+        elif emb_cfg == "installed" or emb_cfg.startswith("installed:"):
+            model_name = cfg.vector.embedder_model or (emb_cfg.split(":", 1)[-1] if ":" in emb_cfg else None)
+            if not model_name:
+                raise ValueError(
+                    "embedder='installed' requires vector.embedder_model in config "
+                    "or use 'installed:model-name' format"
+                )
+            from graphstore.registry.installer import load_installed_embedder
+            _embedder = load_installed_embedder(
+                model_name,
+                dims=cfg.vector.embedder_dims,
+                n_gpu_layers=cfg.vector.gpu_layers,
+            )
         else:
             _embedder = None
 
@@ -201,6 +214,7 @@ class GraphStore:
         )
 
         self._embedder_dirty = False
+        self._check_embedder_identity(_conn, _embedder)
 
         # Create executors before WAL replay so _replay_wal can use them
         self._executor = Executor(self._runtime,
@@ -360,6 +374,7 @@ class GraphStore:
                     if isinstance(ast, ast_nodes.SysReembed):
                         self._embedder_dirty = False
                         self._executor._embedder_dirty = False
+                        self._update_embedder_identity()
             else:
                 is_write = is_write_op(ast)
 
@@ -703,12 +718,61 @@ class GraphStore:
 
     def _ensure_vector_store(self, dims: int):
         """Lazily initialize vector store with given dimensionality."""
-        if self._runtime.vector_store is None:
+        vs = self._runtime.vector_store
+        if vs is None:
             from graphstore.vector.store import VectorStore
-            self._runtime.vector_store = VectorStore(
-                dims=dims, capacity=self._runtime.store._capacity,
+            vs = VectorStore(dims=dims, capacity=self._runtime.store._capacity)
+            self._runtime.vector_store = vs
+            self._record_embedder_identity(dims)
+        elif vs.dims != dims:
+            from graphstore.core.errors import EmbedderRequired
+            raise EmbedderRequired(
+                f"Vector index has {vs.dims} dims but embedder produces {dims}. "
+                f"Either use the same embedder or run SYS REEMBED."
             )
-        return self._runtime.vector_store
+        return vs
+
+    @staticmethod
+    def _check_embedder_identity(conn, embedder):
+        """On open, verify current embedder matches what the database was built with."""
+        if conn is None or embedder is None:
+            return
+        from graphstore.persistence.database import get_metadata
+        stored = get_metadata(conn, "embedder_name")
+        if stored is None:
+            return
+        current = embedder.name
+        if stored != current:
+            stored_dims = get_metadata(conn, "embedder_dims") or "?"
+            import logging
+            logging.getLogger(__name__).warning(
+                "embedder mismatch: database was built with '%s' (%s dims), "
+                "current embedder is '%s'. Run SYS REEMBED to re-encode.",
+                stored, stored_dims, current,
+            )
+
+    def _record_embedder_identity(self, dims: int):
+        """Store embedder name + dims in database metadata on first vector write."""
+        conn = self._runtime.conn
+        if conn is None:
+            return
+        from graphstore.persistence.database import get_metadata, set_metadata
+        if get_metadata(conn, "embedder_name") is not None:
+            return
+        emb = self._runtime.embedder
+        name = emb.name if emb else "unknown"
+        set_metadata(conn, "embedder_name", name)
+        set_metadata(conn, "embedder_dims", str(dims))
+
+    def _update_embedder_identity(self):
+        """Update stored embedder identity after SYS REEMBED."""
+        conn = self._runtime.conn
+        emb = self._runtime.embedder
+        if conn is None or emb is None:
+            return
+        from graphstore.persistence.database import set_metadata
+        set_metadata(conn, "embedder_name", emb.name)
+        set_metadata(conn, "embedder_dims", str(emb.dims))
 
 
 

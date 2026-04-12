@@ -47,6 +47,49 @@ SUPPORTED_MODELS = {
         },
         "default_variant": "q4",
     },
+    "qwen3-embedding-0.6b": {
+        "family": "gguf",
+        "repo_id": "Qwen/Qwen3-Embedding-0.6B-GGUF",
+        "description": "Qwen3 Embedding 0.6B via GGUF. MTEB 70.7, 1024 dims, multilingual.",
+        "max_length": 2048,
+        "base_dims": 1024,
+        "allowed_dims": [1024],
+        "default_dims": 1024,
+        "query_prefix": (
+            "Instruct: Given a web search query, retrieve relevant passages that "
+            "answer the query\nQuery: "
+        ),
+        "doc_prefix_template": "",
+        "pooling": "last_token",
+        "deps": ["llama_cpp", "huggingface_hub"],
+        "variants": {
+            "Q8_0": {"files": ["Qwen3-Embedding-0.6B-Q8_0.gguf"]},
+            "f16": {"files": ["Qwen3-Embedding-0.6B-f16.gguf"]},
+        },
+        "default_variant": "Q8_0",
+    },
+    "harrier-oss-v1-0.6b-gguf": {
+        "family": "gguf",
+        "repo_id": "mradermacher/harrier-oss-v1-0.6b-GGUF",
+        "description": "Microsoft Harrier v1 0.6B via GGUF. MTEB 69.0, 1024 dims, Q2-Q8 quant tiers.",
+        "max_length": 2048,
+        "base_dims": 1024,
+        "allowed_dims": [1024],
+        "default_dims": 1024,
+        "query_prefix": (
+            "Instruct: Given a web search query, retrieve relevant passages that "
+            "answer the query\nQuery: "
+        ),
+        "doc_prefix_template": "",
+        "pooling": "last_token",
+        "deps": ["llama_cpp", "huggingface_hub"],
+        "variants": {
+            "Q4_K_M": {"files": ["harrier-oss-v1-0.6b.Q4_K_M.gguf"]},
+            "Q8_0": {"files": ["harrier-oss-v1-0.6b.Q8_0.gguf"]},
+            "f16": {"files": ["harrier-oss-v1-0.6b.f16.gguf"]},
+        },
+        "default_variant": "Q4_K_M",
+    },
 }
 
 
