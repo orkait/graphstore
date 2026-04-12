@@ -33,6 +33,13 @@ RUN pip install \
         "nvidia-curand-cu12>=10.0" \
         "nvidia-nvjitlink-cu12>=12.0"
 
+# onnxruntime and onnxruntime-gpu share the same `onnxruntime` python module.
+# fastembed/chromadb pull onnxruntime (CPU) above, leaving a broken mix where
+# CUDAExecutionProvider is not discoverable at runtime. Uninstall the CPU
+# wheel and force-reinstall the GPU one so its provider .so files win.
+RUN pip uninstall -y onnxruntime && \
+    pip install --no-deps --force-reinstall "onnxruntime-gpu>=1.23"
+
 COPY graphstore /repo/graphstore
 COPY benchmarks /repo/benchmarks
 
