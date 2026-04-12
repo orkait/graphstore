@@ -72,12 +72,14 @@ def main() -> int:
     p.add_argument("--run-tag", default="")
     p.add_argument("--qa-eval", action="store_true",
                    help="run LLM-based QA evaluation after retrieval (gemma4:31b-cloud)")
-    p.add_argument("--reranker", default=None, choices=["flashrank", "onnx"],
-                   help="reranker backend (flashrank=4-34MB CPU, onnx=custom model)")
+    p.add_argument("--reranker", default=None, choices=["flashrank", "onnx", "gguf"],
+                   help="reranker backend (flashrank=CPU, onnx=custom, gguf=Jina v3)")
     p.add_argument("--reranker-model", default="rank-T5-flan",
-                   help="flashrank model name or onnx model description")
+                   help="flashrank model name")
     p.add_argument("--reranker-model-dir", default=None,
-                   help="path to ONNX cross-encoder reranker model dir")
+                   help="path to reranker model (ONNX dir or GGUF file)")
+    p.add_argument("--reranker-projector-path", default=None,
+                   help="path to projector.safetensors (for GGUF reranker)")
     p.add_argument("--reranker-onnx-file", default="onnx/model_int8.onnx",
                    help="ONNX file within reranker model dir")
 
@@ -188,6 +190,7 @@ def main() -> int:
         "reranker_model": args.reranker_model,
         "reranker_model_dir": args.reranker_model_dir,
         "reranker_onnx_file": args.reranker_onnx_file,
+        "reranker_projector_path": args.reranker_projector_path,
     }
     # Only pass tuning knobs the user explicitly set (otherwise adapter/graphstore defaults apply)
     for attr, key in [
