@@ -26,7 +26,7 @@ from graphstore.cron import CronScheduler
 from graphstore.core.errors import OptimizationInProgress
 from graphstore.dsl.handlers import is_write_op
 from graphstore.core.memory import estimate as _estimate_memory
-from graphstore.config import GraphStoreConfig, load_config, merge_kwargs
+from graphstore.config import GraphStoreConfig, load_config, merge_kwargs, apply_env_overrides
 
 # All system AST types
 _SYS_TYPES = tuple(
@@ -66,7 +66,13 @@ class GraphStore:
                  ingestors: dict | None = None,
                  chunker=None,
                  stt=None,
-                 tts=None):
+                 tts=None,
+                 remember_weights=_UNSET,
+                 recall_decay=_UNSET,
+                 search_oversample=_UNSET,
+                 similarity_threshold=_UNSET,
+                 duplicate_threshold=_UNSET,
+                 ):
         # Load config: explicit object > explicit path > env var > db dir > defaults
         if config is not None:
             self._config = config
@@ -79,7 +85,10 @@ class GraphStore:
         else:
             self._config = GraphStoreConfig()
 
-        # Only merge kwargs that were explicitly passed (not sentinel)
+        # Layer 3: env var overrides (GRAPHSTORE_SECTION_FIELD)
+        self._config = apply_env_overrides(self._config)
+
+        # Layer 4: constructor kwargs (highest priority)
         overrides = {}
         if ceiling_mb is not self._UNSET:
             overrides["ceiling_mb"] = ceiling_mb
@@ -91,6 +100,16 @@ class GraphStore:
             overrides["vault"] = vault
         if retention is not self._UNSET:
             overrides["retention"] = retention
+        if remember_weights is not self._UNSET:
+            overrides["remember_weights"] = remember_weights
+        if recall_decay is not self._UNSET:
+            overrides["recall_decay"] = recall_decay
+        if search_oversample is not self._UNSET:
+            overrides["search_oversample"] = search_oversample
+        if similarity_threshold is not self._UNSET:
+            overrides["similarity_threshold"] = similarity_threshold
+        if duplicate_threshold is not self._UNSET:
+            overrides["duplicate_threshold"] = duplicate_threshold
         if overrides:
             self._config = merge_kwargs(self._config, **overrides)
         cfg = self._config

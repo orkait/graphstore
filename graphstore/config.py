@@ -1,15 +1,25 @@
 """Typed configuration for graphstore via msgspec Structs.
 
 One file, sectioned by engine. Missing keys auto-fill from defaults.
-Load order: defaults -> graphstore.json -> constructor kwargs.
+
+Load order (each layer overrides the previous):
+    1. config.py dataclass defaults (source of truth for types + default values)
+    2. graphstore.json file (per-deployment overrides)
+    3. GRAPHSTORE_* environment variables (Docker/k8s friendly)
+    4. Constructor kwargs (code-level, highest priority)
 """
 
 from __future__ import annotations
 
 import json
+import logging
+import os
 from pathlib import Path
 
 import msgspec
+
+
+_log = logging.getLogger(__name__)
 
 
 class CoreConfig(msgspec.Struct, frozen=True):
@@ -105,6 +115,46 @@ class GraphStoreConfig(msgspec.Struct, frozen=True):
 _decoder = msgspec.json.Decoder(GraphStoreConfig)
 _encoder = msgspec.json.Encoder()
 
+# Section name -> (config class, field name -> type)
+_SECTION_MAP: dict[str, tuple[type, dict[str, type]]] = {
+    "core": (CoreConfig, {f: type(getattr(CoreConfig(), f)) for f in CoreConfig.__struct_fields__}),
+    "vector": (VectorConfig, {f: type(getattr(VectorConfig(), f)) for f in VectorConfig.__struct_fields__}),
+    "document": (DocumentConfig, {f: type(getattr(DocumentConfig(), f)) for f in DocumentConfig.__struct_fields__}),
+    "dsl": (DslConfig, {f: type(getattr(DslConfig(), f)) for f in DslConfig.__struct_fields__}),
+    "vault": (VaultConfig, {f: type(getattr(VaultConfig(), f)) for f in VaultConfig.__struct_fields__}),
+    "persistence": (PersistenceConfig, {f: type(getattr(PersistenceConfig(), f)) for f in PersistenceConfig.__struct_fields__}),
+    "retention": (RetentionConfig, {f: type(getattr(RetentionConfig(), f)) for f in RetentionConfig.__struct_fields__}),
+    "server": (ServerConfig, {f: type(getattr(ServerConfig(), f)) for f in ServerConfig.__struct_fields__}),
+    "evolution": (EvolutionConfig, {f: type(getattr(EvolutionConfig(), f)) for f in EvolutionConfig.__struct_fields__}),
+}
+
+# Flat kwarg name -> (section, field) for constructor shortcuts
+_KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
+    "ceiling_mb":           ("core", "ceiling_mb"),
+    "eviction_target_ratio":("core", "eviction_target_ratio"),
+    "remember_weights":     ("dsl", "remember_weights"),
+    "recall_decay":         ("dsl", "recall_decay"),
+    "search_oversample":    ("vector", "search_oversample"),
+    "similarity_threshold": ("vector", "similarity_threshold"),
+    "duplicate_threshold":  ("vector", "duplicate_threshold"),
+    "fts_tokenizer":        ("document", "fts_tokenizer"),
+}
+
+
+def _coerce(value: str, target_type: type):
+    """Coerce a string env var value to the target type."""
+    if target_type is bool or target_type is type(True):
+        return value.lower() in ("1", "true", "yes")
+    if target_type is int:
+        return int(value)
+    if target_type is float:
+        return float(value)
+    if target_type is list:
+        return [v.strip() for v in value.split(",") if v.strip()]
+    if target_type is type(None):
+        return value if value else None
+    return value
+
 
 def load_config(path: str | Path | None = None) -> GraphStoreConfig:
     """Load config from a JSON file. Returns defaults if file doesn't exist."""
@@ -114,7 +164,11 @@ def load_config(path: str | Path | None = None) -> GraphStoreConfig:
     if not p.exists():
         return GraphStoreConfig()
     raw = p.read_bytes()
-    return _decoder.decode(raw)
+    try:
+        return _decoder.decode(raw)
+    except msgspec.ValidationError as e:
+        _log.warning("config validation error in %s: %s - using defaults", p, e)
+        return GraphStoreConfig()
 
 
 def save_config(config: GraphStoreConfig, path: str | Path) -> None:
@@ -124,77 +178,118 @@ def save_config(config: GraphStoreConfig, path: str | Path) -> None:
     p.write_text(json.dumps(data, indent=2) + "\n")
 
 
-def merge_kwargs(config: GraphStoreConfig, **kwargs) -> GraphStoreConfig:
-    """Override config fields from constructor kwargs for backwards compat.
+def apply_env_overrides(config: GraphStoreConfig) -> GraphStoreConfig:
+    """Override config fields from GRAPHSTORE_* environment variables.
 
-    Supports: ceiling_mb, embedder, ingest_root, vault, retention (dict).
+    Convention: GRAPHSTORE_{SECTION}_{FIELD} in uppercase.
+    Examples:
+        GRAPHSTORE_CORE_CEILING_MB=512
+        GRAPHSTORE_DSL_RECALL_DECAY=0.5
+        GRAPHSTORE_DSL_REMEMBER_WEIGHTS=0.40,0.30,0.15,0.10,0.05
+        GRAPHSTORE_VECTOR_SEARCH_OVERSAMPLE=10
+        GRAPHSTORE_VECTOR_SIMILARITY_THRESHOLD=0.80
+        GRAPHSTORE_SERVER_CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+        GRAPHSTORE_SERVER_AUTH_TOKEN=secret123
     """
-    updates: dict = {}
+    updates: dict[str, dict[str, object]] = {}
 
-    if "ceiling_mb" in kwargs or "eviction_target_ratio" in kwargs:
-        c_mb = kwargs.get("ceiling_mb", config.core.ceiling_mb)
-        e_ratio = kwargs.get("eviction_target_ratio", config.core.eviction_target_ratio)
-        if c_mb != config.core.ceiling_mb or e_ratio != config.core.eviction_target_ratio:
-            updates["core"] = CoreConfig(
-                ceiling_mb=c_mb,
-                initial_capacity=config.core.initial_capacity,
-                compact_threshold=config.core.compact_threshold,
-                string_gc_threshold=config.core.string_gc_threshold,
-                eviction_target_ratio=e_ratio,
-                protected_kinds=config.core.protected_kinds,
-            )
+    for env_key, env_val in os.environ.items():
+        if not env_key.startswith("GRAPHSTORE_") or not env_val:
+            continue
 
+        parts = env_key[len("GRAPHSTORE_"):].lower().split("_", 1)
+        if len(parts) != 2:
+            continue
+        section, field = parts[0], parts[1]
+
+        if section not in _SECTION_MAP:
+            continue
+        _, field_types = _SECTION_MAP[section]
+        if field not in field_types:
+            continue
+
+        target_type = field_types[field]
+        try:
+            if field == "remember_weights":
+                parsed = [float(w) for w in env_val.split(",")]
+                if len(parsed) != 5:
+                    _log.warning("GRAPHSTORE_DSL_REMEMBER_WEIGHTS needs 5 values, got %d", len(parsed))
+                    continue
+                updates.setdefault(section, {})[field] = parsed
+            elif field == "protected_kinds" or field == "cors_origins":
+                updates.setdefault(section, {})[field] = [v.strip() for v in env_val.split(",")]
+            else:
+                updates.setdefault(section, {})[field] = _coerce(env_val, target_type)
+        except (ValueError, TypeError) as e:
+            _log.warning("invalid env var %s=%s: %s", env_key, env_val, e)
+
+    if not updates:
+        return config
+
+    return _rebuild_config(config, updates)
+
+
+def merge_kwargs(config: GraphStoreConfig, **kwargs) -> GraphStoreConfig:
+    """Override config fields from constructor kwargs.
+
+    Supports flat shortcuts for common tuning knobs:
+        ceiling_mb, eviction_target_ratio, remember_weights, recall_decay,
+        search_oversample, similarity_threshold, duplicate_threshold, fts_tokenizer
+
+    Plus legacy kwargs: embedder, ingest_root, vault, retention (dict).
+    """
+    updates: dict[str, dict[str, object]] = {}
+
+    # Flat shortcuts -> section overrides
+    for kwarg_name, (section, field) in _KWARG_SHORTCUTS.items():
+        if kwarg_name in kwargs:
+            updates.setdefault(section, {})[field] = kwargs[kwarg_name]
+
+    # Legacy: embedder (string or object -> vector.embedder name)
     if "embedder" in kwargs:
         emb = kwargs["embedder"]
         emb_name = emb if isinstance(emb, str) else "custom"
         if emb is None:
             emb_name = "none"
-        if emb_name != config.vector.embedder:
-            updates["vector"] = VectorConfig(
-                embedder=emb_name,
-                similarity_threshold=config.vector.similarity_threshold,
-                duplicate_threshold=config.vector.duplicate_threshold,
-                search_oversample=config.vector.search_oversample,
-                model2vec_model=config.vector.model2vec_model,
-                model_cache_dir=config.vector.model_cache_dir,
-            )
+        updates.setdefault("vector", {})["embedder"] = emb_name
 
+    # Legacy: ingest_root -> server.ingest_root
     if "ingest_root" in kwargs and kwargs["ingest_root"] is not None:
-        updates["server"] = ServerConfig(
-            cors_origins=config.server.cors_origins,
-            ingest_root=kwargs["ingest_root"],
-            auth_token=config.server.auth_token,
-            rate_limit_rpm=config.server.rate_limit_rpm,
-            rate_limit_window=config.server.rate_limit_window,
-            max_query_length=config.server.max_query_length,
-            max_batch_size=config.server.max_batch_size,
-        )
+        updates.setdefault("server", {})["ingest_root"] = kwargs["ingest_root"]
 
+    # Legacy: vault -> vault.enabled + vault.path
     if "vault" in kwargs and kwargs["vault"] is not None:
-        updates["vault"] = VaultConfig(
-            enabled=True,
-            path=kwargs["vault"],
-            auto_sync=config.vault.auto_sync,
-        )
+        updates.setdefault("vault", {})["enabled"] = True
+        updates["vault"]["path"] = kwargs["vault"]
 
+    # Legacy: retention (dict)
     if "retention" in kwargs and kwargs["retention"] is not None:
         r = kwargs["retention"]
-        updates["retention"] = RetentionConfig(
-            blob_warm_days=r.get("blob_warm_days", config.retention.blob_warm_days),
-            blob_archive_days=r.get("blob_archive_days", config.retention.blob_archive_days),
-            blob_delete_days=r.get("blob_delete_days", config.retention.blob_delete_days),
-        )
+        for key in ("blob_warm_days", "blob_archive_days", "blob_delete_days"):
+            if key in r:
+                updates.setdefault("retention", {})[key] = r[key]
 
     if not updates:
         return config
 
-    return GraphStoreConfig(
-        core=updates.get("core", config.core),
-        vector=updates.get("vector", config.vector),
-        document=updates.get("document", config.document),
-        dsl=updates.get("dsl", config.dsl),
-        vault=updates.get("vault", config.vault),
-        persistence=updates.get("persistence", config.persistence),
-        retention=updates.get("retention", config.retention),
-        server=updates.get("server", config.server),
-    )
+    return _rebuild_config(config, updates)
+
+
+def _rebuild_config(
+    config: GraphStoreConfig,
+    updates: dict[str, dict[str, object]],
+) -> GraphStoreConfig:
+    """Rebuild a frozen config with section-level field overrides."""
+    sections = {}
+    for section_name in GraphStoreConfig.__struct_fields__:
+        current = getattr(config, section_name)
+        if section_name not in updates:
+            sections[section_name] = current
+            continue
+        field_overrides = updates[section_name]
+        current_dict = {f: getattr(current, f) for f in current.__struct_fields__}
+        current_dict.update(field_overrides)
+        section_cls = type(current)
+        sections[section_name] = section_cls(**current_dict)
+
+    return GraphStoreConfig(**sections)

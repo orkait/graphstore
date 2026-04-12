@@ -88,6 +88,7 @@ def _build_embedder(config: dict[str, Any]):
             max_length=int(config.get("embedder_max_length", 512)),
             pooling_mode=config.get("embedder_pooling", "mean"),
             providers=providers,
+            gpu_mem_limit=config.get("embedder_gpu_mem_limit"),
         )
     if name == "installed":
         from graphstore.registry.installer import load_installed_embedder, set_cache_dir
@@ -129,6 +130,10 @@ class GraphStoreAdapter:
         self._embed_batch_size: int = int(self.config.get("embed_batch_size", 128))
         self._entity_extraction: bool = bool(self.config.get("entities", True))
         self._populate_fts: bool = bool(self.config.get("populate_fts", True))
+        self._retrieval_depth: int = int(self.config.get("retrieval_depth", 4))
+        self._recall_depth: int = int(self.config.get("recall_depth", 2))
+        self._max_query_entities: int = int(self.config.get("max_query_entities", 3))
+        self._recency_boost_k: int = int(self.config.get("recency_boost_k", 1))
         self._embedder = _build_embedder(self.config)
         emb_name = (self.config.get("embedder") or "model2vec").lower()
         if emb_name == "fastembed":
@@ -152,6 +157,18 @@ class GraphStoreAdapter:
             queued=False,
             embedder=self._embedder,
         )
+        weights = self.config.get("remember_weights")
+        if weights and len(weights) == 5:
+            self._gs._executor._remember_weights = weights
+        oversample = self.config.get("search_oversample")
+        if oversample is not None:
+            self._gs._executor._search_oversample = oversample
+        decay = self.config.get("recall_decay")
+        if decay is not None:
+            self._gs._executor._recall_decay = decay
+        sim_thresh = self.config.get("similarity_threshold")
+        if sim_thresh is not None:
+            self._gs._executor._similarity_threshold = sim_thresh
         self._gs.execute(
             'SYS REGISTER NODE KIND "message" '
             'REQUIRED session:string, role:string, content:string '
@@ -261,29 +278,33 @@ class GraphStoreAdapter:
 
     def _dispatch(self, question: str, category: str, k: int) -> tuple[list[str], Any]:
         q = _escape(question)
+        depth = self._retrieval_depth  # multiplier for REMEMBER candidate pool
 
         if category == "multi-session":
-            return self._multi_session(q, question, k)
+            return self._multi_session(q, question, k, depth)
         if category == "knowledge-update":
-            return self._knowledge_update(q, k)
+            return self._knowledge_update(q, k, depth)
 
         r = self._gs.execute(
-            f'REMEMBER "{q}" LIMIT {k} WHERE kind = "message"'
+            f'REMEMBER "{q}" LIMIT {k * depth} WHERE kind = "message"'
         )
-        return self._texts(r.data), r.data
+        texts = self._texts(r.data)
+        return texts[:k], r.data
 
-    def _multi_session(self, q_escaped: str, q_raw: str, k: int) -> tuple[list[str], Any]:
+    def _multi_session(self, q_escaped: str, q_raw: str, k: int, depth: int) -> tuple[list[str], Any]:
         gs = self._gs
         primary = gs.execute(
-            f'REMEMBER "{q_escaped}" LIMIT {k * 2} WHERE kind = "message"'
+            f'REMEMBER "{q_escaped}" LIMIT {k * depth} WHERE kind = "message"'
         )
         merged = self._texts(primary.data)
 
         if self._entity_extraction:
-            for ent_name in _extract_entities(q_raw)[:3]:
+            for ent_name in _extract_entities(q_raw)[:self._max_query_entities]:
                 ent_id = f"ent:{_slug(ent_name)}"
                 try:
-                    rec = gs.execute(f'RECALL FROM "{ent_id}" DEPTH 2 LIMIT {k}')
+                    rec = gs.execute(
+                        f'RECALL FROM "{ent_id}" DEPTH {self._recall_depth} LIMIT {k}'
+                    )
                     for text in self._texts(rec.data):
                         if text not in merged:
                             merged.append(text)
@@ -292,17 +313,18 @@ class GraphStoreAdapter:
 
         return merged[:k], primary.data
 
-    def _knowledge_update(self, q_escaped: str, k: int) -> tuple[list[str], Any]:
+    def _knowledge_update(self, q_escaped: str, k: int, depth: int) -> tuple[list[str], Any]:
         gs = self._gs
         primary = gs.execute(
-            f'REMEMBER "{q_escaped}" LIMIT {k * 2} WHERE kind = "message"'
+            f'REMEMBER "{q_escaped}" LIMIT {k * depth} WHERE kind = "message"'
         )
         merged = self._texts(primary.data)
 
         try:
+            recency_k = k * self._recency_boost_k
             recent = gs.execute(
                 f'NODES WHERE kind = "message" '
-                f'ORDER BY __updated_at__ DESC LIMIT {k}'
+                f'ORDER BY __updated_at__ DESC LIMIT {recency_k}'
             )
             for text in self._texts(recent.data):
                 if text not in merged:

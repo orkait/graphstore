@@ -231,11 +231,14 @@ class ChromaBM25Adapter:
     def close(self) -> None:
         if self._client is not None:
             try:
-                # chromadb doesn't need explicit close
-                self._client = None
-                self._collection = None
+                if hasattr(self._client, 'clear_system_cache'):
+                    self._client.clear_system_cache()
+                del self._collection
+                del self._client
             except Exception:
                 pass
+            self._client = None
+            self._collection = None
         if self._tmpdir and self._tmpdir.exists():
             shutil.rmtree(self._tmpdir, ignore_errors=True)
         self._tmpdir = None
