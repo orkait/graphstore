@@ -291,7 +291,10 @@ def merge_kwargs(config: GraphStoreConfig, **kwargs) -> GraphStoreConfig:
     # Flat shortcuts -> section overrides
     for kwarg_name, (section, field) in _KWARG_SHORTCUTS.items():
         if kwarg_name in kwargs:
-            updates.setdefault(section, {})[field] = kwargs[kwarg_name]
+            val = kwargs[kwarg_name]
+            current_val = getattr(getattr(config, section), field)
+            if val != current_val:
+                updates.setdefault(section, {})[field] = val
 
     # Legacy: embedder (string or object -> vector.embedder name)
     if "embedder" in kwargs:

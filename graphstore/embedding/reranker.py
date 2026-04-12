@@ -1,8 +1,9 @@
 """Pluggable reranker interface + implementations.
 
-Two backends:
-- FlashRankReranker: 4MB default model, no torch, CPU. Best for most users.
-- OnnxReranker: Any ONNX cross-encoder (GTE, BGE, Jina). For power users.
+Three backends:
+- FlashRankReranker: 22MB default model, no torch, CPU. Best for most users.
+- OnnxReranker: Any ONNX cross-encoder (GTE, BGE). For power users.
+- GGUFReranker: Jina Reranker v3 via llama-cpp-python. CUDA/Metal native.
 """
 
 from __future__ import annotations
@@ -105,3 +106,58 @@ class OnnxReranker:
         if logits.ndim == 2:
             logits = logits[:, 0]
         return logits.astype(np.float64)
+
+
+class GGUFReranker:
+    """Late-interaction reranker via llama-cpp-python + projector MLP.
+
+    Designed for Jina Reranker v3: embed query and docs via GGUF model,
+    project through MLP, score by cosine similarity. Native CUDA/Metal.
+    """
+
+    def __init__(self, model_path: str, projector_path: str | None = None,
+                 n_ctx: int = 2048, n_gpu_layers: int = -1):
+        try:
+            from llama_cpp import Llama
+        except ImportError as e:
+            raise ImportError(
+                "GGUFReranker requires llama-cpp-python. "
+                "Install with: pip install llama-cpp-python"
+            ) from e
+
+        self._model = Llama(
+            model_path=model_path,
+            embedding=True,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            verbose=False,
+        )
+
+        self._projector = None
+        if projector_path:
+            from safetensors import safe_open
+            with safe_open(projector_path, framework="numpy") as f:
+                self._proj_w1 = f.get_tensor("projector.0.weight")
+                self._proj_w2 = f.get_tensor("projector.2.weight")
+
+    def _embed_and_project(self, text: str) -> np.ndarray:
+        emb = np.array(self._model.embed(text), dtype=np.float32)
+        if emb.ndim == 2:
+            emb = emb.mean(axis=0)
+        if self._proj_w1 is not None:
+            emb = emb @ self._proj_w1.T
+            emb = np.maximum(emb, 0)  # ReLU
+            emb = emb @ self._proj_w2.T
+        norm = np.linalg.norm(emb)
+        return emb / norm if norm > 0 else emb
+
+    def score(self, query: str, documents: list[str]) -> np.ndarray:
+        if not documents:
+            return np.empty(0, dtype=np.float64)
+
+        q_emb = self._embed_and_project(query)
+        scores = np.zeros(len(documents), dtype=np.float64)
+        for i, doc in enumerate(documents):
+            d_emb = self._embed_and_project(doc)
+            scores[i] = float(np.dot(q_emb, d_emb))
+        return scores

@@ -72,6 +72,13 @@ class GraphStore:
                  search_oversample=_UNSET,
                  similarity_threshold=_UNSET,
                  duplicate_threshold=_UNSET,
+                 retrieval_depth=_UNSET,
+                 recall_depth=_UNSET,
+                 max_query_entities=_UNSET,
+                 recency_boost_k=_UNSET,
+                 recency_half_life_days=_UNSET,
+                 similar_to_oversample=_UNSET,
+                 lexical_search_oversample=_UNSET,
                  ):
         # Load config: explicit object > explicit path > env var > db dir > defaults
         if config is not None:
@@ -110,6 +117,20 @@ class GraphStore:
             overrides["similarity_threshold"] = similarity_threshold
         if duplicate_threshold is not self._UNSET:
             overrides["duplicate_threshold"] = duplicate_threshold
+        if retrieval_depth is not self._UNSET:
+            overrides["retrieval_depth"] = retrieval_depth
+        if recall_depth is not self._UNSET:
+            overrides["recall_depth"] = recall_depth
+        if max_query_entities is not self._UNSET:
+            overrides["max_query_entities"] = max_query_entities
+        if recency_boost_k is not self._UNSET:
+            overrides["recency_boost_k"] = recency_boost_k
+        if recency_half_life_days is not self._UNSET:
+            overrides["recency_half_life_days"] = recency_half_life_days
+        if similar_to_oversample is not self._UNSET:
+            overrides["similar_to_oversample"] = similar_to_oversample
+        if lexical_search_oversample is not self._UNSET:
+            overrides["lexical_search_oversample"] = lexical_search_oversample
         if overrides:
             self._config = merge_kwargs(self._config, **overrides)
         cfg = self._config
