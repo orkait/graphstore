@@ -38,7 +38,9 @@ def get_model_dir(name: str) -> Path:
 
 def is_installed(name: str) -> bool:
     model_dir = get_model_dir(name)
-    return model_dir.exists() and any(model_dir.rglob("*.onnx"))
+    if not model_dir.exists():
+        return False
+    return any(model_dir.rglob("*.onnx")) or any(model_dir.rglob("*.gguf"))
 
 
 def install_embedder(name: str, variant: str | None = None) -> Path:
@@ -76,27 +78,25 @@ def install_embedder(name: str, variant: str | None = None) -> Path:
 
     repo_id = info["repo_id"]
     variant_info = info["variants"][variant]
+    family = info.get("family", "hf_onnx")
 
-    # Download tokenizer files
-    for tok_file in ["tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"]:
-        try:
-            hf_hub_download(repo_id, tok_file, local_dir=str(model_dir))
-        except Exception as e:
-            logger.debug("tokenizer file %r download skipped: %s", tok_file, e, exc_info=True)
+    if family == "hf_onnx":
+        for tok_file in ["tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"]:
+            try:
+                hf_hub_download(repo_id, tok_file, local_dir=str(model_dir))
+            except Exception as e:
+                logger.debug("tokenizer file %r download skipped: %s", tok_file, e, exc_info=True)
 
-    # Download ONNX model files
     for f in variant_info["files"]:
         print(f"Downloading {f}...")
         hf_hub_download(repo_id, f, local_dir=str(model_dir))
 
     # 3. Write manifest
     import json
-    # Record the primary .onnx file so the loader picks the right variant when
-    # multiple variants have been installed into the same directory.
-    onnx_files = [f for f in variant_info["files"] if f.endswith(".onnx")]
-    primary_onnx = onnx_files[0] if onnx_files else variant_info["files"][0]
+    primary_file = variant_info["files"][0]
     manifest = {
         "name": name,
+        "family": family,
         "variant": variant,
         "dims": info["base_dims"],
         "default_dims": info["default_dims"],
@@ -104,8 +104,11 @@ def install_embedder(name: str, variant: str | None = None) -> Path:
         "query_prefix": info["query_prefix"],
         "doc_prefix_template": info["doc_prefix_template"],
         "pooling": info.get("pooling", "mean"),
-        "onnx_file": primary_onnx,
     }
+    if family == "gguf":
+        manifest["gguf_file"] = primary_file
+    else:
+        manifest["onnx_file"] = primary_file
     (model_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
     print(f"Installed {name} ({variant}) to {model_dir}")
@@ -125,12 +128,12 @@ def load_installed_embedder(
     name: str,
     dims: int | None = None,
     providers: list[str] | str | None = None,
+    n_gpu_layers: int = 0,
 ):
-    """Load an installed ONNX embedder.
+    """Load an installed embedder (ONNX or GGUF).
 
-    Pass ``providers=["CUDAExecutionProvider", "CPUExecutionProvider"]`` or
-    set ``GRAPHSTORE_GPU=1`` in the environment to run inference on GPU.
-    Requires the ``graphstore[gpu]`` install.
+    For ONNX: pass ``providers=["CUDAExecutionProvider", ...]`` for GPU.
+    For GGUF: pass ``n_gpu_layers=-1`` to offload all layers to GPU.
     """
     model_dir = get_model_dir(name)
     if not is_installed(name):
@@ -140,6 +143,20 @@ def load_installed_embedder(
 
     import json
     manifest = json.loads((model_dir / "manifest.json").read_text())
+    family = manifest.get("family", "hf_onnx")
+
+    if family == "gguf":
+        from graphstore.embedding.llamacpp_embedder import LlamaCppEmbedder
+        gguf_file = manifest.get("gguf_file", "")
+        model_path = str(model_dir / gguf_file)
+        return LlamaCppEmbedder(
+            model_path=model_path,
+            n_ctx=manifest.get("max_length", 2048),
+            n_gpu_layers=n_gpu_layers,
+            output_dims=dims or manifest["default_dims"],
+            query_prefix=manifest.get("query_prefix", ""),
+            doc_prefix_template=manifest.get("doc_prefix_template", ""),
+        )
 
     from graphstore.embedding.onnx_hf_embedder import OnnxHFEmbedder
     return OnnxHFEmbedder(

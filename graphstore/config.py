@@ -23,6 +23,9 @@ class CoreConfig(msgspec.Struct, frozen=True):
 
 class VectorConfig(msgspec.Struct, frozen=True):
     embedder: str = "default"
+    embedder_model: str | None = None
+    embedder_dims: int | None = None
+    gpu_layers: int = 0
     similarity_threshold: float = 0.85
     duplicate_threshold: float = 0.95
     search_oversample: int = 5
