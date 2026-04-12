@@ -2,7 +2,6 @@
 
 import time
 from collections import deque
-import concurrent.futures
 
 import numpy as np
 from scipy.sparse import csr_matrix
