@@ -2,6 +2,7 @@
 
 import time
 from collections import deque
+import concurrent.futures
 
 import numpy as np
 from scipy.sparse import csr_matrix
@@ -37,8 +38,7 @@ class IntelligenceHandlers:
         if n == 0:
             return Result(kind="nodes", data=[], count=0)
 
-        combined = self.store.edge_matrices.get(None)
-        if combined is None:
+        if self.store.edge_matrices.total_edges == 0:
             return Result(kind="nodes", data=[], count=0)
 
         importance = np.ones(n, dtype=np.float64)
@@ -62,10 +62,15 @@ class IntelligenceHandlers:
 
         live_mask = self._compute_live_mask(n)
 
-        if combined.shape[0] < n:
-            mat_t = resize_csr(combined, n).T.tocsr()
-        else:
-            mat_t = self.store.edge_matrices.get_combined_transpose()
+        mat_t, mat_t_delta = self.store.edge_matrices.get_combined_transpose_split()
+        if mat_t is None and mat_t_delta is None:
+            return Result(kind="nodes", data=[], count=0)
+            
+        if mat_t is not None and mat_t.shape[0] < n:
+            mat_t = resize_csr(mat_t, n)
+        if mat_t_delta is not None and mat_t_delta.shape[0] < n:
+            mat_t_delta = resize_csr(mat_t_delta, n)
+
         decay = getattr(self, '_recall_decay', 0.7)
         activation = _algo_spreading_activation(
             matrix_t=mat_t,
@@ -75,6 +80,7 @@ class IntelligenceHandlers:
             live_mask=live_mask,
             importance=importance,
             recency=recency,
+            matrix_t_delta=mat_t_delta,
         )
 
         if q.where:
@@ -331,41 +337,41 @@ class IntelligenceHandlers:
             return Result(kind="nodes", data=[], count=0)
 
         slot_arr = np.union1d(vec_slots_np, bm25_slots_np)
-        m = len(slot_arr)
-
-        vec_signal = np.zeros(m, dtype=np.float64)
+        
+        vec_signal = np.zeros(n, dtype=np.float64)
         if len(vec_slots_np) > 0:
-            vi = np.searchsorted(slot_arr, vec_slots_np)
-            vec_signal[vi] = vec_sims_np
+            vec_signal[vec_slots_np] = vec_sims_np
 
-        bm25_signal = np.zeros(m, dtype=np.float64)
+        bm25_signal = np.zeros(n, dtype=np.float64)
         if len(bm25_slots_np) > 0:
-            bi = np.searchsorted(slot_arr, bm25_slots_np)
-            scattered = np.zeros(m, dtype=np.float64)
-            scattered[bi] = bm25_scores_np
+            scattered = np.zeros(n, dtype=np.float64)
+            scattered[bm25_slots_np] = bm25_scores_np
             bm25_signal = _algo_normalize_bm25(scattered)
 
-        recency_signal = np.ones(m, dtype=np.float64)
+        recency_signal = np.zeros(n, dtype=np.float64)
+        recency_signal[slot_arr] = 1.0
         updated_col = self.store.columns.get_column("__updated_at__", n)
         if updated_col is not None:
             col_data, col_pres, _ = updated_col
             pres_at = col_pres[slot_arr]
             if pres_at.any():
                 half_life = getattr(self, '_recency_half_life_days', 30.0)
-                recency_signal = _algo_recency_decay(
+                r_scores = _algo_recency_decay(
                     col_data[slot_arr], pres_at, now_ms, half_life_days=half_life,
                 )
+                recency_signal[slot_arr] = r_scores
 
-        confidence_signal = np.ones(m, dtype=np.float64)
+        confidence_signal = np.zeros(n, dtype=np.float64)
+        confidence_signal[slot_arr] = 1.0
         conf_col = self.store.columns.get_column("__confidence__", n)
         if conf_col is not None:
             col_data, col_pres, _ = conf_col
             pres_at = col_pres[slot_arr]
             if pres_at.any():
                 clamped = np.clip(col_data[slot_arr].astype(np.float64), 0.0, 1.0)
-                confidence_signal = np.where(pres_at, clamped, 1.0)
+                confidence_signal[slot_arr] = np.where(pres_at, clamped, 1.0)
 
-        recall_signal = np.zeros(m, dtype=np.float64)
+        recall_signal = np.zeros(n, dtype=np.float64)
         recall_col = self.store.columns.get_column("__recall_count__", n)
         if recall_col is not None:
             col_data, col_pres, _ = recall_col
@@ -374,33 +380,68 @@ class IntelligenceHandlers:
                 counts = col_data[slot_arr].astype(np.float64)
                 max_recalls = max(1.0, float(counts[pres_at].max()))
                 boost = counts / max_recalls
-                recall_signal = np.where(pres_at, boost, 0.0)
+                recall_signal[slot_arr] = np.where(pres_at, boost, 0.0)
 
         weights = getattr(self, '_remember_weights', [0.30, 0.20, 0.15, 0.20, 0.15])
-        final = _algo_weighted_fusion(
+        base_final = _algo_weighted_fusion(
             vec_signal, bm25_signal, recency_signal,
             confidence_signal, recall_signal, list(weights),
         )
+        base_final *= live_mask
 
-        order = np.argsort(-final)
+        # --- HybridRAG Expansion (Vector-First k-Hop) ---
+        seed_count = min(len(slot_arr), max(5, target_k // 2))
+        final_scores = base_final.copy()
+        
+        if seed_count > 0:
+            base_order = slot_arr[np.argsort(-base_final[slot_arr])]
+            seed_slots = base_order[:seed_count].astype(np.int64)
+            seed_scores = base_final[seed_slots].astype(np.float32)
+
+            mat_t, mat_t_delta = self.store.edge_matrices.get_combined_transpose_split()
+            if mat_t is not None or mat_t_delta is not None:
+                if mat_t is not None and mat_t.shape[0] < n:
+                    mat_t = resize_csr(mat_t, n)
+                if mat_t_delta is not None and mat_t_delta.shape[0] < n:
+                    mat_t_delta = resize_csr(mat_t_delta, n)
+                
+                activation = _algo_spreading_activation(
+                    matrix_t=mat_t,
+                    cue_slot=seed_slots,
+                    depth=2, 
+                    decay=getattr(self, '_recall_decay', 0.7),
+                    live_mask=live_mask,
+                    matrix_t_delta=mat_t_delta,
+                    cue_scores=seed_scores,
+                )
+                
+                final_scores += activation
+
+        valid_slots = np.where(final_scores > 0)[0]
+        if len(valid_slots) == 0:
+            return Result(kind="nodes", data=[], count=0)
+            
+        order = valid_slots[np.argsort(-final_scores[valid_slots])]
 
         results = []
         retrieved_slots = []
-        for idx_np in order:
-            idx = int(idx_np)
-            slot = int(slot_arr[idx])
+        for slot in order:
+            slot = int(slot)
             node = self.store._materialize_slot(slot)
             if node is None:
                 continue
             if q.where and not self._eval_where(q.where.expr, node):
                 continue
-            node["_remember_score"] = round(float(final[idx]), 4)
-            node["_vector_sim"] = round(float(vec_signal[idx]), 4)
-            node["_bm25_score"] = round(float(bm25_signal[idx]), 4)
-            node["_recency_score"] = round(float(recency_signal[idx]), 4)
-            node["_confidence"] = round(float(confidence_signal[idx]), 4)
+            
+            node["_remember_score"] = round(float(final_scores[slot]), 4)
+            node["_vector_sim"] = round(float(vec_signal[slot]), 4)
+            node["_bm25_score"] = round(float(bm25_signal[slot]), 4)
+            node["_recency_score"] = round(float(recency_signal[slot]), 4)
+            node["_confidence"] = round(float(confidence_signal[slot]), 4)
+            
             results.append(node)
             retrieved_slots.append(slot)
+            
             if q.tokens is not None:
                 total_tokens = sum(
                     len(r.get("summary", "") + r.get("claim", "") + r.get("text", "")) // 4

@@ -15,7 +15,8 @@ def build_tombstone_mask(tombstones, n: int) -> np.ndarray:
     mask = np.zeros(n, dtype=bool)
     if not tombstones:
         return mask
-    tomb_arr = np.fromiter((t for t in tombstones if t < n), dtype=np.int32)
+    tomb_arr = np.fromiter(tombstones, dtype=np.int32)
+    tomb_arr = tomb_arr[tomb_arr < n]
     if tomb_arr.size:
         mask[tomb_arr] = True
     return mask

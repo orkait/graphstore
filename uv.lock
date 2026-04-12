@@ -512,6 +512,15 @@ wheels = [
 ]
 
 [[package]]
+name = "diskcache"
+version = "5.6.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3f/21/1c1ffc1a039ddcc459db43cc108658f32c57d271d7289a2794e401d0fdb6/diskcache-5.6.3.tar.gz", hash = "sha256:2c3a3fa2743d8535d832ec61c2054a1641f41775aa7c556758a109941e33e4fc", size = 67916, upload-time = "2023-08-31T06:12:00.316Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/27/4570e78fc0bf5ea0ca45eb1de3818a23787af9b390c0b0a0033a1b8236f9/diskcache-5.6.3-py3-none-any.whl", hash = "sha256:5e31b2d5fbad117cc363ebaf6b689474db18a1f6438bc82358b024abd4c2ca19", size = 45550, upload-time = "2023-08-31T06:11:58.822Z" },
+]
+
+[[package]]
 name = "distro"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -792,6 +801,9 @@ embed-default = [
 embed-fastembed = [
     { name = "fastembed" },
 ]
+embed-gguf = [
+    { name = "llama-cpp-python" },
+]
 gpu = [
     { name = "nvidia-cublas-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "nvidia-cuda-nvrtc-cu12", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -849,6 +861,7 @@ requires-dist = [
     { name = "fastembed", marker = "extra == 'embed-fastembed'", specifier = ">=0.8" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "lark", specifier = ">=1.1" },
+    { name = "llama-cpp-python", marker = "extra == 'embed-gguf'", specifier = ">=0.3" },
     { name = "markitdown", marker = "extra == 'ingest'", specifier = ">=0.1" },
     { name = "model2vec", marker = "extra == 'embed-default'", specifier = ">=0.4" },
     { name = "moonshine-voice", marker = "extra == 'voice'" },
@@ -877,7 +890,7 @@ requires-dist = [
     { name = "usearch", specifier = ">=2.0" },
     { name = "uvicorn", marker = "extra == 'playground'", specifier = ">=0.20" },
 ]
-provides-extras = ["dev", "embed-default", "embed-fastembed", "ingest", "ingest-pro", "scheduler", "vault", "playground", "gpu-ort", "gpu", "voice"]
+provides-extras = ["dev", "embed-default", "embed-fastembed", "embed-gguf", "ingest", "ingest-pro", "scheduler", "vault", "playground", "gpu-ort", "gpu", "voice"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1188,6 +1201,19 @@ sdist = { url = "https://files.pythonhosted.org/packages/dd/8d/2161f46485d9c36c0
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fd/92/56a954dd59637dd2ee013581fa3beea0821f17f2c07f818fc51dcc11fd10/latex2mathml-3.79.0-py3-none-any.whl", hash = "sha256:9f10720d4fcf6b22d1b81f6628237832419a7a29783c13aa92fa8d680165e63d", size = 73945, upload-time = "2026-03-12T23:25:09.466Z" },
 ]
+
+[[package]]
+name = "llama-cpp-python"
+version = "0.3.20"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "diskcache" },
+    { name = "jinja2" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/45/95/c69c47c9c8dda97f712f5864688d13a22b0159aa9adae91a69067a728532/llama_cpp_python-0.3.20.tar.gz", hash = "sha256:70f01b7d915d31c617dc66610a332cb2d51cde84c8b152d09a352206323616f5", size = 59323017, upload-time = "2026-04-03T06:56:32.455Z" }
 
 [[package]]
 name = "loguru"
