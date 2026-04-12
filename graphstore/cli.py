@@ -128,6 +128,27 @@ def cmd_playground(args: argparse.Namespace) -> None:
     uvicorn.run(app, host=args.host, port=args.port)
 
 
+def cmd_config(args: argparse.Namespace) -> None:
+    """Show config schema, defaults, or resolved values."""
+    import json
+    import msgspec
+    from graphstore.config import GraphStoreConfig, load_config
+
+    if args.schema:
+        schema = msgspec.json.schema(GraphStoreConfig)
+        print(json.dumps(schema, indent=2))
+    elif args.defaults:
+        data = msgspec.json.decode(msgspec.json.encode(GraphStoreConfig()))
+        print(json.dumps(data, indent=2))
+    elif args.path:
+        config = load_config(args.path)
+        data = msgspec.json.decode(msgspec.json.encode(config))
+        print(json.dumps(data, indent=2))
+    else:
+        data = msgspec.json.decode(msgspec.json.encode(GraphStoreConfig()))
+        print(json.dumps(data, indent=2))
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="graphstore", description="graphstore CLI")
     sub = parser.add_subparsers(dest="command")
@@ -174,6 +195,13 @@ def main(argv: list[str] | None = None) -> None:
     # list-voice subcommand
     lv = sub.add_parser("list-voice", help="Show voice (STT/TTS) installation status")
     lv.set_defaults(func=cmd_list_voice)
+
+    # config subcommand
+    cfg = sub.add_parser("config", help="Show config defaults, schema, or current values")
+    cfg.add_argument("--schema", action="store_true", help="Output JSON Schema for graphstore.json")
+    cfg.add_argument("--defaults", action="store_true", help="Output all default values as JSON")
+    cfg.add_argument("--path", type=str, default=None, help="Path to graphstore.json to show resolved config")
+    cfg.set_defaults(func=cmd_config)
 
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):

@@ -247,6 +247,14 @@ class GraphStore:
         self._executor._fts_full_text = cfg.document.fts_full_text
         self._executor._recall_decay = cfg.dsl.recall_decay
         self._executor._remember_weights = cfg.dsl.remember_weights
+        self._executor._retrieval_strategy = cfg.dsl.retrieval_strategy
+        self._executor._retrieval_depth = cfg.dsl.retrieval_depth
+        self._executor._recall_depth = cfg.dsl.recall_depth
+        self._executor._max_query_entities = cfg.dsl.max_query_entities
+        self._executor._recency_boost_k = cfg.dsl.recency_boost_k
+        self._executor._recency_half_life_days = cfg.dsl.recency_half_life_days
+        self._executor._similar_to_oversample = cfg.dsl.similar_to_oversample
+        self._executor._lexical_search_oversample = cfg.dsl.lexical_search_oversample
         self._executor._chunk_max_size = cfg.document.chunk_max_size
         self._executor._summary_max_length = cfg.document.summary_max_length
         self._executor._chunk_overlap = cfg.document.chunk_overlap

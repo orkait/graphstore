@@ -38,7 +38,7 @@ class VectorConfig(msgspec.Struct, frozen=True):
     gpu_layers: int = 0
     similarity_threshold: float = 0.85
     duplicate_threshold: float = 0.95
-    search_oversample: int = 5
+    search_oversample: int = 10
     model2vec_model: str = "minishlab/M2V_base_output"
     model_cache_dir: str | None = None
 
@@ -61,6 +61,14 @@ class DslConfig(msgspec.Struct, frozen=True):
     optimize_interval: int = 500
     recall_decay: float = 0.7
     remember_weights: list[float] = msgspec.field(default_factory=lambda: [0.30, 0.20, 0.15, 0.20, 0.15])
+    retrieval_strategy: str = "full"
+    retrieval_depth: int = 8
+    recall_depth: int = 2
+    max_query_entities: int = 3
+    recency_boost_k: int = 2
+    recency_half_life_days: float = 30.0
+    similar_to_oversample: int = 3
+    lexical_search_oversample: int = 3
     cache_gc_threshold: int = 200
 
 
@@ -134,6 +142,14 @@ _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "eviction_target_ratio":("core", "eviction_target_ratio"),
     "remember_weights":     ("dsl", "remember_weights"),
     "recall_decay":         ("dsl", "recall_decay"),
+    "retrieval_strategy":   ("dsl", "retrieval_strategy"),
+    "retrieval_depth":      ("dsl", "retrieval_depth"),
+    "recall_depth":         ("dsl", "recall_depth"),
+    "max_query_entities":   ("dsl", "max_query_entities"),
+    "recency_boost_k":      ("dsl", "recency_boost_k"),
+    "recency_half_life_days": ("dsl", "recency_half_life_days"),
+    "similar_to_oversample": ("dsl", "similar_to_oversample"),
+    "lexical_search_oversample": ("dsl", "lexical_search_oversample"),
     "search_oversample":    ("vector", "search_oversample"),
     "similarity_threshold": ("vector", "similarity_threshold"),
     "duplicate_threshold":  ("vector", "duplicate_threshold"),
@@ -157,25 +173,57 @@ def _coerce(value: str, target_type: type):
 
 
 def load_config(path: str | Path | None = None) -> GraphStoreConfig:
-    """Load config from a JSON file. Returns defaults if file doesn't exist."""
+    """Load config overrides from a JSON file and merge onto defaults.
+
+    The file is expected to be a partial dict - only sections/fields the user
+    changed. Missing sections and fields fall back to config.py defaults.
+    Returns full defaults if the file doesn't exist or is empty.
+    """
     if path is None:
         return GraphStoreConfig()
     p = Path(path)
     if not p.exists():
         return GraphStoreConfig()
-    raw = p.read_bytes()
-    try:
-        return _decoder.decode(raw)
-    except msgspec.ValidationError as e:
-        _log.warning("config validation error in %s: %s - using defaults", p, e)
+    raw = p.read_bytes().strip()
+    if not raw:
         return GraphStoreConfig()
+    try:
+        overrides = json.loads(raw)
+    except (json.JSONDecodeError, ValueError) as e:
+        _log.warning("config parse error in %s: %s - using defaults", p, e)
+        return GraphStoreConfig()
+    if not isinstance(overrides, dict) or not overrides:
+        return GraphStoreConfig()
+    return _rebuild_config(GraphStoreConfig(), overrides)
 
 
 def save_config(config: GraphStoreConfig, path: str | Path) -> None:
-    """Save config to a JSON file (pretty-printed)."""
+    """Save config overrides to a JSON file.
+
+    Only writes values that differ from defaults. This keeps graphstore.json
+    minimal and ensures users benefit from future default improvements.
+    """
+    defaults = GraphStoreConfig()
+    current = msgspec.json.decode(msgspec.json.encode(config))
+    default_data = msgspec.json.decode(msgspec.json.encode(defaults))
+
+    diff: dict = {}
+    for section, fields in current.items():
+        if not isinstance(fields, dict):
+            continue
+        section_diff = {}
+        for field, value in fields.items():
+            default_val = default_data.get(section, {}).get(field)
+            if value != default_val:
+                section_diff[field] = value
+        if section_diff:
+            diff[section] = section_diff
+
     p = Path(path)
-    data = msgspec.json.decode(msgspec.json.encode(config))
-    p.write_text(json.dumps(data, indent=2) + "\n")
+    if diff:
+        p.write_text(json.dumps(diff, indent=2) + "\n")
+    elif p.exists():
+        p.unlink()
 
 
 def apply_env_overrides(config: GraphStoreConfig) -> GraphStoreConfig:
