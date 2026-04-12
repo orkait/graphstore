@@ -70,24 +70,34 @@ def main() -> int:
     p.add_argument("--ceiling-mb", type=int, default=3072)
     p.add_argument("--cache-dir", default="/cache/fastembed")
     p.add_argument("--run-tag", default="")
+    p.add_argument("--reranker", default=None, choices=["flashrank", "onnx"],
+                   help="reranker backend (flashrank=4-34MB CPU, onnx=custom model)")
+    p.add_argument("--reranker-model", default="rank-T5-flan",
+                   help="flashrank model name or onnx model description")
+    p.add_argument("--reranker-model-dir", default=None,
+                   help="path to ONNX cross-encoder reranker model dir")
+    p.add_argument("--reranker-onnx-file", default="onnx/model_int8.onnx",
+                   help="ONNX file within reranker model dir")
 
-    # GraphStore retrieval tuning
-    p.add_argument("--retrieval-depth", type=int, default=4,
-                   help="REMEMBER candidate multiplier (LIMIT k*depth, default 4)")
-    p.add_argument("--recall-depth", type=int, default=2,
+    # Adapter query strategy (how the adapter calls REMEMBER/RECALL)
+    p.add_argument("--retrieval-depth", type=int, default=None,
+                   help="REMEMBER candidate multiplier (LIMIT k*depth)")
+    p.add_argument("--recall-depth", type=int, default=None,
                    help="graph traversal depth for RECALL in multi-session queries")
-    p.add_argument("--max-query-entities", type=int, default=3,
+    p.add_argument("--max-query-entities", type=int, default=None,
                    help="max entities extracted from query for RECALL")
-    p.add_argument("--recency-boost-k", type=int, default=1,
-                   help="multiplier for recency-sorted results in knowledge-update (k * this)")
+    p.add_argument("--recency-boost-k", type=int, default=None,
+                   help="multiplier for recency-sorted results in knowledge-update")
+
+    # GraphStore engine config (mirrors graphstore.json, overrides config chain)
     p.add_argument("--remember-weights", default=None,
-                   help="5 comma-separated fusion weights: vector,bm25,recency,confidence,recall_freq")
+                   help="dsl.remember_weights - 5 comma-separated fusion weights")
     p.add_argument("--search-oversample", type=int, default=None,
-                   help="usearch ANN oversample factor (default 5, higher = more candidates)")
+                   help="vector.search_oversample - usearch ANN oversample factor")
     p.add_argument("--recall-decay", type=float, default=None,
-                   help="spreading activation decay per hop (default 0.7)")
+                   help="dsl.recall_decay - spreading activation decay per hop")
     p.add_argument("--similarity-threshold", type=float, default=None,
-                   help="minimum cosine similarity floor (default 0.85)")
+                   help="vector.similarity_threshold - minimum cosine similarity")
     args = p.parse_args()
 
     # --- Validate args early ---
@@ -171,16 +181,27 @@ def main() -> int:
         "embedder_query_prefix": args.embedder_query_prefix,
         "embed_batch_size": args.embed_batch_size,
         "ceiling_mb": args.ceiling_mb,
-        "retrieval_depth": args.retrieval_depth,
-        "recall_depth": args.recall_depth,
-        "max_query_entities": args.max_query_entities,
-        "recency_boost_k": args.recency_boost_k,
-        "remember_weights": [float(w) for w in args.remember_weights.split(",")] if args.remember_weights else None,
-        "search_oversample": args.search_oversample,
-        "recall_decay": args.recall_decay,
-        "similarity_threshold": args.similarity_threshold,
         "cache_dir": args.cache_dir,
+        "reranker": args.reranker,
+        "reranker_model": args.reranker_model,
+        "reranker_model_dir": args.reranker_model_dir,
+        "reranker_onnx_file": args.reranker_onnx_file,
     }
+    # Only pass tuning knobs the user explicitly set (otherwise adapter/graphstore defaults apply)
+    for attr, key in [
+        ("retrieval_depth", "retrieval_depth"),
+        ("recall_depth", "recall_depth"),
+        ("max_query_entities", "max_query_entities"),
+        ("recency_boost_k", "recency_boost_k"),
+        ("search_oversample", "search_oversample"),
+        ("recall_decay", "recall_decay"),
+        ("similarity_threshold", "similarity_threshold"),
+    ]:
+        val = getattr(args, attr, None)
+        if val is not None:
+            adapter_config[key] = val
+    if args.remember_weights:
+        adapter_config["remember_weights"] = [float(w) for w in args.remember_weights.split(",")]
     if args.system != "graphstore" and args.embedder in ("gguf", "onnx"):
         if args.embedder == "gguf":
             from graphstore.embedding.llamacpp_embedder import LlamaCppEmbedder
