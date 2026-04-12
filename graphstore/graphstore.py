@@ -130,7 +130,11 @@ class GraphStore:
             try:
                 from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
                 _embedder = Model2VecEmbedder(model_name=cfg.vector.model2vec_model)
-            except Exception:
+            except ImportError:
+                _embedder = None
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("embedder init failed: %s", e)
                 _embedder = None
         else:
             _embedder = None
