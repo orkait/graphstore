@@ -119,6 +119,27 @@ def _build_embedder(config: dict[str, Any]):
     raise ValueError(f"unknown embedder: {name!r}")
 
 
+def _build_reranker(config: dict[str, Any]):
+    backend = config.get("reranker", "").lower()
+    if backend == "flashrank":
+        from graphstore.embedding.reranker import FlashRankReranker
+        return FlashRankReranker(
+            model_name=config.get("reranker_model", "rank-T5-flan"),
+            max_length=int(config.get("reranker_max_length", 512)),
+        )
+    if backend == "onnx":
+        reranker_dir = config.get("reranker_model_dir")
+        if not reranker_dir:
+            return None
+        from graphstore.embedding.reranker import OnnxReranker
+        return OnnxReranker(
+            model_dir=reranker_dir,
+            onnx_file=config.get("reranker_onnx_file", "onnx/model_int8.onnx"),
+            max_length=int(config.get("reranker_max_length", 512)),
+        )
+    return None
+
+
 class GraphStoreAdapter:
     name = "graphstore"
     version = _GS_VERSION
@@ -130,10 +151,7 @@ class GraphStoreAdapter:
         self._embed_batch_size: int = int(self.config.get("embed_batch_size", 128))
         self._entity_extraction: bool = bool(self.config.get("entities", True))
         self._populate_fts: bool = bool(self.config.get("populate_fts", True))
-        self._retrieval_depth: int = int(self.config.get("retrieval_depth", 4))
-        self._recall_depth: int = int(self.config.get("recall_depth", 2))
-        self._max_query_entities: int = int(self.config.get("max_query_entities", 3))
-        self._recency_boost_k: int = int(self.config.get("recency_boost_k", 1))
+        self._reranker = _build_reranker(self.config)
         self._embedder = _build_embedder(self.config)
         emb_name = (self.config.get("embedder") or "model2vec").lower()
         if emb_name == "fastembed":
@@ -151,24 +169,20 @@ class GraphStoreAdapter:
     def reset(self) -> None:
         self.close()
         self._tmpdir = Path(tempfile.mkdtemp(prefix="gs_bench_"))
-        self._gs = GraphStore(
-            path=str(self._tmpdir),
-            ceiling_mb=self.config.get("ceiling_mb", 4096),
-            queued=False,
-            embedder=self._embedder,
-        )
-        weights = self.config.get("remember_weights")
-        if weights and len(weights) == 5:
-            self._gs._executor._remember_weights = weights
-        oversample = self.config.get("search_oversample")
-        if oversample is not None:
-            self._gs._executor._search_oversample = oversample
-        decay = self.config.get("recall_decay")
-        if decay is not None:
-            self._gs._executor._recall_decay = decay
-        sim_thresh = self.config.get("similarity_threshold")
-        if sim_thresh is not None:
-            self._gs._executor._similarity_threshold = sim_thresh
+        # Build constructor kwargs from any CLI overrides (only explicitly set values)
+        gs_kwargs: dict[str, Any] = {
+            "path": str(self._tmpdir),
+            "ceiling_mb": self.config.get("ceiling_mb", 4096),
+            "queued": False,
+            "embedder": self._embedder,
+        }
+        for key in ("remember_weights", "search_oversample", "recall_decay",
+                     "similarity_threshold", "retrieval_depth", "recall_depth",
+                     "max_query_entities", "recency_boost_k"):
+            val = self.config.get(key)
+            if val is not None:
+                gs_kwargs[key] = val
+        self._gs = GraphStore(**gs_kwargs)
         self._gs.execute(
             'SYS REGISTER NODE KIND "message" '
             'REQUIRED session:string, role:string, content:string '
@@ -276,34 +290,41 @@ class GraphStoreAdapter:
     def query(self, question: str, k: int = 5) -> QueryResult:
         return self.query_with_context(QueryContext(question=question), k=k)
 
+    def _cfg(self, attr: str):
+        """Read a config value from the GraphStore executor (single source of truth)."""
+        return getattr(self._gs._executor, f"_{attr}")
+
     def _dispatch(self, question: str, category: str, k: int) -> tuple[list[str], Any]:
+        strategy = self._cfg("retrieval_strategy")
+        handler = self._STRATEGIES.get(strategy, self._strategy_full)
+        return handler(self, question, k)
+
+    def _strategy_remember(self, question: str, k: int) -> tuple[list[str], Any]:
+        """Hybrid only. Fast, no graph overhead."""
         q = _escape(question)
-        depth = self._retrieval_depth  # multiplier for REMEMBER candidate pool
-
-        if category == "multi-session":
-            return self._multi_session(q, question, k, depth)
-        if category == "knowledge-update":
-            return self._knowledge_update(q, k, depth)
-
+        depth = self._cfg("retrieval_depth")
         r = self._gs.execute(
             f'REMEMBER "{q}" LIMIT {k * depth} WHERE kind = "message"'
         )
-        texts = self._texts(r.data)
-        return texts[:k], r.data
+        return self._texts(r.data)[:k], r.data
 
-    def _multi_session(self, q_escaped: str, q_raw: str, k: int, depth: int) -> tuple[list[str], Any]:
-        gs = self._gs
-        primary = gs.execute(
-            f'REMEMBER "{q_escaped}" LIMIT {k * depth} WHERE kind = "message"'
+    def _strategy_remember_graph(self, question: str, k: int) -> tuple[list[str], Any]:
+        """Hybrid + entity graph traversal. Good for cross-session."""
+        q = _escape(question)
+        depth = self._cfg("retrieval_depth")
+        primary = self._gs.execute(
+            f'REMEMBER "{q}" LIMIT {k * depth} WHERE kind = "message"'
         )
         merged = self._texts(primary.data)
 
         if self._entity_extraction:
-            for ent_name in _extract_entities(q_raw)[:self._max_query_entities]:
+            max_ents = self._cfg("max_query_entities")
+            recall_d = self._cfg("recall_depth")
+            for ent_name in _extract_entities(question)[:max_ents]:
                 ent_id = f"ent:{_slug(ent_name)}"
                 try:
-                    rec = gs.execute(
-                        f'RECALL FROM "{ent_id}" DEPTH {self._recall_depth} LIMIT {k}'
+                    rec = self._gs.execute(
+                        f'RECALL FROM "{ent_id}" DEPTH {recall_d} LIMIT {k}'
                     )
                     for text in self._texts(rec.data):
                         if text not in merged:
@@ -313,16 +334,18 @@ class GraphStoreAdapter:
 
         return merged[:k], primary.data
 
-    def _knowledge_update(self, q_escaped: str, k: int, depth: int) -> tuple[list[str], Any]:
-        gs = self._gs
-        primary = gs.execute(
-            f'REMEMBER "{q_escaped}" LIMIT {k * depth} WHERE kind = "message"'
+    def _strategy_remember_recency(self, question: str, k: int) -> tuple[list[str], Any]:
+        """Hybrid + recency boost. Good for knowledge updates."""
+        q = _escape(question)
+        depth = self._cfg("retrieval_depth")
+        primary = self._gs.execute(
+            f'REMEMBER "{q}" LIMIT {k * depth} WHERE kind = "message"'
         )
         merged = self._texts(primary.data)
 
         try:
-            recency_k = k * self._recency_boost_k
-            recent = gs.execute(
+            recency_k = k * self._cfg("recency_boost_k")
+            recent = self._gs.execute(
                 f'NODES WHERE kind = "message" '
                 f'ORDER BY __updated_at__ DESC LIMIT {recency_k}'
             )
@@ -333,6 +356,100 @@ class GraphStoreAdapter:
             pass
 
         return merged[:k], primary.data
+
+    def _strategy_full(self, question: str, k: int) -> tuple[list[str], Any]:
+        """Hybrid + graph + recency. All signals, no category routing."""
+        q = _escape(question)
+        depth = self._cfg("retrieval_depth")
+        primary = self._gs.execute(
+            f'REMEMBER "{q}" LIMIT {k * depth} WHERE kind = "message"'
+        )
+        merged = self._texts(primary.data)
+
+        if self._entity_extraction:
+            max_ents = self._cfg("max_query_entities")
+            recall_d = self._cfg("recall_depth")
+            for ent_name in _extract_entities(question)[:max_ents]:
+                ent_id = f"ent:{_slug(ent_name)}"
+                try:
+                    rec = self._gs.execute(
+                        f'RECALL FROM "{ent_id}" DEPTH {recall_d} LIMIT {k}'
+                    )
+                    for text in self._texts(rec.data):
+                        if text not in merged:
+                            merged.append(text)
+                except Exception:
+                    pass
+
+        try:
+            recency_k = k * self._cfg("recency_boost_k")
+            recent = self._gs.execute(
+                f'NODES WHERE kind = "message" '
+                f'ORDER BY __updated_at__ DESC LIMIT {recency_k}'
+            )
+            for text in self._texts(recent.data):
+                if text not in merged:
+                    merged.append(text)
+        except Exception:
+            pass
+
+        return merged[:k], primary.data
+
+    def _strategy_lexical_boost(self, question: str, k: int) -> tuple[list[str], Any]:
+        """Hybrid + extra lexical search. Good for keyword-heavy queries."""
+        q = _escape(question)
+        depth = self._cfg("retrieval_depth")
+        primary = self._gs.execute(
+            f'REMEMBER "{q}" LIMIT {k * depth} WHERE kind = "message"'
+        )
+        merged = self._texts(primary.data)
+
+        try:
+            lexical = self._gs.execute(
+                f'LEXICAL SEARCH "{q}" LIMIT {k * 2}'
+            )
+            for text in self._texts(lexical.data):
+                if text not in merged:
+                    merged.append(text)
+        except Exception:
+            pass
+
+        return merged[:k], primary.data
+
+    def _rerank(self, question: str, texts: list[str], k: int) -> list[str]:
+        """Rerank texts by cross-encoder relevance. Falls back to truncation if no reranker."""
+        if not self._reranker or len(texts) <= k:
+            return texts[:k]
+        scores = self._reranker.score(question, texts)
+        ranked = sorted(zip(scores, texts), reverse=True)
+        return [t for _, t in ranked[:k]]
+
+    def _strategy_remember_rerank(self, question: str, k: int) -> tuple[list[str], Any]:
+        """Hybrid retrieval + cross-encoder rerank. Research-backed best pattern."""
+        q = _escape(question)
+        depth = self._cfg("retrieval_depth")
+        primary = self._gs.execute(
+            f'REMEMBER "{q}" LIMIT {k * depth} WHERE kind = "message"'
+        )
+        candidates = self._texts(primary.data)
+        reranked = self._rerank(question, candidates, k)
+        return reranked, primary.data
+
+    def _strategy_full_rerank(self, question: str, k: int) -> tuple[list[str], Any]:
+        """All signals + cross-encoder rerank. Maximum accuracy."""
+        texts, raw = self._strategy_full(question, k * 2)
+        reranked = self._rerank(question, texts, k)
+        return reranked, raw
+
+    _STRATEGIES = {
+        "remember": _strategy_remember,
+        "remember_graph": _strategy_remember_graph,
+        "remember_recency": _strategy_remember_recency,
+        "remember_lexical": _strategy_lexical_boost,
+        "remember_rerank": _strategy_remember_rerank,
+        "full": _strategy_full,
+        "full_rerank": _strategy_full_rerank,
+    }
 
     @staticmethod
     def _texts(rows: Any) -> list[str]:

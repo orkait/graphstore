@@ -90,6 +90,89 @@ SUPPORTED_MODELS = {
         },
         "default_variant": "Q4_K_M",
     },
+    "jina-v5-nano-retrieval": {
+        "family": "hf_onnx",
+        "repo_id": "jinaai/jina-embeddings-v5-text-nano-retrieval",
+        "description": (
+            "Jina v5 Nano Retrieval 239M (EuroBERT-based) via ONNX. "
+            "MTEB v2 71.0, 119+ languages, 32k context, mean pooling. "
+            "Best quality-to-size ratio for local retrieval."
+        ),
+        "max_length": 8192,
+        "base_dims": 768,
+        "allowed_dims": [768, 512, 256, 128],
+        "default_dims": 768,
+        "query_prefix": "",
+        "doc_prefix_template": "",
+        "pooling": "mean",
+        "deps": ["onnxruntime", "tokenizers", "huggingface_hub"],
+        "variants": {
+            "fp16": {"files": ["onnx/model_fp16.onnx", "onnx/model_fp16.onnx_data"]},
+            "q4": {"files": ["onnx/model_q4.onnx", "onnx/model_q4.onnx_data"]},
+            "q4f16": {"files": ["onnx/model_q4f16.onnx", "onnx/model_q4f16.onnx_data"]},
+            "int8": {"files": ["onnx/model_quantized.onnx", "onnx/model_quantized.onnx_data"]},
+        },
+        "default_variant": "q4",
+    },
+    "jina-v5-small-retrieval": {
+        "family": "hf_onnx",
+        "repo_id": "jinaai/jina-embeddings-v5-text-small-retrieval",
+        "description": (
+            "Jina v5 Small Retrieval 677M (Qwen3-0.6B-based) via ONNX. "
+            "MTEB v2 71.7, 119+ languages, 32k context, last-token pooling. "
+            "Top of MTEB for models under 1B params."
+        ),
+        "max_length": 8192,
+        "base_dims": 1024,
+        "allowed_dims": [1024, 512, 256, 128],
+        "default_dims": 1024,
+        "query_prefix": "",
+        "doc_prefix_template": "",
+        "pooling": "last_token",
+        "deps": ["onnxruntime", "tokenizers", "huggingface_hub"],
+        "variants": {
+            "fp32": {"files": ["onnx/model.onnx", "onnx/model.onnx_data"]},
+        },
+        "default_variant": "fp32",
+    },
+    "jina-v5-nano-retrieval-gguf": {
+        "family": "gguf",
+        "repo_id": "jinaai/jina-embeddings-v5-text-nano-retrieval",
+        "description": "Jina v5 Nano Retrieval 239M via GGUF. MTEB 71.0, 768 dims, Q2-Q8 quant tiers.",
+        "max_length": 8192,
+        "base_dims": 768,
+        "allowed_dims": [768, 512, 256, 128],
+        "default_dims": 768,
+        "query_prefix": "",
+        "doc_prefix_template": "",
+        "pooling": "mean",
+        "deps": ["llama_cpp", "huggingface_hub"],
+        "variants": {
+            "Q4_K_M": {"files": ["v5-nano-retrieval-Q4_K_M.gguf"]},
+            "Q8_0": {"files": ["v5-nano-retrieval-Q8_0.gguf"]},
+            "f16": {"files": ["v5-nano-retrieval-F16.gguf"]},
+        },
+        "default_variant": "Q4_K_M",
+    },
+    "jina-v5-small-retrieval-gguf": {
+        "family": "gguf",
+        "repo_id": "jinaai/jina-embeddings-v5-text-small-retrieval",
+        "description": "Jina v5 Small Retrieval 677M via GGUF. MTEB 71.7, 1024 dims, Q2-Q8 quant tiers.",
+        "max_length": 8192,
+        "base_dims": 1024,
+        "allowed_dims": [1024, 512, 256, 128],
+        "default_dims": 1024,
+        "query_prefix": "",
+        "doc_prefix_template": "",
+        "pooling": "last_token",
+        "deps": ["llama_cpp", "huggingface_hub"],
+        "variants": {
+            "Q4_K_M": {"files": ["v5-small-retrieval-Q4_K_M.gguf"]},
+            "Q8_0": {"files": ["v5-small-retrieval-Q8_0.gguf"]},
+            "f16": {"files": ["v5-small-retrieval-F16.gguf"]},
+        },
+        "default_variant": "Q4_K_M",
+    },
 }
 
 

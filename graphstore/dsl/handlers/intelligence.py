@@ -154,7 +154,8 @@ class IntelligenceHandlers:
         combined_mask = mask & vs_mask
 
         k = q.limit.value if q.limit else 10
-        search_k = k * 3 if q.where else k
+        sim_oversample = getattr(self, '_similar_to_oversample', 3)
+        search_k = k * sim_oversample if q.where else k
         slots, dists = self._vector_store.search(query_vec, k=search_k, mask=combined_mask)
 
         conf_col = self.store.columns.get_column("__confidence__", n)
@@ -193,7 +194,8 @@ class IntelligenceHandlers:
             return Result(kind="nodes", data=[], count=0)
 
         target_k = q.limit.value if q.limit else 10
-        hits = self._document_store.search_text(q.query, limit=target_k * 3)
+        lex_oversample = getattr(self, '_lexical_search_oversample', 3)
+        hits = self._document_store.search_text(q.query, limit=target_k * lex_oversample)
 
         results = []
         for slot, score in hits:
@@ -349,8 +351,9 @@ class IntelligenceHandlers:
             col_data, col_pres, _ = updated_col
             pres_at = col_pres[slot_arr]
             if pres_at.any():
+                half_life = getattr(self, '_recency_half_life_days', 30.0)
                 recency_signal = _algo_recency_decay(
-                    col_data[slot_arr], pres_at, now_ms, half_life_days=30.0,
+                    col_data[slot_arr], pres_at, now_ms, half_life_days=half_life,
                 )
 
         confidence_signal = np.ones(m, dtype=np.float64)
