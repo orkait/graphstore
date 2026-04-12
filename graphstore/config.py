@@ -69,6 +69,8 @@ class DslConfig(msgspec.Struct, frozen=True):
     recency_half_life_days: float = 30.0
     similar_to_oversample: int = 3
     lexical_search_oversample: int = 3
+    hybridrag_weight: float = 0.15
+    hybridrag_min_seeds: int = 5
     cache_gc_threshold: int = 200
 
 
@@ -150,6 +152,8 @@ _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "recency_half_life_days": ("dsl", "recency_half_life_days"),
     "similar_to_oversample": ("dsl", "similar_to_oversample"),
     "lexical_search_oversample": ("dsl", "lexical_search_oversample"),
+    "hybridrag_weight":     ("dsl", "hybridrag_weight"),
+    "hybridrag_min_seeds":  ("dsl", "hybridrag_min_seeds"),
     "search_oversample":    ("vector", "search_oversample"),
     "similarity_threshold": ("vector", "similarity_threshold"),
     "duplicate_threshold":  ("vector", "duplicate_threshold"),

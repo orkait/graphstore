@@ -390,10 +390,14 @@ class IntelligenceHandlers:
         base_final *= live_mask
 
         # --- HybridRAG Expansion (Vector-First k-Hop) ---
-        seed_count = min(len(slot_arr), max(5, target_k // 2))
+        # Use top fusion results as seeds, spread through graph, blend back
+        # with normalized weight so graph signal doesn't overwhelm fusion.
+        graph_weight = getattr(self, '_hybridrag_weight', 0.15)
+        min_seeds = getattr(self, '_hybridrag_min_seeds', 5)
+        seed_count = min(len(slot_arr), max(min_seeds, target_k // 2))
         final_scores = base_final.copy()
-        
-        if seed_count > 0:
+
+        if seed_count > 0 and self.store.edge_matrices.total_edges > 0:
             base_order = slot_arr[np.argsort(-base_final[slot_arr])]
             seed_slots = base_order[:seed_count].astype(np.int64)
             seed_scores = base_final[seed_slots].astype(np.float32)
@@ -404,23 +408,27 @@ class IntelligenceHandlers:
                     mat_t = resize_csr(mat_t, n)
                 if mat_t_delta is not None and mat_t_delta.shape[0] < n:
                     mat_t_delta = resize_csr(mat_t_delta, n)
-                
+
                 activation = _algo_spreading_activation(
                     matrix_t=mat_t,
                     cue_slot=seed_slots,
-                    depth=2, 
+                    depth=getattr(self, '_recall_depth', 2),
                     decay=getattr(self, '_recall_decay', 0.7),
                     live_mask=live_mask,
                     matrix_t_delta=mat_t_delta,
                     cue_scores=seed_scores,
                 )
-                
-                final_scores += activation
+
+                # Normalize activation to 0-1 before blending
+                act_max = activation.max()
+                if act_max > 0:
+                    activation /= act_max
+                    final_scores = (1 - graph_weight) * base_final + graph_weight * activation
 
         valid_slots = np.where(final_scores > 0)[0]
         if len(valid_slots) == 0:
             return Result(kind="nodes", data=[], count=0)
-            
+
         order = valid_slots[np.argsort(-final_scores[valid_slots])]
 
         results = []

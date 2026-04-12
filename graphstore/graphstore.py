@@ -276,6 +276,8 @@ class GraphStore:
         self._executor._recency_half_life_days = cfg.dsl.recency_half_life_days
         self._executor._similar_to_oversample = cfg.dsl.similar_to_oversample
         self._executor._lexical_search_oversample = cfg.dsl.lexical_search_oversample
+        self._executor._hybridrag_weight = cfg.dsl.hybridrag_weight
+        self._executor._hybridrag_min_seeds = cfg.dsl.hybridrag_min_seeds
         self._executor._chunk_max_size = cfg.document.chunk_max_size
         self._executor._summary_max_length = cfg.document.summary_max_length
         self._executor._chunk_overlap = cfg.document.chunk_overlap
