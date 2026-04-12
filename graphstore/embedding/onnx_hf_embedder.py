@@ -179,6 +179,12 @@ def _resolve_providers(providers: list[str] | str | None) -> list[str]:
     available = set(ort.get_available_providers())
 
     resolved = [p for p in wanted if p in available]
+    dropped = [p for p in wanted if p not in available and p != "CPUExecutionProvider"]
+    if dropped:
+        import logging
+        logging.getLogger(__name__).warning(
+            "requested providers %s not available, falling back to CPU", dropped
+        )
     if "CPUExecutionProvider" not in resolved:
         resolved.append("CPUExecutionProvider")
     return resolved
@@ -392,7 +398,7 @@ class OnnxHFEmbedder(Embedder):
             feed["position_ids"] = np.maximum(pos, 0)
         if self._kv_cache_specs:
             for name, num_heads, head_dim, dtype in self._kv_cache_specs:
-                feed[name] = np.zeros((batch, num_heads, 0, head_dim), dtype=dtype)
+                feed[name] = np.zeros((input_ids.shape[0], num_heads, 0, head_dim), dtype=dtype)
 
         outputs = self._session.run(None, feed)
         embeddings = outputs[self._hidden_output_idx]
