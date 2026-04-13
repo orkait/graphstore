@@ -20,9 +20,7 @@ _log = logging.getLogger(__name__)
 
 BATCH_SIZE = 8          # max concurrent per provider
 CALL_TIMEOUT = 90       # seconds per LLM call
-FAST_FAIL_TIME = 5      # if all empties arrive within this, provider is rate-limited
-FAST_FAIL_RATIO = 0.75  # if this fraction of batch is empty within FAST_FAIL_TIME, skip provider
-MAX_ROUNDS = 15
+MAX_ROUNDS = 10
 
 
 async def _call_one(
@@ -77,42 +75,22 @@ async def _run_batch(
     prompts: dict[int, str],
     provider: dict,
     answers: dict[int, str],
-) -> tuple[list[int], bool]:
-    """Run a batch of indices on one provider.
-
-    Returns (failed_indices, was_rate_limited).
-    Rate-limited = most results came back empty within FAST_FAIL_TIME.
-    """
+) -> list[int]:
+    """Run a batch of indices on one provider. Returns failed indices."""
     if not indices:
-        return [], False
+        return []
 
-    start = time.monotonic()
     tasks = [_call_indexed(idx, prompts[idx], provider) for idx in indices]
-
     failed = []
-    empty_count = 0
-    answered_count = 0
-    rate_limited = False
 
     for coro in asyncio.as_completed(tasks):
         idx, result = await coro
-
         if result:
             answers[idx] = result
-            answered_count += 1
         else:
-            empty_count += 1
             failed.append(idx)
 
-        # Fast-fail: if most empties arrive quickly, provider is rate-limited
-        elapsed = time.monotonic() - start
-        total_done = empty_count + answered_count
-        if (elapsed < FAST_FAIL_TIME
-                and total_done >= len(indices) * FAST_FAIL_RATIO
-                and empty_count > answered_count * 2):
-            rate_limited = True
-
-    return failed, rate_limited
+    return failed
 
 
 async def generate_all_answers(
@@ -138,6 +116,8 @@ async def generate_all_answers(
     all_indices = [q["idx"] for q in questions]
     answers: dict[int, str] = {}
 
+    prev_answered = 0
+    no_progress_count = 0
     for round_num in range(MAX_ROUNDS):
         pending = [i for i in all_indices if i not in answers]
         if not pending:
@@ -167,32 +147,31 @@ async def generate_all_answers(
 
         results = await asyncio.gather(*batch_tasks)
 
-        # Collect rate-limited providers
-        rl_providers = set()
-        all_failed = []
-        for (failed, was_rl), (_, provider) in zip(results, provider_batches):
-            all_failed.extend(failed)
-            if was_rl:
-                rl_providers.add(provider.get("pid", ""))
+        for failed in results:
+            pass  # failures already tracked by answers dict
 
         answered_count = len(answers)
         remaining = n - answered_count
         if on_progress:
             on_progress(answered_count, n)
-        print(
-            f"    Round {round_num+1} done: {answered_count}/{n} answered, {remaining} remaining"
-            + (f" (rate-limited: {rl_providers})" if rl_providers else ""),
-            flush=True,
-        )
+        print(f"    Round {round_num+1} done: {answered_count}/{n} answered, {remaining} remaining", flush=True)
 
         if remaining == 0:
             break
 
-        # Cooldown when rate-limited - let the window reset
-        if rl_providers:
-            wait = 10 if len(rl_providers) < n_prov else 15
-            print(f"    Cooldown {wait}s (rate-limited providers: {rl_providers})...", flush=True)
-            await asyncio.sleep(wait)
+        # Brief cooldown between rounds to avoid hammering providers
+        if remaining > 0:
+            await asyncio.sleep(5)
+
+        # Early exit if no progress for 2 consecutive rounds
+        if round_num > 0 and answered_count == prev_answered:
+            no_progress_count += 1
+            if no_progress_count >= 2:
+                print(f"    No progress for {no_progress_count} rounds, stopping.", flush=True)
+                break
+        else:
+            no_progress_count = 0
+        prev_answered = answered_count
 
     # Build ordered result list
     result = []
