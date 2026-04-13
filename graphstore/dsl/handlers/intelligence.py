@@ -324,7 +324,13 @@ class IntelligenceHandlers:
                 has_fts=bool(self._document_store),
                 has_vectors=bool(self._embedder and self._vector_store and self._vector_store.count() > 0),
             )
-            plan = planner.plan(plan_ctx, explicit_overrides={})
+            plan = planner.plan(
+                plan_ctx,
+                explicit_overrides={
+                    "fusion_method": getattr(self, "_fusion_method", "weighted"),
+                    "use_nucleus": getattr(self, "_nucleus_expansion", False),
+                },
+            )
 
         # ── Stage 1: Candidate gathering (vector + BM25) ──────────────
         vec_slots_np = np.empty(0, dtype=np.int64)

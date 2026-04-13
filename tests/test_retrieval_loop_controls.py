@@ -11,13 +11,13 @@ from autoresearch import tune_config
 def test_adapter_routes_categories_when_no_explicit_strategy():
     adapter = GraphStoreAdapter(config={})
 
-    assert adapter._resolve_strategy("multi-session") == "remember_graph"
-    assert adapter._resolve_strategy("temporal-reasoning") == "remember_recency"
-    assert adapter._resolve_strategy("knowledge-update") == "remember_recency"
-    assert adapter._resolve_strategy("single-session-user") == "remember_lexical"
-    assert adapter._resolve_strategy("single-session-assistant") == "remember_lexical"
-    assert adapter._resolve_strategy("single-session-preference") == "remember_lexical"
-    assert adapter._resolve_strategy("unknown") == "remember_lexical"
+    assert adapter._resolve_strategy("multi-session") == "full"
+    assert adapter._resolve_strategy("temporal-reasoning") == "full"
+    assert adapter._resolve_strategy("knowledge-update") == "full"
+    assert adapter._resolve_strategy("single-session-user") == "full"
+    assert adapter._resolve_strategy("single-session-assistant") == "full"
+    assert adapter._resolve_strategy("single-session-preference") == "full"
+    assert adapter._resolve_strategy("unknown") == "full"
 
 
 def test_adapter_respects_explicit_strategy_override():

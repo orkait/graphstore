@@ -389,14 +389,7 @@ class GraphStoreAdapter:
         explicit = self.config.get("retrieval_strategy")
         if explicit is not None:
             return explicit
-
-        if category == "multi-session":
-            return "remember_graph"
-        if category in ("temporal-reasoning", "knowledge-update"):
-            return "remember_recency"
-        if category in ("single-session-user", "single-session-assistant", "single-session-preference"):
-            return "remember_lexical"
-        return "remember_lexical"
+        return "full"
 
     def _dispatch(self, question: str, category: str, k: int) -> tuple[list[str], Any]:
         """Dispatch to the configured retrieval strategy."""
