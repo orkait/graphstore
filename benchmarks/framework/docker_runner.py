@@ -102,6 +102,10 @@ def main() -> int:
                    help="dsl.recall_decay - spreading activation decay per hop")
     p.add_argument("--similarity-threshold", type=float, default=None,
                    help="vector.similarity_threshold - minimum cosine similarity")
+    p.add_argument("--fusion-method", default=None, choices=["weighted", "rrf"],
+                   help="dsl.fusion_method - score fusion strategy")
+    p.add_argument("--rrf-k", type=float, default=None,
+                   help="dsl.rrf_k - RRF ranking constant (default 60)")
     args = p.parse_args()
 
     # --- Validate args early ---
@@ -201,6 +205,8 @@ def main() -> int:
         ("search_oversample", "search_oversample"),
         ("recall_decay", "recall_decay"),
         ("similarity_threshold", "similarity_threshold"),
+        ("fusion_method", "fusion_method"),
+        ("rrf_k", "rrf_k"),
     ]:
         val = getattr(args, attr, None)
         if val is not None:
