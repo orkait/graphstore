@@ -1,7 +1,7 @@
 """Kaggle: GraphStore + Jina v5 Nano on LongMemEval-S (500 records)
 
-Config source of truth: bench_config.py (values inlined here because
-Kaggle copies scripts to /kaggle/src/script.py, breaking sibling imports).
+Tuning config: benchmarks/graphstore.json (loaded via GRAPHSTORE_CONFIG env var)
+Environment config: inlined below (Kaggle-specific paths, deps, GPU settings)
 """
 import subprocess, sys, os
 
@@ -29,6 +29,9 @@ snapshot_download("xiaowu0162/longmemeval-cleaned",
 print("Cloning graphstore...")
 subprocess.check_call(["git", "clone", "--depth", "1",
     "https://github.com/orkait/graphstore.git", "/kaggle/working/graphstore"])
+
+# Point GraphStore at the benchmark config (single source of truth for tuning)
+os.environ["GRAPHSTORE_CONFIG"] = "/kaggle/working/graphstore/benchmarks/graphstore.json"
 
 sys.path.insert(0, "/kaggle/working/graphstore")
 sys.argv = ["bench",

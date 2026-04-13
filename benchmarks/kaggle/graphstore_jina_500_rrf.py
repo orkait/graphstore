@@ -1,4 +1,8 @@
-"""Kaggle: GraphStore + Jina v5 Nano + RRF fusion on LongMemEval-S (500 records)"""
+"""Kaggle: GraphStore + Jina v5 Nano + RRF fusion on LongMemEval-S (500 records)
+
+Same as graphstore_jina_500.py but overrides fusion_method to rrf via CLI arg.
+Tuning base: benchmarks/graphstore.json. CLI args override JSON (highest priority).
+"""
 import subprocess, sys, os
 
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
@@ -25,6 +29,8 @@ snapshot_download("xiaowu0162/longmemeval-cleaned",
 print("Cloning graphstore...")
 subprocess.check_call(["git", "clone", "--depth", "1",
     "https://github.com/orkait/graphstore.git", "/kaggle/working/graphstore"])
+
+os.environ["GRAPHSTORE_CONFIG"] = "/kaggle/working/graphstore/benchmarks/graphstore.json"
 
 sys.path.insert(0, "/kaggle/working/graphstore")
 sys.argv = ["bench",
