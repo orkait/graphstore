@@ -1,4 +1,6 @@
-"""Shared benchmark config for Kaggle notebooks."""
+"""Single source of truth for Kaggle benchmark configuration."""
+
+import os
 
 # Embedder
 EMBEDDER = "onnx"
@@ -25,13 +27,13 @@ MODEL_DIR = "/kaggle/working/jina-nano"
 DATA_DIR = "/kaggle/working/longmemeval-data"
 RESULTS_DIR = "/kaggle/working/results"
 GRAPHSTORE_DIR = "/kaggle/working/graphstore"
+GRAPHSTORE_REPO = "https://github.com/orkait/graphstore.git"
 
-# Deps
+# Deps (graphstore is cloned from source, these are its runtime dependencies)
 PIP_DEPS = [
     "numpy>=1.24", "scipy>=1.10", "lark>=1.1", "usearch>=2.0",
     "model2vec>=0.4", "msgspec>=0.18", "croniter>=6.0", "orjson>=3.11.8",
-    "fastembed>=0.8", "psutil>=5.9",
-    "chromadb>=0.5", "rank-bm25>=0.2.2",
+    "psutil>=5.9",
     "tokenizers>=0.20", "onnxruntime-gpu>=1.23", "onnx>=1.14",
     "huggingface_hub",
 ]
