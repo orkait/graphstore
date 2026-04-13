@@ -79,6 +79,15 @@ class GraphStore:
                  recency_half_life_days=_UNSET,
                  similar_to_oversample=_UNSET,
                  lexical_search_oversample=_UNSET,
+                 fusion_method=_UNSET,
+                 rrf_k=_UNSET,
+                 type_weights=_UNSET,
+                 temporal_weight=_UNSET,
+                 temporal_decay_days=_UNSET,
+                 nucleus_expansion=_UNSET,
+                 nucleus_hops=_UNSET,
+                 nucleus_max_neighbors=_UNSET,
+                 recency_mode=_UNSET,
                  ):
         # Load config: explicit object > explicit path > env var > db dir > defaults
         if config is not None:
@@ -131,6 +140,24 @@ class GraphStore:
             overrides["similar_to_oversample"] = similar_to_oversample
         if lexical_search_oversample is not self._UNSET:
             overrides["lexical_search_oversample"] = lexical_search_oversample
+        if fusion_method is not self._UNSET:
+            overrides["fusion_method"] = fusion_method
+        if rrf_k is not self._UNSET:
+            overrides["rrf_k"] = rrf_k
+        if type_weights is not self._UNSET:
+            overrides["type_weights"] = type_weights
+        if temporal_weight is not self._UNSET:
+            overrides["temporal_weight"] = temporal_weight
+        if temporal_decay_days is not self._UNSET:
+            overrides["temporal_decay_days"] = temporal_decay_days
+        if nucleus_expansion is not self._UNSET:
+            overrides["nucleus_expansion"] = nucleus_expansion
+        if nucleus_hops is not self._UNSET:
+            overrides["nucleus_hops"] = nucleus_hops
+        if nucleus_max_neighbors is not self._UNSET:
+            overrides["nucleus_max_neighbors"] = nucleus_max_neighbors
+        if recency_mode is not self._UNSET:
+            overrides["recency_mode"] = recency_mode
         if overrides:
             self._config = merge_kwargs(self._config, **overrides)
         cfg = self._config
@@ -268,16 +295,25 @@ class GraphStore:
         self._executor._fts_full_text = cfg.document.fts_full_text
         self._executor._recall_decay = cfg.dsl.recall_decay
         self._executor._remember_weights = cfg.dsl.remember_weights
+        self._executor._fusion_method = cfg.dsl.fusion_method
+        self._executor._rrf_k = cfg.dsl.rrf_k
         self._executor._retrieval_strategy = cfg.dsl.retrieval_strategy
         self._executor._retrieval_depth = cfg.dsl.retrieval_depth
         self._executor._recall_depth = cfg.dsl.recall_depth
         self._executor._max_query_entities = cfg.dsl.max_query_entities
+        self._executor._recency_mode = cfg.dsl.recency_mode
         self._executor._recency_boost_k = cfg.dsl.recency_boost_k
         self._executor._recency_half_life_days = cfg.dsl.recency_half_life_days
         self._executor._similar_to_oversample = cfg.dsl.similar_to_oversample
         self._executor._lexical_search_oversample = cfg.dsl.lexical_search_oversample
         self._executor._hybridrag_weight = cfg.dsl.hybridrag_weight
         self._executor._hybridrag_min_seeds = cfg.dsl.hybridrag_min_seeds
+        self._executor._type_weights = cfg.dsl.type_weights
+        self._executor._temporal_weight = cfg.dsl.temporal_weight
+        self._executor._temporal_decay_days = cfg.dsl.temporal_decay_days
+        self._executor._nucleus_expansion = cfg.dsl.nucleus_expansion
+        self._executor._nucleus_hops = cfg.dsl.nucleus_hops
+        self._executor._nucleus_max_neighbors = cfg.dsl.nucleus_max_neighbors
         self._executor._chunk_max_size = cfg.document.chunk_max_size
         self._executor._summary_max_length = cfg.document.summary_max_length
         self._executor._chunk_overlap = cfg.document.chunk_overlap

@@ -19,6 +19,7 @@ from graphstore.dsl.ast_nodes import (
     SysCheckpoint,
     SysClear,
     SysConnect,
+    SysConsolidate,
     SysContradictions,
     SysDescribe,
     SysDuplicates,
@@ -140,6 +141,7 @@ class SystemExecutor:
             SysDuplicates: self._duplicates,
             SysEmbedders: self._embedders,
             SysConnect: self._connect,
+            SysConsolidate: self._consolidate,
             SysReembed: self._reembed,
             SysStatus: self._status,
             SysRetain: self._retain,
@@ -752,6 +754,128 @@ class SystemExecutor:
             self.store, self._vector_store,
             threshold=q.threshold, where_expr=q.where,
         )
+
+    def _consolidate(self, q: SysConsolidate) -> Result:
+        """SYS CONSOLIDATE: cluster episodic memories into observations.
+
+        Groups messages by entity (via 'mentions' edges), clusters by
+        cosine similarity, creates 'observation' nodes with evidence links.
+        No LLM required - picks the most representative message per cluster.
+        """
+        from graphstore.algos.consolidation import cluster_by_entity
+
+        store = self.store
+        n = store._next_slot
+        live = store.compute_live_mask(n)
+
+        # Build entity -> message slot mapping from graph edges
+        entity_to_slots: dict[str, list[int]] = {}
+        for etype, edge_list in store._edges_by_type.items():
+            if etype != "mentions":
+                continue
+            for src_slot, tgt_slot, _data in edge_list:
+                if not live[src_slot] or not live[tgt_slot]:
+                    continue
+                # src=message, tgt=entity
+                entity_id = store._slot_to_id(tgt_slot)
+                if entity_id:
+                    entity_to_slots.setdefault(entity_id, []).append(src_slot)
+
+        if not entity_to_slots:
+            return Result(kind="ok", data={"observations": 0, "reason": "no entity edges found"}, count=0)
+
+        # Gather texts
+        texts: dict[int, str] = {}
+        lookup = store.string_table.lookup
+        for entity_slots in entity_to_slots.values():
+            for s in entity_slots:
+                node = store._materialize_slot(s)
+                if node:
+                    texts[s] = node.get("content") or node.get("summary") or node.get("claim") or ""
+
+        # Gather event times
+        event_times: dict[int, int] = {}
+        event_col = store.columns.get_column("__event_at__", n)
+        if event_col is not None:
+            col_data, col_pres, _ = event_col
+            for slots in entity_to_slots.values():
+                for s in slots:
+                    if col_pres[s]:
+                        event_times[s] = int(col_data[s])
+
+        # Gather vectors
+        vs = self._vector_store
+        vectors = None
+        has_vector = None
+        if vs is not None:
+            max_slot = max((s for slots in entity_to_slots.values() for s in slots), default=-1)
+            if max_slot >= 0:
+                cap = max_slot + 1
+                vectors = np.zeros((cap, vs.dims), dtype=np.float32)
+                has_vector = np.zeros(cap, dtype=bool)
+                for slots in entity_to_slots.values():
+                    for s in slots:
+                        if s >= cap or not vs.has_vector(s):
+                            continue
+                        vec = vs.get_vector(s)
+                        if vec is None:
+                            continue
+                        vectors[s] = vec
+                        has_vector[s] = True
+
+        observations = cluster_by_entity(
+            entity_to_slots=entity_to_slots,
+            vectors=vectors,
+            has_vector=has_vector,
+            texts=texts,
+            event_times=event_times,
+            similarity_threshold=q.similarity_threshold,
+            min_cluster_size=q.min_cluster_size,
+        )
+
+        # Create observation nodes + evidence edges
+        created = 0
+        for i, obs in enumerate(observations):
+            obs_id = f"obs:{obs.entity}:{i}"
+            try:
+                store.put_node(obs_id, "observation", {
+                    "entity": obs.entity,
+                    "content": obs.text,
+                    "evidence_count": obs.evidence_count,
+                })
+                obs_slot = store.id_to_slot[store.string_table.intern(obs_id)]
+
+                # Set confidence and event_at
+                store.columns.set_reserved(obs_slot, "__confidence__", obs.confidence)
+                if obs.event_at_ms is not None:
+                    store.columns.set_reserved(obs_slot, "__event_at__", obs.event_at_ms)
+
+                # Embed observation with cluster centroid
+                if obs.centroid is not None and vs is not None:
+                    vs.add(obs_slot, obs.centroid)
+
+                # FTS index the observation text
+                if self._document_store and obs.text:
+                    self._document_store.put_summary(obs_slot, obs.text, doc_slot=0, chunk_index=0)
+
+                # Link to evidence
+                for ev_slot in obs.evidence_slots:
+                    ev_id = store._slot_to_id(ev_slot)
+                    if ev_id:
+                        try:
+                            store.put_edge(obs_id, ev_id, "evidence")
+                        except Exception:
+                            pass
+
+                created += 1
+            except Exception:
+                continue
+
+        return Result(kind="ok", data={
+            "observations": created,
+            "entities": len(entity_to_slots),
+            "clusters": len(observations),
+        }, count=created)
 
     def _reembed(self, q: SysReembed) -> Result:
         """SYS REEMBED: re-embed all summaries with current embedder."""

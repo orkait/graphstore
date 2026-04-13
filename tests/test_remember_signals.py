@@ -37,7 +37,8 @@ def test_remember_includes_confidence_in_scoring():
 
     result = gs.execute('REMEMBER "attention" LIMIT 10')
     if len(result.data) >= 2:
-        scores = {n["id"]: n["_confidence"] for n in result.data}
+        # Confidence is folded into _graph_score (overrides degree when present)
+        scores = {n["id"]: n["_graph_score"] for n in result.data}
         if "high_conf" in scores and "low_conf" in scores:
             assert scores["high_conf"] > scores["low_conf"]
     gs.close()
@@ -70,6 +71,7 @@ def test_remember_includes_score_breakdown():
     if result.data:
         node = result.data[0]
         assert "_remember_score" in node
-        assert "_confidence" in node
+        assert "_graph_score" in node
+        assert "_recall_score" in node
         assert "_recency_score" in node
     gs.close()

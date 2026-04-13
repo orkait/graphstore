@@ -1,0 +1,21 @@
+{
+  "dsl": {
+    "retrieval_depth": 9,
+    "recall_depth": 2,
+    "max_query_entities": 6,
+    "recency_boost_k": 4,
+    "recall_decay": 0.5912428069710964,
+    "recency_half_life_days": 48.43688350759862,
+    "similar_to_oversample": 2,
+    "lexical_search_oversample": 3,
+    "retrieval_strategy": "remember_lexical",
+    "fusion_method": "weighted",
+    "recency_mode": "multiplicative",
+    "nucleus_expansion": true,
+    "nucleus_hops": 2,
+    "nucleus_max_neighbors": 3
+  },
+  "vector": {
+    "search_oversample": 16
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "dsl": {
+    "retrieval_depth": 8,
+    "recall_depth": 4,
+    "max_query_entities": 1,
+    "recency_boost_k": 3,
+    "recall_decay": 0.42990463111939736,
+    "recency_half_life_days": 51.698749895509124,
+    "similar_to_oversample": 8,
+    "lexical_search_oversample": 4
+  },
+  "vector": {
+    "search_oversample": 20
+  }
+}
