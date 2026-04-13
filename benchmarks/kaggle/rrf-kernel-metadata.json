@@ -1,0 +1,13 @@
+{
+  "id": "superkaiii/graphstore-jina-500-rrf",
+  "title": "GraphStore Jina 500 RRF",
+  "code_file": "graphstore_jina_500_rrf.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "competition_sources": [],
+  "dataset_sources": [],
+  "kernel_sources": []
+}
