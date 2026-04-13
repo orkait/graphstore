@@ -19,9 +19,9 @@ logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 _CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "autoresearch" / "config.json"
 
 # Model preference for LoCoMo QA (fast, no reasoning overhead)
-QA_MODEL = "minimax-m2.7:cloud"
+QA_MODEL = "gemma4:31b-cloud"
 # Same model on OpenRouter as fallback (consistent answers across providers)
-QA_MODEL_OR = "minimax/minimax-m2.7:nitro"
+QA_MODEL_OR = "google/gemma-4-31b-it:free"
 
 
 def _load_config() -> dict:
@@ -94,6 +94,71 @@ def llm_call(prompt: str, max_tokens: int = 1000, temperature: float = 0.0, _ret
         time.sleep(1)
         return llm_call(prompt, max_tokens=max_tokens, temperature=temperature, _retries=_retries - 1)
     return ""
+
+
+def _resolve_providers() -> list[dict]:
+    """Resolve available LLM providers with model + litellm config.
+
+    Returns list of provider dicts with keys: litellm_model, api_base, api_key.
+    """
+    import litellm
+    litellm.suppress_debug_info = True
+
+    config = _load_config()
+    providers = config.get("providers", {})
+    active_pid = config.get("active_provider", "")
+    provider_order = [active_pid] + [
+        p for p in config.get("provider_fallback_order", []) if p != active_pid
+    ]
+    provider_order = [p for p in dict.fromkeys(provider_order) if p in providers]
+
+    resolved = []
+    for pid in provider_order:
+        p = providers.get(pid)
+        if not p:
+            continue
+        base_url = p.get("base_url", "")
+        api_key = (p.get("api_key", "")
+                   or os.environ.get(p.get("api_key_env", ""), "")
+                   or "ollama")
+        if not base_url:
+            continue
+        available = p.get("models", {})
+        model_order = [m for m in [QA_MODEL, QA_MODEL_OR] if m in available]
+        if not model_order:
+            continue
+        is_local = p.get("is_local", "localhost" in base_url or "127.0.0.1" in base_url)
+        prefix = p.get("litellm_prefix") or ("ollama_chat" if is_local else "")
+        model = model_order[0]
+        litellm_model = f"{prefix}/{model}" if prefix else model
+        resolved.append({
+            "pid": pid,
+            "litellm_model": litellm_model,
+            "api_base": base_url,
+            "api_key": api_key,
+        })
+    return resolved
+
+
+def llm_call_on_provider(prompt: str, provider: dict, max_tokens: int = 1000, temperature: float = 0.0) -> str:
+    """Call LLM on a specific provider. Returns empty string on failure."""
+    import litellm
+    litellm.suppress_debug_info = True
+    try:
+        response = litellm.completion(
+            model=provider["litellm_model"],
+            messages=[{"role": "user", "content": prompt}],
+            api_base=provider["api_base"],
+            api_key=provider["api_key"],
+            stream=False,
+            timeout=30,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        content = response.choices[0].message.content or ""
+        return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    except Exception:
+        return ""
 
 
 def health_check() -> bool:
