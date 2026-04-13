@@ -756,6 +756,20 @@ class GraphStore:
         """Return all live edges. Used by server /api/graph endpoint."""
         return self._store.get_all_edges()
 
+    def index_text(self, node_id: str, text: str) -> None:
+        """Index text for full-text/BM25 search on an existing node.
+
+        Call after CREATE NODE to make the node's text searchable via
+        LEXICAL SEARCH and REMEMBER's BM25 signal.
+        """
+        if self._document_store is None:
+            return
+        str_id = self._store.string_table.intern(node_id)
+        slot = self._store.id_to_slot.get(str_id)
+        if slot is None:
+            return
+        self._document_store.put_summary(slot, text)
+
     @property
     def cost_threshold(self) -> int:
         """DSL query cost threshold. Queries exceeding this are rejected."""

@@ -54,6 +54,26 @@ class TestRecall:
         ids = [n["id"] for n in result.data]
         assert "c" in ids  # reachable at depth 2
 
+    def test_recall_reaches_incoming_neighbors_from_sink_node(self):
+        g = GraphStore(ceiling_mb=256)
+        g.execute('CREATE NODE "msg" kind = "memory" content = "Caroline moved from Sweden"')
+        g.execute('CREATE NODE "ent" kind = "entity" name = "Caroline"')
+        g.execute('CREATE EDGE "msg" -> "ent" kind = "mentions"')
+        result = g.execute('RECALL FROM "ent" DEPTH 1 LIMIT 10')
+        ids = [n["id"] for n in result.data]
+        assert "msg" in ids
+
+    def test_recall_spreads_bidirectionally(self):
+        g = GraphStore(ceiling_mb=256)
+        g.execute('CREATE NODE "a" kind = "concept"')
+        g.execute('CREATE NODE "b" kind = "concept"')
+        g.execute('CREATE NODE "c" kind = "concept"')
+        g.execute('CREATE EDGE "a" -> "b" kind = "r"')
+        g.execute('CREATE EDGE "b" -> "c" kind = "r"')
+        result = g.execute('RECALL FROM "b" DEPTH 1 LIMIT 10')
+        ids = {n["id"] for n in result.data}
+        assert ids == {"a", "c"}
+
 
 class TestPropagate:
     def test_propagate_updates_descendants(self):
@@ -148,3 +168,24 @@ def test_combined_transpose_invalidated_on_rebuild():
     em.rebuild({"knows": [(0, 1, {}), (1, 0, {})]}, num_nodes=2)
     t2 = em.get_combined_transpose()
     assert t1 is not t2, "after rebuild, transpose cache must be refreshed"
+
+
+def test_combined_spread_matrix_cached():
+    """Spread matrix cache should be stable across repeated calls."""
+    from graphstore.core.edges import EdgeMatrices
+    em = EdgeMatrices()
+    em.rebuild({"knows": [(0, 1, {}), (1, 2, {})]}, num_nodes=3)
+    s1 = em.get_combined_spread()
+    s2 = em.get_combined_spread()
+    assert s1 is s2
+
+
+def test_combined_spread_matrix_invalidated_on_rebuild():
+    """Spread matrix cache must refresh after rebuild."""
+    from graphstore.core.edges import EdgeMatrices
+    em = EdgeMatrices()
+    em.rebuild({"knows": [(0, 1, {})]}, num_nodes=2)
+    s1 = em.get_combined_spread()
+    em.rebuild({"knows": [(0, 1, {}), (1, 0, {})]}, num_nodes=2)
+    s2 = em.get_combined_spread()
+    assert s1 is not s2

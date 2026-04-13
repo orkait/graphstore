@@ -114,8 +114,8 @@ python -m benchmarks.framework.run_locomo \
   --embedder installed:jina-v5-small-retrieval \
   --k 10
 
-# Run retrieval recall test (no LLM needed)
-python -m benchmarks.framework.ratchet50
+# Run direct evidence recall test (no LLM needed)
+python -m benchmarks.framework.ratchet_recall
 ```
 
 ---
@@ -127,3 +127,56 @@ python -m benchmarks.framework.ratchet50
 - The LLM reader (MiniMax M2.7) generates a short answer from retrieved context. F1 is computed between this answer and the gold answer. No LLM judge involved.
 - MemMachine and other SOTA systems report LLM-judge accuracy (binary correct/wrong), which inflates ~1.5-2x compared to token F1. Numbers are not directly comparable.
 - Our retrieval recall test uses keyword matching (does the longest distinctive word from the gold answer appear in the retrieved text?) which is conservative - the LLM might extract the answer even without an exact keyword match.
+
+---
+
+## BEAM
+
+GraphStore now includes a benchmark-side BEAM answer-generation runner at:
+
+`benchmarks/framework/run_beam.py`
+
+This keeps GraphStore core untouched and emits BEAM-compatible answer JSON so
+BEAM's own evaluator can score it.
+
+### Workflow
+
+1. Prepare a local BEAM checkout or dataset directory
+2. Run GraphStore answer generation against BEAM chats
+3. Run BEAM's official evaluator on the produced answer files
+
+### Example
+
+```bash
+# Generate answers for BEAM 100K chats 1..2
+uv run python3 -m benchmarks.framework.run_beam \
+  --beam-root /tmp/BEAM \
+  --chat-size 100K \
+  --start-index 1 \
+  --end-index 3 \
+  --retrieval-method pair_chunk \
+  --embedder installed:jina-v5-small-retrieval \
+  --embedder-cache-dir /tmp/gs_models \
+  --reader-model-name gpt-4.1-mini \
+  --reader-model-url https://api.openai.com/v1 \
+  --reader-model-api-key "$OPENAI_API_KEY" \
+  --result-file-name graphstore_beam_answers.json \
+  --k 5
+
+# Evaluate with BEAM's official scorer
+cd /tmp/BEAM
+python -m src.evaluation.run_evaluation \
+  --input_directory results/100K \
+  --chat_size 100K \
+  --start_index 0 \
+  --end_index 2 \
+  --max_workers 4 \
+  --allowed_result_files graphstore_beam_answers.json
+```
+
+### Notes
+
+- Supported chunk modes: `pair_chunk`, `turn_chunk`
+- The runner builds one GraphStore per BEAM chat, ingests once, and answers all
+  probing questions against that live state
+- This is answer-generation support, not a separate custom evaluator

@@ -17,6 +17,7 @@ class EdgeMatrices:
         self._edge_data: dict[str, list[dict]] = {}  # per-type edge data lists
         self._transpose_cache: dict[str, csr_matrix] = {} # CSC for incoming edges
         self._combined_transpose: csr_matrix | None = None  # cached combined-all transpose
+        self._combined_spread: csr_matrix | None = None
 
         # Dynamic Edge Buffer (LSM L0)
         self._dynamic_out: dict[str, dict[int, list[int]]] = {}
@@ -29,6 +30,7 @@ class EdgeMatrices:
         self._dynamic_cache: dict[frozenset | str | None, csr_matrix] = {}
         self._dynamic_transpose_cache: dict[str, csr_matrix] = {}
         self._dynamic_combined_transpose: csr_matrix | None = None
+        self._dynamic_combined_spread: csr_matrix | None = None
 
         # Degree arrays - precomputed on rebuild
         self._out_degree: dict[str, np.ndarray] = {}
@@ -57,6 +59,7 @@ class EdgeMatrices:
         # Clear only dynamic caches, preserve frozen matrices and transposes
         self._dynamic_cache.clear()
         self._dynamic_combined_transpose = None
+        self._dynamic_combined_spread = None
         self._dynamic_transpose_cache.clear()
 
     def get(self, edge_types: set[str] | None = None) -> csr_matrix | None:
@@ -168,12 +171,7 @@ class EdgeMatrices:
         return result
 
     def get_combined_transpose_split(self) -> tuple[csr_matrix | None, csr_matrix | None]:
-        """Cached transpose of combined-all matrix. Returns (base, delta) to avoid O(N) merge.
-
-        The transpose convention: matrix_t[i, j] > 0 means "activation at j
-        flows to i". For an original edge src -> tgt, the transpose has
-        matrix_t[src, tgt] so that activating tgt spreads back to src.
-        """
+        """Cached transpose of combined-all matrix. Returns (base, delta) to avoid O(N) merge."""
         base = None
         if self._combined_all is not None:
             if self._combined_transpose is None:
@@ -201,9 +199,8 @@ class EdgeMatrices:
         if base is not None:
             n = max(n, base.shape[0])
 
-        # Transpose convention: matrix_t[tgt, src] so that:
-        # - BFS from tgt finds incoming srcs (row access)
-        # - matrix_t @ activation propagates activation backwards (mat-vec)
+        # Transpose convention: matrix_t[tgt, src] so row access from tgt
+        # finds incoming srcs.
         delta = csr_matrix((data, (tgts, srcs)), shape=(n, n))
 
         if base is not None and base.shape[0] < n:
@@ -212,7 +209,7 @@ class EdgeMatrices:
         return base, delta
 
     def get_combined_transpose(self) -> csr_matrix | None:
-        """Cached transpose of combined-all matrix. Used by RECALL spreading activation."""
+        """Cached transpose of combined-all matrix."""
         if self._dynamic_combined_transpose is not None:
             return self._dynamic_combined_transpose
 
@@ -256,6 +253,70 @@ class EdgeMatrices:
             result = base + delta
             
         self._dynamic_combined_transpose = result
+        return result
+
+    def get_combined_spread_split(self) -> tuple[csr_matrix | None, csr_matrix | None]:
+        """Return propagation matrices for bidirectional spreading.
+
+        The spread matrix is `A + A.T`, so activation can flow through both
+        incoming and outgoing edges regardless of edge write direction.
+        """
+        base = None
+        if self._combined_all is not None:
+            if self._combined_spread is None:
+                if self._combined_transpose is None:
+                    self._combined_transpose = self._combined_all.T.tocsr()
+                self._combined_spread = self._combined_all + self._combined_transpose
+            base = self._combined_spread
+
+        if self._pending_edge_count == 0:
+            return base, None
+
+        srcs = []
+        tgts = []
+        data_list = []
+        for etype in self._dynamic_out:
+            weights = self._dynamic_weights.get(etype, {})
+            for src, tgts_list in self._dynamic_out[etype].items():
+                for tgt in tgts_list:
+                    weight = weights.get((src, tgt), 1.0)
+                    srcs.extend((src, tgt))
+                    tgts.extend((tgt, src))
+                    data_list.extend((weight, weight))
+
+        if not srcs:
+            return base, None
+
+        data = np.array(data_list, dtype=np.float32)
+        n = self._num_nodes
+        if base is not None:
+            n = max(n, base.shape[0])
+
+        delta = csr_matrix((data, (srcs, tgts)), shape=(n, n))
+
+        if base is not None and base.shape[0] < n:
+            base = resize_csr(base, n)
+
+        return base, delta
+
+    def get_combined_spread(self) -> csr_matrix | None:
+        """Cached bidirectional propagation matrix for spreading activation."""
+        if self._dynamic_combined_spread is not None:
+            return self._dynamic_combined_spread
+
+        base, delta = self.get_combined_spread_split()
+        if delta is None:
+            self._dynamic_combined_spread = base
+            return base
+
+        if base is None:
+            result = delta
+        else:
+            if base.shape[0] < delta.shape[0]:
+                base = resize_csr(base, delta.shape[0])
+            result = base + delta
+
+        self._dynamic_combined_spread = result
         return result
 
     def get_edge_data(self, edge_type: str) -> list[dict]:
@@ -332,6 +393,7 @@ class EdgeMatrices:
         self._cache.clear()
         self._transpose_cache.clear()
         self._combined_transpose = None
+        self._combined_spread = None
         self._edge_data.clear()
         self._out_degree.clear()
         self._in_degree.clear()
@@ -342,6 +404,7 @@ class EdgeMatrices:
         self._dynamic_cache.clear()
         self._dynamic_transpose_cache.clear()
         self._dynamic_combined_transpose = None
+        self._dynamic_combined_spread = None
         self._pending_edge_count = 0
         self._num_nodes = num_nodes
 
@@ -364,4 +427,3 @@ class EdgeMatrices:
         for etype in self._typed:
             t = self.get_transpose(etype)
             self._in_degree[etype] = np.diff(t.indptr)
-
