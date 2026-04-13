@@ -22,7 +22,7 @@ from collections import defaultdict
 
 from .adapter import QueryContext, TimedOperation
 from .datasets import load_locomo
-from .llm_client import generate_answer, compute_f1
+from .llm_client import generate_answer, compute_f1, health_check
 
 # Official LoCoMo category IDs
 _CAT_TO_ID = {
@@ -46,6 +46,8 @@ def run_locomo(
 
     Official protocol: all conversations, all questions, F1 with stemming.
     """
+    # Verify LLM is reachable before wasting time on retrieval
+    health_check()
 
     # Group records by conversation
     conversations: dict[str, list] = defaultdict(list)

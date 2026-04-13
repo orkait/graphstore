@@ -633,6 +633,12 @@ class IntelligenceHandlers:
                         nb_node = self.store._materialize_slot(nb)
                         if nb_node is None:
                             continue
+                        # Skip nodes without meaningful text content
+                        nb_text = (nb_node.get("content") or nb_node.get("summary")
+                                   or nb_node.get("claim") or nb_node.get("text") or "")
+                        if len(nb_text) < 20:
+                            seen_slots.add(nb)  # still mark seen to avoid revisiting
+                            continue
                         if token_budget is not None:
                             node_tokens = len(
                                 nb_node.get("summary", "") + nb_node.get("claim", "") + nb_node.get("text", "")

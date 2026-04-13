@@ -20,7 +20,8 @@ _CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "autoresearch" / 
 
 # Model preference for LoCoMo QA (fast, no reasoning overhead)
 QA_MODEL = "minimax-m2.7:cloud"
-QA_FALLBACK = "qwen3.5:cloud"
+# Same model on OpenRouter as fallback (consistent answers across providers)
+QA_MODEL_OR = "minimax/minimax-m2.7:nitro"
 
 
 def _load_config() -> dict:
@@ -29,8 +30,12 @@ def _load_config() -> dict:
     return {}
 
 
-def llm_call(prompt: str, max_tokens: int = 1000, temperature: float = 0.0) -> str:
-    """Call LLM using litellm with autoresearch provider fallback."""
+def llm_call(prompt: str, max_tokens: int = 1000, temperature: float = 0.0, _retries: int = 2) -> str:
+    """Call LLM using litellm with autoresearch provider fallback.
+
+    Retries on empty response (MiniMax sometimes returns empty content
+    when reasoning tokens consume the budget or during transient outages).
+    """
     import litellm
     litellm.suppress_debug_info = True
 
@@ -56,12 +61,8 @@ def llm_call(prompt: str, max_tokens: int = 1000, temperature: float = 0.0) -> s
             continue
 
         available = p.get("models", {})
-        # Only use MiniMax for QA - no fallback to coder models
-        qa_models_local = [QA_MODEL]
-        qa_models_or = ["minimax/minimax-m2.7:nitro"]
-        model_order = [m for m in qa_models_local if m in available]
-        if not model_order:
-            model_order = [m for m in qa_models_or if m in available]
+        # Same model across providers for consistent answers
+        model_order = [m for m in [QA_MODEL, QA_MODEL_OR] if m in available]
         if not model_order:
             continue
 
@@ -87,7 +88,23 @@ def llm_call(prompt: str, max_tokens: int = 1000, temperature: float = 0.0) -> s
             except Exception:
                 continue
 
+    # All providers/models returned empty - retry if attempts remain
+    if _retries > 0:
+        import time
+        time.sleep(1)
+        return llm_call(prompt, max_tokens=max_tokens, temperature=temperature, _retries=_retries - 1)
     return ""
+
+
+def health_check() -> bool:
+    """Verify LLM is reachable. Call before starting a benchmark."""
+    result = llm_call("Say OK", max_tokens=10)
+    if not result:
+        raise RuntimeError(
+            "LLM health check failed: got empty response. "
+            "Check that minimax-m2.7:cloud (Ollama) or minimax/minimax-m2.7:nitro (OpenRouter) is available."
+        )
+    return True
 
 
 def generate_answer(question: str, context_texts: list[str], scored_nodes: list[dict] | None = None) -> str:
