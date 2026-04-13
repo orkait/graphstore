@@ -19,8 +19,8 @@ logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 _CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "autoresearch" / "config.json"
 
 # Model preference for LoCoMo QA
-QA_MODEL = "gemma4:31b-cloud"
-QA_MODEL_OR = "google/gemma-4-31b-it:free"
+QA_MODEL = "minimax/minimax-m2.7:nitro"
+QA_MODEL_OR = "minimax/minimax-m2.7:nitro"
 
 
 def _load_config() -> dict:
