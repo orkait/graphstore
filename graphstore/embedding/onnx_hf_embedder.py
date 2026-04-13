@@ -190,6 +190,31 @@ def _resolve_providers(providers: list[str] | str | None) -> list[str]:
     return resolved
 
 
+def _cuda_requested(providers: list[str]) -> bool:
+    return any(p == "CUDAExecutionProvider" for p in providers)
+
+
+def _create_inference_session(ort, model_source, sess_kwargs: dict):
+    """Create ORT session, retrying once if CUDA silently fell back to CPU.
+
+    We have observed first-attempt CUDA provider init occasionally produce a
+    CPU-only session in a fresh process while the second identical call in the
+    same process succeeds. Detect that case by inspecting the created session's
+    provider list.
+    """
+    session = ort.InferenceSession(model_source, **sess_kwargs)
+    requested = sess_kwargs.get("providers", [])
+    if _cuda_requested(requested):
+        active = list(session.get_providers())
+        if "CUDAExecutionProvider" not in active and "CPUExecutionProvider" in active:
+            import logging
+            logging.getLogger(__name__).warning(
+                "CUDA provider requested but ORT created CPU-only session; retrying once"
+            )
+            session = ort.InferenceSession(model_source, **sess_kwargs)
+    return session
+
+
 def _patch_gqa_for_cuda(onnx_path: str | Path) -> bytes | None:
     """Patch GroupQueryAttention nodes for CUDA compatibility.
 
@@ -324,9 +349,9 @@ class OnnxHFEmbedder(Embedder):
 
         model_bytes = _patch_gqa_for_cuda(onnx_path) if uses_gpu else None
         if model_bytes:
-            self._session = ort.InferenceSession(model_bytes, **sess_kwargs)
+            self._session = _create_inference_session(ort, model_bytes, sess_kwargs)
         else:
-            self._session = ort.InferenceSession(str(onnx_path), **sess_kwargs)
+            self._session = _create_inference_session(ort, str(onnx_path), sess_kwargs)
         self._input_names = {i.name for i in self._session.get_inputs()}
         self._needs_token_type_ids = "token_type_ids" in self._input_names
         self._needs_position_ids = "position_ids" in self._input_names
@@ -442,4 +467,3 @@ class OnnxHFEmbedder(Embedder):
                 feed[name] = np.zeros((input_ids.shape[0], num_heads, 0, head_dim), dtype=dtype)
         outputs = self._session.run(None, feed)
         return outputs[self._hidden_output_idx]
-

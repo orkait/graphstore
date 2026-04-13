@@ -59,7 +59,7 @@ def run_test(label: str, config: dict, k: int = 10, reranker=None) -> dict:
 
 BASE_CONFIG = {
     'embedder': 'installed',
-    'embedder_model': 'jina-v5-nano-retrieval',
+    'embedder_model': 'jina-v5-small-retrieval',
     'embedder_cache_dir': '/tmp/gs_models',
     'embedder_gpu': True,
     'ceiling_mb': 512,

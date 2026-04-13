@@ -221,9 +221,7 @@ def _create_benchmark_node(gs: GraphStore, item: CorpusItem, question_id: str) -
         fields.append(f"turn_id = {item.turn_id}")
     fields.append(f'DOCUMENT {_dsl_quote(item.text)}')
     gs.execute(" ".join(fields))
-
-    slot = gs._store.id_to_slot[gs._store.string_table.intern(item.corpus_id)]
-    gs._document_store.put_summary(slot, item.text[:2000])
+    gs.index_text(item.corpus_id, item.text[:2000])
 
 
 def _result_rows(result, item_by_id: dict[str, CorpusItem]) -> list[dict]:

@@ -9,10 +9,10 @@ system is scored on that record in isolation. This is different from
 "ingest one global pool and query many times", so the dataset loader
 returns one BenchmarkRecord per question rather than a flat session pool.
 
-Supported:
-    longmemeval - https://github.com/xiaowu0162/LongMemEval
-    locomo      - https://snap-research.github.io/locomo/   (stub)
-    amb         - https://agentmemorybenchmark.ai          (stub)
+Supported benchmarks (3 total):
+    longmemeval  - https://github.com/xiaowu0162/LongMemEval   (runner.py)
+    locomo       - https://snap-research.github.io/locomo/      (run_locomo.py)
+    beam         - https://github.com/stanford-crfm/BEAM        (run_beam.py)
 """
 
 from __future__ import annotations
@@ -272,12 +272,7 @@ def load_locomo(
     return BenchmarkDataset(name="LoCoMo", records=records)
 
 
-def load_amb(data_path: str | Path) -> BenchmarkDataset:
-    raise NotImplementedError("AMB loader is a stub.")
-
-
 DATASET_LOADERS = {
     "longmemeval": load_longmemeval,
     "locomo": load_locomo,
-    "amb": load_amb,
 }

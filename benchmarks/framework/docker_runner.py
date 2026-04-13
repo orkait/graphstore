@@ -207,27 +207,6 @@ def main() -> int:
             adapter_config[key] = val
     if args.remember_weights:
         adapter_config["remember_weights"] = [float(w) for w in args.remember_weights.split(",")]
-    if args.system != "graphstore" and args.embedder in ("gguf", "onnx"):
-        if args.embedder == "gguf":
-            from graphstore.embedding.llamacpp_embedder import LlamaCppEmbedder
-            adapter_config["_embedder_instance"] = LlamaCppEmbedder(
-                model_path=args.embedder_gguf_path,
-                n_ctx=args.embedder_max_length,
-                n_gpu_layers=args.embedder_gpu_layers,
-                output_dims=args.embedder_output_dims,
-                query_prefix=args.embedder_query_prefix,
-            )
-        elif args.embedder == "onnx" and args.embedder_model_dir:
-            from graphstore.embedding.onnx_hf_embedder import OnnxHFEmbedder
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if args.gpu else None
-            adapter_config["_embedder_instance"] = OnnxHFEmbedder(
-                model_dir=args.embedder_model_dir,
-                output_dims=args.embedder_output_dims,
-                max_length=args.embedder_max_length,
-                pooling_mode=args.embedder_pooling,
-                providers=providers,
-                gpu_mem_limit=adapter_config.get("embedder_gpu_mem_limit"),
-            )
     adapter = adapter_cls(config=adapter_config)
     print(f"system: {adapter.name} v{adapter.version}")
     print(f"config: {adapter_config}")

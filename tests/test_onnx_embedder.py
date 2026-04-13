@@ -58,3 +58,51 @@ class TestInstaller:
         from graphstore.registry.installer import get_model_dir
         path = get_model_dir("embeddinggemma-300m")
         assert "embeddinggemma-300m" in str(path)
+
+
+class _FakeSession:
+    def __init__(self, providers):
+        self._providers = providers
+
+    def get_providers(self):
+        return list(self._providers)
+
+
+class _FakeOrt:
+    def __init__(self, providers_per_call):
+        self.providers_per_call = list(providers_per_call)
+        self.calls = 0
+
+    def InferenceSession(self, model_source, **kwargs):
+        providers = self.providers_per_call[min(self.calls, len(self.providers_per_call) - 1)]
+        self.calls += 1
+        return _FakeSession(providers)
+
+
+class TestSessionCreationRetry:
+    def test_retries_when_cuda_requested_but_first_session_falls_back_to_cpu(self):
+        from graphstore.embedding.onnx_hf_embedder import _create_inference_session
+
+        ort = _FakeOrt([
+            ["CPUExecutionProvider"],
+            ["CUDAExecutionProvider", "CPUExecutionProvider"],
+        ])
+        session = _create_inference_session(
+            ort,
+            "model.onnx",
+            {"providers": ["CUDAExecutionProvider", "CPUExecutionProvider"]},
+        )
+        assert ort.calls == 2
+        assert session.get_providers() == ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+    def test_does_not_retry_when_cuda_is_not_requested(self):
+        from graphstore.embedding.onnx_hf_embedder import _create_inference_session
+
+        ort = _FakeOrt([["CPUExecutionProvider"]])
+        session = _create_inference_session(
+            ort,
+            "model.onnx",
+            {"providers": ["CPUExecutionProvider"]},
+        )
+        assert ort.calls == 1
+        assert session.get_providers() == ["CPUExecutionProvider"]

@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 from benchmarks.framework.adapters.graphstore_ import GraphStoreAdapter
 from benchmarks.framework.adapter import QueryContext
+from benchmarks.framework import ratchet_recall, ratchet_test
 
 try:
     from autoresearch import tune_config
@@ -31,15 +32,14 @@ def test_adapter_respects_explicit_strategy_override():
     assert adapter._resolve_strategy("temporal-reasoning") == "remember_lexical"
 
 
-def test_adapter_sets_temporal_anchor_from_query_context():
+def test_adapter_passes_temporal_anchor_to_dispatch():
     adapter = GraphStoreAdapter(config={})
-    exec_state = SimpleNamespace(_temporal_anchor_ms=None)
-    adapter._gs = SimpleNamespace(_executor=exec_state)
+    adapter._gs = SimpleNamespace()  # truthy, no internal access needed
 
     seen = {}
 
-    def fake_dispatch(question: str, category: str, k: int):
-        seen["anchor"] = exec_state._temporal_anchor_ms
+    def fake_dispatch(question: str, category: str, k: int, anchor_ms=None):
+        seen["anchor_ms"] = anchor_ms
         return [], []
 
     adapter._dispatch = fake_dispatch  # type: ignore[method-assign]
@@ -50,8 +50,7 @@ def test_adapter_sets_temporal_anchor_from_query_context():
     )
 
     adapter.query_with_context(ctx, k=5)
-    assert seen["anchor"] is not None
-    assert exec_state._temporal_anchor_ms is None
+    assert seen["anchor_ms"] is not None
 
 
 def test_adapter_ingest_done_runs_consolidation_when_enabled():
@@ -70,6 +69,11 @@ def test_adapter_ingest_done_skips_consolidation_by_default():
 
     adapter.ingest_done()
     execute.assert_not_called()
+
+
+def test_ratchet_defaults_are_locked_to_jina_small():
+    assert ratchet_test.BASE_CONFIG["embedder_model"] == "jina-v5-small-retrieval"
+    assert "jina-v5-small-retrieval" in ratchet_recall.run.__code__.co_consts
 
 
 @pytest.mark.skipif(tune_config is None, reason="optuna not installed")
