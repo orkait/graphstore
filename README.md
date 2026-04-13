@@ -16,15 +16,27 @@
 
 ---
 
-graphstore is a Python library that gives AI agents a persistent, queryable memory. You store nodes and edges with a simple DSL, and retrieve them by meaning, by association, by text search, or by any combination - all from one call.
+graphstore gives AI agents persistent, queryable memory. Store nodes and edges with a simple DSL, retrieve them by meaning, by association, by text search, or any combination - all from one call.
 
-It is designed for agent frameworks, LLM applications, and research tools that need more than a vector database but less than a full graph database. Everything lives in-process and persists to SQLite. No server to run, no infrastructure to manage.
+It is designed for agent frameworks, LLM applications, and research tools that need more than a vector database but less than a full graph database. Everything runs in-process, persists to SQLite. No server, no infrastructure.
 
 ---
 
-## 🏗️ Architecture
+## Why graphstore?
 
-Three storage engines, one typed DSL, a layered feature set on top, and a pair of optional subsystems.
+Most agent memory systems are wrappers around a vector database. That works for simple retrieval but breaks down when you need:
+
+- **Multi-signal retrieval** - vector similarity alone misses keyword matches. BM25 alone misses semantic matches. You need both, plus graph structure, plus recency, fused intelligently.
+- **Graph-native operations** - spreading activation, subgraph extraction, path queries, counterfactual reasoning. These aren't afterthoughts - they're first-class DSL commands.
+- **Temporal awareness** - knowing WHEN something happened matters as much as WHAT happened. `__event_at__` is a reserved column, not a hack.
+- **Belief tracking** - agents deal with uncertain, contradictory facts. ASSERT with confidence, RETRACT when wrong, find CONTRADICTIONS automatically.
+- **Zero infrastructure** - everything is SQLite + numpy + usearch. No Docker, no server, no cloud dependency.
+
+---
+
+## 🏗️ How it works
+
+Three storage engines, one typed DSL, and a hybrid retrieval pipeline that fuses all of them.
 
 ```text
               ┌─────────────────────────────────────────┐
@@ -42,100 +54,71 @@ Three storage engines, one typed DSL, a layered feature set on top, and a pair o
         │ scipy CSR│         │  cosine  │         │ blobs    │
         │ + indices│         │          │         │ + summary│
         └──────────┘         └──────────┘         └──────────┘
-              ▲                    ▲                    ▲
-              └────────────────────┼────────────────────┘
-                                   │
-                         ┌─────────┴──────────┐
-                         │  Ingest pipeline   │
-                         │  markitdown · pdf  │
-                         │  docling · vision  │
-                         └────────────────────┘
 ```
 
-**Layered features** (reach into the three engines via the DSL):
+### REMEMBER - the retrieval engine
 
-| Feature | What it does | Where it lives |
-|---|---|---|
-| **Beliefs** | `ASSERT` / `RETRACT` / `PROPAGATE` with confidence, source, retraction | reserved columns on Graph |
-| **Evolution** | `SYS EVOLVE` WHEN/THEN rules - self-tuning on live signals (opt-in) | `EvolutionEngine` + SQLite history |
-| **Snapshots** | `SYS SNAPSHOT` / `SYS ROLLBACK` - full-state rewind | in-memory store snapshots |
-| **Cron** | `SYS CRON ADD/LIST/RUN` - scheduled DSL queries | persistent cron_jobs table |
-| **WAL** | append → replay on open, auto-checkpoint at 50k | SQLite WAL + blobs |
-| **Ceiling** | pre-flight RAM guard, self-calibrating per-node estimate | `check_ceiling` on every write |
+`REMEMBER` is the core command. It fuses five signals into a single ranked result set:
 
-**Optional subsystems** (off by default):
+```
+REMEMBER "European architecture" LIMIT 10
 
-| Subsystem | What it adds | Toggle |
-|---|---|---|
-| **Vault** | markdown notebook synced into Graph | `GraphStore(vault="./notes")` |
-| **Voice** | Moonshine STT + Piper TTS | `GraphStore(voice=True)` |
+  ┌─────────────────────────────────────────────────────────┐
+  │  vec_signal     cosine similarity (usearch ANN)         │  0.50
+  │  bm25_signal    keyword match (SQLite FTS5)             │  0.20
+  │  recency        decay from event time                   │  0.10
+  │  graph_degree   how connected is this node              │  0.15
+  │  recall_freq    how often retrieved before              │  0.05
+  │                                                         │
+  │  + co-occurrence boost (found by both vec AND bm25)     │
+  │  + HybridRAG graph expansion (spreading activation)     │
+  │  + temporal-first filtering (when AT anchor present)    │
+  │  + type-weighted scoring (observations > messages)      │
+  └─────────────────────────────────────────────────────────┘
+```
+
+Weights are configurable. The pipeline is 10 stages - see [summary.md](summary.md) for the full breakdown.
 
 ---
 
 ## 📦 Installation
 
-**Requires Python 3.10 or higher.**
-
 ```bash
 pip install graphstore
 ```
 
-This is the lightweight core: numpy, scipy, usearch, lark, msgspec. Five runtime deps, no torch, no PDF parser, no HTTP server. The graph + vector + doc engines are fully functional - you can create nodes/edges, run BFS/Dijkstra paths, query by kind/property, and persist via WAL+snapshots out of the box.
-
-For anything beyond the core engine, opt into an extra:
+Lightweight core: numpy, scipy, usearch, lark, msgspec. No torch, no PDF parser, no HTTP server.
 
 ```bash
-# zero-config default embedder (30 MB, CPU-only)
+# Embedder (30 MB, CPU-only, zero-config)
 pip install 'graphstore[embed-default]'
 
-# 30+ ONNX models (BGE, mxbai, e5, nomic, jina-v2)
-pip install 'graphstore[embed-fastembed]'
-
-# PDF / DOCX / HTML → markdown ingestion
+# PDF / DOCX / HTML ingestion
 pip install 'graphstore[ingest]'
 
-# Obsidian-style vault sync
-pip install 'graphstore[vault]'
-
-# cron-scheduled DSL jobs
-pip install 'graphstore[scheduler]'
-
-# local web playground (FastAPI + React UI)
-pip install 'graphstore[playground]'
-
-# GPU acceleration, zero-config (onnxruntime-gpu + bundled nvidia cu12 wheels)
+# GPU acceleration (Linux x86_64, CUDA 12)
 pip install 'graphstore[gpu]'
 
-# GPU acceleration, lean (onnxruntime-gpu only; bring your own system CUDA 12)
-pip install 'graphstore[gpu-ort]'
+# Everything
+pip install 'graphstore[embed-default,ingest,vault,scheduler]'
 ```
 
-GPU support is **Linux x86_64 only** today. Activation is opt-in via `GRAPHSTORE_GPU=1` or an explicit `providers=["CUDAExecutionProvider", ...]` argument - CPU remains the default. On Ubuntu 24.04, you'll need to temporarily relax apparmor's unprivileged-userns restriction for CUDA to initialize; graphstore detects this and raises a targeted error with the exact sysctl fix.
-
-Extras compose - `pip install 'graphstore[embed-default,ingest,vault,scheduler]'` gets you a full agent-memory stack. When a feature is used without its extra installed, graphstore raises a targeted `ImportError` pointing at the right `pip install` recipe, not a cryptic `ModuleNotFoundError`.
-
 <details>
-<summary><strong>Full extras reference</strong></summary>
+<summary><strong>All extras</strong></summary>
 
 | Extra | What it adds |
 |---|---|
 | `embed-default` | model2vec - zero-config CPU embedder |
-| `embed-fastembed` | fastembed - ~30 pre-exported ONNX encoder models |
-| `ingest` | markitdown + pymupdf + pymupdf4llm (~80 MB, PDF/DOCX/HTML → markdown) |
+| `embed-fastembed` | fastembed - ~30 ONNX encoder models |
+| `ingest` | markitdown + pymupdf (PDF/DOCX/HTML -> markdown) |
 | `ingest-pro` | docling + openai (heavier PDF + vision via LLM) |
-| `scheduler` | croniter (cron-expression parsing for `SYS CRON ADD`) |
-| `vault` | pyyaml (Obsidian-style markdown vault sync) |
-| `playground` | fastapi + uvicorn + pydantic (local web UI) |
-| `gpu` | onnxruntime-gpu + bundled nvidia-cu12 runtime wheels (Linux x86_64) |
-| `gpu-ort` | onnxruntime-gpu only - expects system CUDA 12 + cuDNN 9 (Linux x86_64) |
-| `voice` | sounddevice + moonshine-voice + piper-tts |
-| `dev` | pytest + pytest-benchmark + pytest-cov |
-
-For vision-powered ingestion (images, diagrams), you also need [Ollama](https://ollama.com) running:
-
-```bash
-ollama pull smolvlm2:2.2b
-```
+| `scheduler` | croniter (cron-expression parsing) |
+| `vault` | pyyaml (markdown vault sync) |
+| `playground` | fastapi + uvicorn (local web UI) |
+| `gpu` | onnxruntime-gpu + bundled nvidia-cu12 (Linux x86_64) |
+| `gpu-ort` | onnxruntime-gpu only (bring your own CUDA 12) |
+| `voice` | moonshine STT + piper TTS |
+| `dev` | pytest + pytest-benchmark |
 
 </details>
 
@@ -148,22 +131,25 @@ from graphstore import GraphStore
 
 g = GraphStore(path="./brain")
 
-# Store two memories
+# Store memories
 g.execute('CREATE NODE "mem:paris" kind = "memory" topic = "travel" importance = 0.9')
 g.execute('CREATE NODE "mem:eiffel" kind = "memory" topic = "travel" importance = 0.8')
 g.execute('CREATE EDGE "mem:paris" -> "mem:eiffel" kind = "associated"')
 
-# Recall by meaning - returns best matches within a 4000-token budget
+# Retrieve by meaning (fuses vector + BM25 + recency + graph)
 result = g.execute('REMEMBER "European architecture" TOKENS 4000')
 
-# Recall by association - follows edges from a starting node
+# Retrieve by association (spreading activation through edges)
 result = g.execute('RECALL FROM "mem:paris" DEPTH 2 LIMIT 10')
 
-# Exact text search
+# Retrieve by keywords
 result = g.execute('LEXICAL SEARCH "Eiffel Tower" LIMIT 5')
+
+# Retrieve with temporal anchor
+result = g.execute('REMEMBER "trip plans" AT "2024-03" LIMIT 10')
 ```
 
-The graph persists to `./brain/` as SQLite. Next time you create a `GraphStore` with the same path, all your memories are back.
+Everything persists to `./brain/` as SQLite. Reopen with the same path and all memories are back.
 
 ---
 
@@ -171,416 +157,127 @@ The graph persists to `./brain/` as SQLite. Next time you create a `GraphStore` 
 
 ### Store and recall memories
 
-The core use case: store structured memories, retrieve the right ones for your agent's context window.
-
 ```sql
--- Create memories with any fields you need
 CREATE NODE "mem:123" kind = "memory" topic = "finance" importance = 0.8
 
--- Recall by meaning (vector search + BM25 + recency + confidence)
+-- Hybrid retrieval (5-signal fusion)
 REMEMBER "quarterly revenue trends" TOKENS 4000
 
--- Recall by association (spreading activation through edges)
+-- Graph traversal (spreading activation)
 RECALL FROM "concept:finance" DEPTH 3 LIMIT 10
 
--- Recall by exact text
+-- Keyword search (BM25)
 LEXICAL SEARCH "Q3 revenue" LIMIT 10
 
--- Recall by vector similarity
+-- Vector similarity
 SIMILAR TO "budget forecasting" LIMIT 10
+
+-- Temporal retrieval
+REMEMBER "what happened in May" AT "2024-05" LIMIT 10
 ```
-
-`REMEMBER` fuses five signals and fills your token budget automatically. You get the most relevant memories that fit, not a fixed count.
-
-<details>
-<summary>How REMEMBER scores memories</summary>
-
-```
-0.30 × vector_similarity    (cosine distance from embedder)
-0.20 × bm25_score           (full-text BM25 on content)
-0.15 × recency              (exp(-age_days / 30))
-0.20 × confidence           (__confidence__ column)
-0.15 × recall_frequency     (how often this was retrieved before)
-```
-
-Weights are configurable in `graphstore.json`. `REMEMBER` also increments `__recall_count__` on returned nodes, so frequently-useful memories naturally bubble up over time.
-
-</details>
-
----
 
 ### Ingest documents
 
-Drop a file in and graphstore parses it, chunks it, embeds it, and wires it into the graph.
-
 ```sql
--- Ingest a PDF (auto-parse → section hierarchy → embed → store)
 INGEST "report.pdf" AS "doc:q3" KIND "report"
-
--- Auto-connect similar chunks across all ingested documents
-SYS CONNECT
-
--- Search across documents
-SIMILAR TO "Q3 revenue growth" LIMIT 5
-LEXICAL SEARCH "quarterly revenue" LIMIT 5
-
--- Fetch the full text of a chunk
-NODE "doc:q3:chunk:3" WITH DOCUMENT
+SYS CONNECT    -- auto-wire similar chunks across documents
 ```
 
-Supported out of the box: PDF, Word, Markdown, text, images (via VLM), audio (via speech-to-text). The ingestor chain tries fast parsers first (MarkItDown) and falls back to heavier ones (PyMuPDF, Docling) for hard files.
+Supports PDF, Word, Markdown, text, images (via VLM), audio (via STT). Parses, chunks, embeds, and wires into the graph automatically.
 
-<details>
-<summary>Custom ingestors and chunkers</summary>
-
-```python
-from graphstore.ingest.base import Ingestor, IngestResult, Chunk
-
-class MyIngestor(Ingestor):
-    name = "myformat"
-    supported_extensions = ["myext"]
-
-    def convert(self, file_path: str, **kwargs) -> IngestResult:
-        text = my_parser.parse(file_path)
-        return IngestResult(markdown=text, parser_used="myformat")
-
-g = GraphStore(
-    path="./brain",
-    ingestors={"pdf": MyPDFIngestor(), "myext": MyIngestor()},
-    chunker=MySentenceChunker(),
-)
-```
-
-Custom ingestors override the built-in chain per extension. Anything not overridden falls through to the default tiered router.
-
-</details>
-
----
-
-### Track beliefs and facts
-
-Agents deal with uncertain, contradictory information. graphstore has first-class support for confidence-weighted facts and belief retraction.
+### Track beliefs
 
 ```sql
--- Assert a fact with a source and confidence
 ASSERT "fact:earth-radius" value = 6371 kind = "fact" CONFIDENCE 0.99 SOURCE "physics-tool"
-
--- Retract when it becomes stale
 RETRACT "fact:old-preference" REASON "user corrected this"
-
--- Find contradictions (same field, different values, same topic)
 SYS CONTRADICTIONS WHERE kind = "belief" FIELD value GROUP BY topic
-
--- Explore a hypothesis without committing
 WHAT IF RETRACT "belief:earth-is-flat"
 ```
 
----
-
-### Manage memory lifecycle
-
-Memories age. graphstore gives you tools to expire temporary ones, archive old blobs, and surgically delete anything.
+### Temporal awareness
 
 ```sql
--- Set a TTL on creation
-CREATE NODE "scratch:temp" kind = "working" data = "..." EXPIRES IN 30m
+-- Store when events happened (not just when ingested)
+CREATE NODE "event:trip" kind = "event" content = "visited Paris" EVENT_AT "2024-03-15"
 
--- Run TTL sweep (also schedulable via cron)
-SYS EXPIRE WHERE kind = "working"
+-- Query with temporal anchoring
+REMEMBER "trip plans" AT "2024-03" LIMIT 10
 
--- Hard delete - removes graph node, vector, and blob permanently
-FORGET NODE "mem:old"
-
--- Archive blob bytes by age (node stays in graph, blob is deleted)
-SYS RETAIN
+-- Range queries on event time
+NODES WHERE __event_at__ > 1710000000000 LIMIT 10
 ```
 
----
+### Memory consolidation
 
-### Snapshot and rollback
+```sql
+-- Cluster episodic memories into observations (no LLM needed)
+SYS CONSOLIDATE THRESHOLD 0.7
 
-Before exploring a reasoning branch, snapshot the current state. If the hypothesis doesn't pan out, roll back.
+-- Observations get higher retrieval priority via type_weights
+```
 
+<details>
+<summary><strong>More features</strong></summary>
+
+**Memory lifecycle**
+```sql
+CREATE NODE "scratch:temp" kind = "working" data = "..." EXPIRES IN 30m
+SYS EXPIRE WHERE kind = "working"
+FORGET NODE "mem:old"    -- hard delete (graph + vector + blob)
+```
+
+**Snapshots**
 ```sql
 SYS SNAPSHOT "before-hypothesis"
 -- ... reasoning branch ...
 SYS ROLLBACK TO "before-hypothesis"
 ```
 
----
-
-### Schedule maintenance automatically
-
+**Scheduled maintenance**
 ```python
 g = GraphStore(path="./brain", queued=True)
-
-# Persist cron jobs in SQLite - they survive restarts
-g.execute('SYS CRON ADD "expire-ttl"  SCHEDULE "@hourly"      QUERY "SYS EXPIRE"')
-g.execute('SYS CRON ADD "nightly-opt" SCHEDULE "0 3 * * *"    QUERY "SYS OPTIMIZE"')
-g.execute('SYS CRON ADD "vault-sync"  SCHEDULE "*/5 * * * *"  QUERY "VAULT SYNC"')
+g.execute('SYS CRON ADD "expire-ttl" SCHEDULE "@hourly" QUERY "SYS EXPIRE"')
+g.execute('SYS CRON ADD "nightly-opt" SCHEDULE "0 3 * * *" QUERY "SYS OPTIMIZE"')
 ```
 
-Full cron expressions, `@hourly`, `@daily`, `@weekly` all work. Requires `queued=True`.
-
----
-
-### Write self-healing rules
-
-The evolution engine watches live signals and fires rules automatically when thresholds are crossed.
-
+**Self-healing rules**
 ```sql
--- Re-embed when retrieval quality drops
 SYS EVOLVE RULE "reindex-on-drift"
   WHEN recall_hit_rate <= 0.4
   THEN RUN SYS REEMBED
   COOLDOWN 86400
-
--- Auto-compact when tombstone bloat is high
-SYS EVOLVE RULE "compact-on-bloat"
-  WHEN tombstone_ratio >= 0.3
-  THEN RUN SYS OPTIMIZE COMPACT
-  COOLDOWN 3600
-
--- List, inspect, and manage rules
-SYS EVOLVE LIST
-SYS EVOLVE SHOW "reindex-on-drift"
-SYS EVOLVE HISTORY LIMIT 10
 ```
 
-<details>
-<summary>All available signals and tunable parameters</summary>
-
-**Signals (13):** `memory_pct`, `memory_mb`, `node_count`, `tombstone_ratio`, `string_bloat`, `recall_hit_rate`, `recall_misses`, `avg_similarity`, `eviction_count`, `query_rate`, `write_rate`, `edge_density`, `wal_pending`
-
-**Tunable params (10):** `ceiling_mb`, `eviction_target_ratio`, `recall_decay`, `chunk_max_size`, `cost_threshold`, `optimize_interval`, `similarity_threshold`, `duplicate_threshold`, `remember_weights`, `protected_kinds`
-
-**THEN actions:** `SET param = value`, `ADJUST param BY delta UNTIL target`, `ADD param "element"`, `REMOVE param "element"`, `RUN <any DSL query>`
-
-</details>
-
----
-
-### More features
-
-<details>
-<summary><strong>Vault</strong> - structured markdown notes</summary>
-
-Point graphstore at a folder of markdown files and they become queryable nodes with edges for wikilinks.
-
+**Vault (markdown notes)**
 ```python
 g = GraphStore(path="./brain", vault="./notes")
+g.execute('VAULT NEW "Project Requirements" KIND "context"')
+g.execute('VAULT SEARCH "deployment requirements" LIMIT 5')
 ```
 
-```sql
-VAULT NEW "Project Requirements" KIND "context" TAGS "project,specs"
-VAULT WRITE "Project Requirements" SECTION "body" CONTENT "The app must support..."
-VAULT SEARCH "deployment requirements" LIMIT 5
-VAULT BACKLINKS "my-note"
-VAULT DAILY   -- create/open today's daily note
-VAULT SYNC    -- re-index after external edits
-```
-
-Note kinds: `instruction`, `goal`, `context`, `plan`, `memory`, `artifact`, `log`, `daily`, `entity`, `fact`, `scratch`
-
-</details>
-
-<details>
-<summary><strong>Voice</strong> - speech in, speech out (opt-in)</summary>
-
+**Voice (speech I/O)**
 ```python
 g = GraphStore(path="./brain", voice=True)
-
 g.speak("The Q3 revenue grew 15%")
 g.listen(on_text=lambda text: agent.process(text))
-g.execute('INGEST "meeting.wav"')  # transcribe → chunk → embed
 ```
 
-Ships with Moonshine STT and Piper TTS. Swap either with any duck-typed adapter via `stt=` and `tts=` constructor args.
-
-</details>
-
-<details>
-<summary><strong>Context isolation</strong> - sandboxed reasoning sessions</summary>
-
+**Context isolation**
 ```sql
 BIND CONTEXT "reasoning-session-42"
 CREATE NODE "hyp:1" kind = "hypothesis" content = "maybe X"
-RECALL FROM "hyp:1" DEPTH 3 LIMIT 10
 DISCARD CONTEXT "reasoning-session-42"
 ```
 
-</details>
-
-<details>
-<summary><strong>Aggregations</strong></summary>
-
+**Graph queries**
 ```sql
-AGGREGATE NODES WHERE kind = "memory"
-  GROUP BY topic
-  SELECT COUNT(), AVG(importance)
-  HAVING COUNT() > 2
-  ORDER BY AVG(importance) DESC
-```
-
-</details>
-
-<details>
-<summary><strong>Temporal queries</strong></summary>
-
-```sql
-NODES WHERE __created_at__ > NOW() - 7d
-NODES WHERE __updated_at__ > TODAY ORDER BY __created_at__ DESC
-MERGE NODE "memory:old" INTO "memory:canonical"
-```
-
-</details>
-
-<details>
-<summary><strong>Activity log</strong></summary>
-
-Every query is auto-tagged. You can trace a full session or filter by semantic type.
-
-```sql
-SYS LOG LIMIT 20
-SYS LOG TRACE "research-session-42"
-SYS LOG SINCE "2026-03-24" LIMIT 50
-SYS LOG WHERE tag = "intelligence"
-```
-
-```python
-gs.bind_trace("research-42")
-gs.execute('RECALL FROM "quantum" DEPTH 3')
-gs.discard_trace()
-```
-
-</details>
-
-<details>
-<summary><strong>Thread safety</strong></summary>
-
-graphstore is single-writer by design. The storage engine assumes one writer at a time - no MVCC, no row-level locking.
-
-`queued=True` installs a single-worker submission queue in front of the write path. It is a thread-safety guarantee, not parallelism. Multiple caller threads can share one instance; every `execute()` call is serialized through one daemon worker. It also starts the cron scheduler.
-
-```python
-gs = GraphStore(path="./brain", queued=True)
-
-result = gs.execute('RECALL FROM "cue" DEPTH 3')   # blocks caller, returns Result
-future = gs.submit_background('SYS OPTIMIZE')       # queues behind interactive work
-future = gs.submit_background('SYS CONNECT')
-```
-
-With `queued=False` (the default), you are responsible for not calling `execute()` from multiple threads simultaneously.
-
-</details>
-
----
-
-## 📖 DSL Reference
-
-<details>
-<summary><strong>Reads</strong></summary>
-
-```sql
-NODE "node_id"
-NODE "node_id" WITH DOCUMENT
-NODES WHERE kind = "function" AND file = "app.py" LIMIT 10
-EDGES FROM "node_id" WHERE kind = "calls"
-TRAVERSE FROM "node_id" DEPTH 3 WHERE kind = "calls"
+TRAVERSE FROM "node_id" DEPTH 3
 SUBGRAPH FROM "node_id" DEPTH 2
 PATH FROM "a" TO "b" MAX_DEPTH 5
 SHORTEST PATH FROM "a" TO "b"
-WEIGHTED SHORTEST PATH FROM "a" TO "b"
 ANCESTORS OF "node_id" DEPTH 3
-DESCENDANTS OF "node_id" DEPTH 3
 COMMON NEIGHBORS OF "a" AND "b"
-MATCH ("fn_main") -[kind = "calls"]-> (callee)
-COUNT NODES WHERE kind = "function"
-AGGREGATE NODES GROUP BY kind SELECT COUNT()
-RECALL FROM "concept:x" DEPTH 3 LIMIT 10
-SIMILAR TO "search text" LIMIT 10
-SIMILAR TO [0.1, 0.2, ...] LIMIT 10 WHERE kind = "memory"
-LEXICAL SEARCH "exact phrase" LIMIT 10
-REMEMBER "hybrid query" TOKENS 4000 WHERE kind = "fact"
-REMEMBER "query" LIMIT 10
-WHAT IF RETRACT "belief:x"
-```
-
-</details>
-
-<details>
-<summary><strong>Writes</strong></summary>
-
-```sql
-CREATE NODE "id" kind = "x" name = "foo"
-CREATE NODE "id" kind = "x" DOCUMENT "full text..." EXPIRES IN 1h
-UPDATE NODE "id" SET name = "new"
-UPSERT NODE "id" kind = "x" name = "foo"
-DELETE NODE "id"
-DELETE NODES WHERE kind = "test"
-UPDATE NODES WHERE kind = "fact" SET confidence = 0.5
-CREATE EDGE "source" -> "target" kind = "calls"
-INCREMENT NODE "id" hits BY 1
-ASSERT "fact:x" kind = "fact" value = 42 CONFIDENCE 0.9 SOURCE "tool"
-RETRACT "fact:x" REASON "outdated"
-MERGE NODE "old" INTO "canonical"
-PROPAGATE "belief:x" FIELD confidence DEPTH 3
-INGEST "report.pdf" AS "doc:q3" KIND "report"
-CONNECT NODE "chunk:7" THRESHOLD 0.8
-FORGET NODE "old-memory"
-BIND CONTEXT "session-1"
-DISCARD CONTEXT "session-1"
-BEGIN ... COMMIT
-```
-
-</details>
-
-<details>
-<summary><strong>System</strong></summary>
-
-```sql
-SYS STATUS
-SYS STATS / SYS STATS NODES / SYS STATS MEMORY / SYS STATS DOCUMENTS
-SYS HEALTH
-SYS REGISTER NODE KIND "memory" REQUIRED topic:string, importance:float EMBED content
-SYS KINDS / SYS EDGE KINDS / SYS DESCRIBE NODE "memory"
-SYS CONTRADICTIONS WHERE kind = "belief" FIELD value GROUP BY topic
-SYS CONNECT / SYS CONNECT THRESHOLD 0.9
-SYS DUPLICATES THRESHOLD 0.95
-SYS EXPIRE / SYS EXPIRE WHERE kind = "working"
-SYS SNAPSHOT "name" / SYS ROLLBACK TO "name" / SYS SNAPSHOTS
-SYS EMBEDDERS / SYS SET EMBEDDER "embeddinggemma-300m" / SYS REEMBED
-SYS INGESTORS
-SYS RETAIN
-SYS CHECKPOINT / SYS REBUILD INDICES / SYS CLEAR CACHE
-SYS EXPLAIN TRAVERSE FROM "a" DEPTH 5
-SYS SLOW QUERIES LIMIT 10 / SYS FAILED QUERIES LIMIT 10
-SYS LOG LIMIT 20 / SYS LOG TRACE "id" / SYS LOG SINCE "ISO-8601"
-SYS CRON ADD "name" SCHEDULE "0 * * * *" QUERY "SYS EXPIRE"
-SYS CRON DELETE / ENABLE / DISABLE / LIST / RUN "name"
-SYS EVICT
-SYS OPTIMIZE / SYS OPTIMIZE COMPACT
-SYS EVOLVE RULE "name" WHEN signal OP value [AND ...] THEN action [COOLDOWN n] [PRIORITY n]
-SYS EVOLVE LIST / SHOW "name" / ENABLE "name" / DISABLE "name" / DELETE "name"
-SYS EVOLVE HISTORY [LIMIT n] / RESET
-```
-
-</details>
-
-<details>
-<summary><strong>Vault</strong></summary>
-
-```sql
-VAULT NEW "title" KIND "memory" TAGS "tag1,tag2"
-VAULT READ "title"
-VAULT WRITE "title" SECTION "body" CONTENT "..."
-VAULT APPEND "title" SECTION "body" CONTENT "..."
-VAULT SEARCH "query" LIMIT 10
-VAULT BACKLINKS "title"
-VAULT LIST [WHERE ...] [ORDER BY ...] [LIMIT n]
-VAULT SYNC
-VAULT DAILY
-VAULT ARCHIVE "title"
+AGGREGATE NODES WHERE kind = "memory" GROUP BY topic SELECT COUNT(), AVG(importance)
 ```
 
 </details>
@@ -589,238 +286,223 @@ VAULT ARCHIVE "title"
 
 ## ⚡ Performance
 
-All numbers measured at 100k nodes on a mid-range laptop (no GPU).
+All numbers at 100k nodes, mid-range laptop, no GPU.
 
 | Operation | Latency |
 |---|---|
-| Point lookup (`NODE "id"`) | 4 μs |
-| Filtered scan (`NODES WHERE ... LIMIT 10`) | 68 μs |
-| Count | 41 μs |
-| Order by, limit 10 | 168 μs |
-| Group by + avg | 788 μs |
-| Semantic search (`SIMILAR TO` LIMIT 10) | 127 μs |
-| Graph traversal (`RECALL` DEPTH 3) | 983 μs |
-| Assert / retract | 4-9 μs |
-| Bulk update 50k nodes | 171 μs |
-| Snapshot | 1.8 ms |
+| Point lookup (`NODE "id"`) | 4 us |
+| Filtered scan (`NODES WHERE ... LIMIT 10`) | 68 us |
+| Semantic search (`SIMILAR TO` LIMIT 10) | 127 us |
+| Graph traversal (`RECALL` DEPTH 3) | 983 us |
+| Hybrid retrieval (`REMEMBER` LIMIT 10) | ~2 ms |
+| Assert / retract | 4-9 us |
 | Memory per node | 66 bytes (columns) + ~1 KB (vector) |
 
-**Retrieval quality** (LongMemEval-S, 500 records, bge-small-en-v1.5, CPU-only):
+### Benchmark results
 
-| System | Accuracy / R@5 |
+**LongMemEval-S** (500 records, retrieval-only, Jina v5 Nano 768d, Kaggle T4 GPU):
+
+| Category | Accuracy |
 |---|---|
-| **graphstore (skill adapter + REMEMBER)** | **97.6%** |
-| MemPalace | 96.6% |
-| OMEGA | 95.4% |
-| MemMachine | 93.0% |
+| knowledge-update | 100.0% |
+| multi-session | 98.5% |
+| single-session-assistant | 100.0% |
+| single-session-user | 98.6% |
+| temporal-reasoning | 91.7% |
+| single-session-preference | 86.7% |
+| **Overall** | **96.4%** |
 
-Full methodology, category breakdown, comparison to the public leaderboard, and reproduction instructions: see [**BENCHMARKS.md**](BENCHMARKS.md).
+**LoCoMo** (50Q, token-level F1, MiniMax M2.7 reader, Jina v5 Small 1024d):
+
+| Category | F1 |
+|---|---|
+| open-domain | 0.452 |
+| multi-hop | 0.418 |
+| adversarial | 0.500 |
+| single-hop | 0.224 |
+| temporal | 0.189 |
+| **Overall** | **0.357** |
+
+For context: GPT-3.5-turbo with full conversation context scores 0.378 on LoCoMo. graphstore achieves comparable quality using only retrieved passages (no full context), with a smaller LLM reader.
+
+Retrieval recall (keyword in top-K passages, no LLM):
+
+| K | Recall |
+|---|---|
+| top-5 | 60% |
+| top-10 | 80% |
+| top-20 | 84% |
+| top-50 | 96% |
+
+Full methodology, reproduction instructions, and comparison details: see [summary.md](summary.md).
 
 ---
 
 ## ⚙️ Configuration
 
-The constructor exposes the most common options:
-
 ```python
 g = GraphStore(
-    path="./brain",       # where to persist (None = in-memory only)
-    ceiling_mb=256,       # memory ceiling for the graph
-    embedder="default",   # "default" (model2vec) or a custom Embedder instance
-    queued=True,          # single-worker submission queue + cron scheduler
-    voice=False,          # True to enable built-in STT/TTS
-    vault="./notes",      # path to markdown vault (None = disabled)
-    retention={           # blob lifecycle - when to archive/delete file bytes
-        "blob_warm_days": 30,
-        "blob_archive_days": 90,
-        "blob_delete_days": 365,
-    },
+    path="./brain",
+    ceiling_mb=256,
+    embedder="default",       # or a custom Embedder instance, or "none"
+    queued=True,              # thread-safe + cron scheduler
+    vault="./notes",          # markdown vault (None = disabled)
+    voice=False,              # STT/TTS (False = disabled)
+    fusion_method="weighted", # "weighted" or "rrf"
+    recency_half_life_days=7300,  # ~20 years - agent memory decays slowly
 )
 ```
 
-For deeper tuning, drop a `graphstore.json` file next to your persistence directory.
+Config is loaded in layers: `config.py` defaults -> `graphstore.json` overrides -> `GRAPHSTORE_*` env vars -> constructor kwargs.
 
 <details>
-<summary><strong>Full graphstore.json reference</strong> (48 fields)</summary>
+<summary><strong>graphstore.json reference</strong></summary>
+
+Only include fields you want to override. Missing fields use defaults from `config.py`.
 
 ```json
 {
   "core": {
-    "ceiling_mb": 256,
-    "initial_capacity": 1024,
-    "compact_threshold": 0.2,
-    "string_gc_threshold": 3.0,
-    "eviction_target_ratio": 0.8,
-    "protected_kinds": ["schema", "config", "system"]
+    "ceiling_mb": 512
   },
   "vector": {
-    "embedder": "default",
-    "similarity_threshold": 0.85,
-    "duplicate_threshold": 0.95,
-    "search_oversample": 5,
-    "model2vec_model": "minishlab/M2V_base_output",
-    "model_cache_dir": null
-  },
-  "document": {
-    "fts_tokenizer": "porter unicode61",
-    "chunk_max_size": 2000,
-    "chunk_overlap": 50,
-    "summary_max_length": 200,
-    "fts_full_text": true,
-    "vision_model": "smolvlm2:2.2b",
-    "vision_base_url": "http://localhost:11434/v1",
-    "vision_max_tokens": 300
+    "search_oversample": 16,
+    "similarity_threshold": 0.85
   },
   "dsl": {
-    "cost_threshold": 100000,
-    "plan_cache_size": 256,
-    "auto_optimize": false,
-    "optimize_interval": 500,
-    "recall_decay": 0.7,
-    "remember_weights": [0.30, 0.20, 0.15, 0.20, 0.15],
-    "cache_gc_threshold": 200
-  },
-  "vault": {
-    "enabled": false,
-    "path": null,
-    "auto_sync": true
-  },
-  "persistence": {
-    "wal_hard_limit": 100000,
-    "auto_checkpoint_threshold": 50000,
-    "log_retention_days": 7,
-    "busy_timeout_ms": 5000
-  },
-  "retention": {
-    "blob_warm_days": 30,
-    "blob_archive_days": 90,
-    "blob_delete_days": 365
-  },
-  "server": {
-    "cors_origins": ["*"],
-    "ingest_root": null,
-    "auth_token": null,
-    "rate_limit_rpm": 120,
-    "rate_limit_window": 60,
-    "max_query_length": 10000,
-    "max_batch_size": 1000
-  },
-  "evolution": {
-    "similarity_buffer_size": 100,
-    "max_rules": 50,
-    "min_cooldown": 10,
-    "history_retention": 1000
+    "fusion_method": "weighted",
+    "remember_weights": [0.50, 0.20, 0.10, 0.15, 0.05],
+    "recency_half_life_days": 7300,
+    "hybridrag_weight": 0.15,
+    "nucleus_expansion": true
   }
 }
+```
+
+Environment variables: `GRAPHSTORE_CORE_CEILING_MB=512`, `GRAPHSTORE_DSL_FUSION_METHOD=weighted`, etc.
+
+</details>
+
+---
+
+## 📖 DSL Reference
+
+<details>
+<summary><strong>Reads (25+ commands)</strong></summary>
+
+```sql
+NODE "id"
+NODE "id" WITH DOCUMENT
+NODES WHERE kind = "memory" AND importance > 0.5 LIMIT 10
+EDGES FROM "id" WHERE kind = "calls"
+TRAVERSE FROM "id" DEPTH 3
+SUBGRAPH FROM "id" DEPTH 2
+PATH FROM "a" TO "b" MAX_DEPTH 5
+SHORTEST PATH FROM "a" TO "b"
+ANCESTORS OF "id" DEPTH 3
+DESCENDANTS OF "id" DEPTH 3
+COMMON NEIGHBORS OF "a" AND "b"
+MATCH ("fn_main") -[kind = "calls"]-> (callee)
+COUNT NODES WHERE kind = "memory"
+AGGREGATE NODES GROUP BY kind SELECT COUNT()
+RECALL FROM "id" DEPTH 3 LIMIT 10
+SIMILAR TO "text" LIMIT 10
+SIMILAR TO NODE "id" LIMIT 10
+SIMILAR TO [0.1, 0.2, ...] LIMIT 10
+LEXICAL SEARCH "phrase" LIMIT 10
+REMEMBER "query" LIMIT 10
+REMEMBER "query" AT "2024-03" TOKENS 4000
+WHAT IF RETRACT "id"
+```
+
+</details>
+
+<details>
+<summary><strong>Writes (15+ commands)</strong></summary>
+
+```sql
+CREATE NODE "id" kind = "x" name = "foo"
+CREATE NODE "id" kind = "x" EVENT_AT "2024-03-15"
+CREATE NODE "id" kind = "x" DOCUMENT "full text..." EXPIRES IN 1h
+UPDATE NODE "id" SET name = "new"
+UPSERT NODE "id" kind = "x" name = "foo"
+DELETE NODE "id"
+DELETE NODES WHERE kind = "test"
+UPDATE NODES WHERE kind = "fact" SET confidence = 0.5
+CREATE EDGE "src" -> "tgt" kind = "calls"
+INCREMENT NODE "id" hits BY 1
+ASSERT "id" kind = "fact" value = 42 CONFIDENCE 0.9 SOURCE "tool" EVENT_AT "2024-01"
+RETRACT "id" REASON "outdated"
+MERGE NODE "old" INTO "canonical"
+PROPAGATE "id" FIELD confidence DEPTH 3
+INGEST "file.pdf" AS "doc:q3" KIND "report"
+FORGET NODE "id"
+BIND CONTEXT "session-1"
+DISCARD CONTEXT "session-1"
+BEGIN ... COMMIT
+```
+
+</details>
+
+<details>
+<summary><strong>System (30+ commands)</strong></summary>
+
+```sql
+SYS STATUS / SYS STATS / SYS HEALTH
+SYS KINDS / SYS EDGE KINDS / SYS DESCRIBE NODE "memory"
+SYS REGISTER NODE KIND "memory" REQUIRED topic:string EMBED content
+SYS CONNECT / SYS CONNECT THRESHOLD 0.9
+SYS CONSOLIDATE THRESHOLD 0.7
+SYS DUPLICATES THRESHOLD 0.95
+SYS CONTRADICTIONS WHERE kind = "belief" FIELD value GROUP BY topic
+SYS EXPIRE WHERE kind = "working"
+SYS SNAPSHOT "name" / SYS ROLLBACK TO "name"
+SYS EMBEDDERS / SYS REEMBED
+SYS RETAIN / SYS EVICT
+SYS CHECKPOINT / SYS REBUILD INDICES / SYS CLEAR CACHE
+SYS OPTIMIZE / SYS OPTIMIZE COMPACT
+SYS LOG LIMIT 20 / SYS LOG TRACE "id"
+SYS CRON ADD "name" SCHEDULE "0 * * * *" QUERY "SYS EXPIRE"
+SYS EVOLVE RULE "name" WHEN signal OP value THEN action COOLDOWN n
+SYS EVOLVE LIST / SHOW / ENABLE / DISABLE / DELETE / HISTORY
 ```
 
 </details>
 
 ---
 
-## 🎮 Playground (experimental)
-
-A local web UI for exploring your graph interactively - CodeMirror editor, React Flow visualization, stacked query results.
-
-```bash
-pip install "graphstore[playground]"
-graphstore playground
-```
-
-The playground currently supports the core DSL (reads, writes, traversals, semantic search). Newer features (evolution rules, cron, vault, voice, document ingest) are not yet surfaced in the UI - use the Python API for those.
-
----
-
-## 🏗️ Architecture
+## 🏗️ Project structure
 
 <details>
-<summary>Project structure</summary>
+<summary>Expand</summary>
 
 ```
 graphstore/
-├── __init__.py               # Public API re-exports
-├── graphstore.py             # GraphStore facade
-├── wal.py                    # WAL: append, replay, checkpoint, query log
-├── cron.py                   # CronScheduler: persistent jobs, daemon timer
-├── config.py                 # Typed config via msgspec Structs
-├── evolve.py                 # EvolutionEngine: WHEN/THEN signal-driven rules
-├── evolve_defaults.py        # Starter rules (disabled by default)
-├── core/                     # Graph engine
-│   ├── store.py              # CoreStore: columnar node CRUD
-│   ├── columns.py            # ColumnStore: typed numpy arrays
-│   ├── edges.py              # EdgeMatrices: scipy CSR
-│   ├── strings.py            # StringTable: string interning
-│   ├── schema.py             # SchemaRegistry + EMBED field
-│   ├── path.py               # BFS, Dijkstra, common neighbors
-│   ├── memory.py             # Memory measurement + ceiling
-│   ├── optimizer.py          # Compact, GC, evict
-│   ├── scheduler.py          # OptimizerScheduler: health + auto-optimize
-│   ├── queue.py              # CommandQueue: thread-safe priority queue
-│   ├── runtime.py            # RuntimeState: shared component refs
-│   ├── types.py              # Result, Edge dataclasses
-│   └── errors.py             # Error hierarchy
-├── dsl/                      # Query language
-│   ├── grammar.lark          # Lark LALR(1) grammar
-│   ├── parser.py             # Parser + LRU cache
-│   ├── transformer.py        # Parse tree → AST
-│   ├── ast_nodes.py          # 70+ AST node types
-│   ├── tagger.py             # Auto-tag AST for the log layer (read/write/intelligence/...)
-│   ├── visibility.py         # VisibilityMixin: tombstone / TTL / retracted / context filter
-│   ├── filtering.py          # FilteringMixin: eval_where + numpy column acceleration
-│   ├── executor_base.py      # Shared init, properties, and execute() entry point
-│   ├── handlers/             # Auto-dispatch handler mixins
-│   │   ├── nodes.py          # NODE, NODES, COUNT
-│   │   ├── edges.py          # EDGES, CREATE/DELETE EDGE
-│   │   ├── traversal.py      # TRAVERSE, PATH, ANCESTORS, DESCENDANTS
-│   │   ├── pattern.py        # MATCH
-│   │   ├── aggregation.py    # AGGREGATE GROUP BY
-│   │   ├── intelligence.py   # RECALL, SIMILAR, LEXICAL, REMEMBER
-│   │   ├── beliefs.py        # ASSERT, RETRACT, PROPAGATE
-│   │   ├── mutations.py      # CREATE/UPDATE/DELETE/MERGE/BATCH
-│   │   ├── context.py        # BIND/DISCARD CONTEXT
-│   │   └── ingest.py         # INGEST, CONNECT NODE
-│   ├── executor.py           # Unified dispatcher
-│   ├── executor_system.py    # SYS + CRON + LOG commands
-│   └── cost_estimator.py     # Frontier-based cost rejection
-├── embedding/                # Text → vectors
-│   ├── base.py               # Embedder protocol
-│   ├── model2vec_embedder.py # Default (30MB, CPU-only)
-│   ├── onnx_hf_embedder.py   # EmbeddingGemma ONNX (opt-in)
-│   └── postprocess.py        # L2 normalize, Matryoshka truncation
-├── vector/                   # Semantic search
-│   ├── index.py              # usearch HNSW wrapper
-│   └── store.py              # VectorStore: slot ↔ vector mapping
-├── document/                 # Document storage
-│   └── store.py              # DocumentStore: SQLite FTS5
-├── ingest/                   # File → graph pipeline
-│   ├── base.py               # Ingestor protocol + Chunk dataclass
-│   ├── registry.py           # Per-extension routing
-│   ├── markitdown_ingestor.py  # Tier 1: general files
-│   ├── pymupdf4llm_ingestor.py # Tier 2: PDF structure
-│   ├── docling_ingestor.py   # Tier 3: hard PDFs (lazy load)
-│   ├── chunker.py            # HeadingChunker
-│   ├── vision.py             # SmolVLM2/Qwen3-VL via Ollama
-│   ├── router.py             # Tiered routing
-│   └── connector.py          # SYS CONNECT cross-doc wiring
-├── voice/                    # Speech I/O (opt-in)
-│   ├── protocol.py           # STTProtocol, TTSProtocol
-│   ├── stt.py                # MoonshineSTT
-│   └── tts.py                # PiperTTS
-├── vault/                    # Markdown notes
-│   ├── parser.py             # Frontmatter, sections, wikilinks
-│   ├── manager.py            # Note CRUD
-│   ├── sync.py               # Vault dir → graphstore sync
-│   └── executor.py           # VAULT DSL handler
-├── registry/                 # Model management
-│   ├── models.py             # Supported models config
-│   ├── installer.py          # Download + verify + smoke test
-│   └── manifest.py           # Model manifest schema
-├── persistence/              # SQLite checkpoints
-│   ├── database.py
-│   ├── serializer.py
-│   └── deserializer.py
-├── server.py                 # FastAPI playground server
-└── cli.py                    # CLI entry point
+  graphstore.py           # Main entry point
+  config.py               # Typed config (msgspec Structs)
+  wal.py                  # Write-ahead log
+  cron.py                 # Scheduled jobs
+  evolve.py               # Self-tuning rules
+  core/                   # Graph engine (numpy + CSR + columns)
+  dsl/                    # Query language (grammar + parser + handlers)
+    handlers/
+      intelligence.py     # REMEMBER, RECALL, SIMILAR, LEXICAL SEARCH
+      mutations.py        # CREATE, UPDATE, DELETE, MERGE
+      traversal.py        # TRAVERSE, PATH, SUBGRAPH
+      beliefs.py          # ASSERT, RETRACT, PROPAGATE
+      ...
+  algos/                  # Pure algorithms (fusion, spreading, consolidation)
+  embedding/              # Embedder backends (model2vec, ONNX, GGUF, fastembed)
+  vector/                 # usearch ANN index
+  document/               # SQLite FTS5 + blob storage
+  ingest/                 # File -> graph pipeline
+  retrieval/              # Query-aware retrieval planner
+  vault/                  # Markdown note system
+  voice/                  # STT + TTS
+  registry/               # Model management
+  persistence/            # SQLite serialization
+  server.py               # Playground web UI
+  cli.py                  # CLI
 ```
 
 </details>
@@ -834,7 +516,7 @@ git clone https://github.com/orkait/graphstore.git
 cd graphstore
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest
+pytest     # 1166 tests
 ```
 
 ---
@@ -842,3 +524,4 @@ pytest
 ## 📄 License
 
 MIT
+</div>
