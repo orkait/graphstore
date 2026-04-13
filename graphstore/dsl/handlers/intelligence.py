@@ -1,5 +1,6 @@
 """Intelligence handlers: RECALL, SIMILAR, LEXICAL SEARCH, WHAT IF."""
 
+import re
 import time
 from collections import deque
 
@@ -304,6 +305,26 @@ class IntelligenceHandlers:
 
         live_mask = self._compute_live_mask(n)
         now_ms = int(time.time() * 1000)
+        planner = getattr(self, "_retrieval_planner", None)
+        anchor_ms = getattr(q, 'at', None) or getattr(self, '_temporal_anchor_ms', None)
+        query_entities = re.findall(r"\b[A-Z][a-zA-Z0-9_-]{2,}(?:\s+[A-Z][a-zA-Z0-9_-]{2,}){0,3}\b", q.query)
+        plan = None
+        if planner is not None:
+            plan_ctx = planner.build_context(
+                query=q.query,
+                limit=target_k,
+                token_budget=q.tokens,
+                query_anchor_ms=anchor_ms,
+                query_time_range=None,
+                has_entities=bool(query_entities),
+                entity_candidates=query_entities,
+                has_temporal_signal=anchor_ms is not None,
+                has_observations=("observation" in self.store.string_table),
+                has_graph_edges=self.store.edge_matrices.total_edges > 0,
+                has_fts=bool(self._document_store),
+                has_vectors=bool(self._embedder and self._vector_store and self._vector_store.count() > 0),
+            )
+            plan = planner.plan(plan_ctx, explicit_overrides={})
 
         # ── Stage 1: Candidate gathering (vector + BM25) ──────────────
         vec_slots_np = np.empty(0, dtype=np.int64)
@@ -442,11 +463,11 @@ class IntelligenceHandlers:
                 )
 
         # ── Stage 3: Temporal-first filtering (TSM-inspired) ──────────
-        anchor_ms = getattr(q, 'at', None) or getattr(self, '_temporal_anchor_ms', None)
         temporal_filtered_slots = None
         has_temporal = False
 
-        if anchor_ms is not None:
+        use_temporal_filter = plan.use_temporal_filter if plan is not None else anchor_ms is not None
+        if use_temporal_filter and anchor_ms is not None:
             t_event_col = self.store.columns.get_column("__event_at__", n)
             if t_event_col is not None:
                 col_data, col_pres, _ = t_event_col
@@ -469,7 +490,7 @@ class IntelligenceHandlers:
         multiplicative = recency_mode == 'multiplicative'
         recency_for_fusion = np.zeros(n, dtype=np.float64) if multiplicative else recency_signal
 
-        fusion_method = getattr(self, '_fusion_method', 'rrf')
+        fusion_method = plan.fusion_method if plan is not None else getattr(self, '_fusion_method', 'rrf')
         if fusion_method not in ('rrf', 'weighted'):
             fusion_method = 'rrf'
         if fusion_method == 'rrf':
@@ -517,7 +538,8 @@ class IntelligenceHandlers:
         seed_count = min(len(fusion_slots), max(min_seeds, target_k // 2))
         final_scores = base_final.copy()
 
-        if seed_count > 0 and self.store.edge_matrices.total_edges > 0:
+        use_graph_expansion = plan.use_graph_expansion if plan is not None else True
+        if use_graph_expansion and seed_count > 0 and self.store.edge_matrices.total_edges > 0:
             base_order = fusion_slots[np.argsort(-base_final[fusion_slots])]
             seed_slots = base_order[:seed_count].astype(np.int64)
             seed_scores = base_final[seed_slots].astype(np.float32)
@@ -608,7 +630,7 @@ class IntelligenceHandlers:
         # ── Stage 9: Nucleus expansion (context windowing) ────────────
         # Neighbors are NOT filtered by q.where - they provide context,
         # not primary results. Only live_mask and token budget are enforced.
-        nucleus_on = getattr(self, '_nucleus_expansion', False)
+        nucleus_on = plan.use_nucleus if plan is not None else getattr(self, '_nucleus_expansion', False)
         if nucleus_on and results and self.store.edge_matrices.total_edges > 0:
             max_nb = getattr(self, '_nucleus_max_neighbors', 3)
             n_hops = getattr(self, '_nucleus_hops', 1)
@@ -672,4 +694,17 @@ class IntelligenceHandlers:
             except Exception:
                 pass
 
-        return Result(kind="nodes", data=results, count=len(results))
+        meta = {}
+        if plan is not None:
+            meta["planner"] = {
+                "candidate_k": plan.candidate_k,
+                "use_temporal_filter": plan.use_temporal_filter,
+                "use_graph_expansion": plan.use_graph_expansion,
+                "use_observations": plan.use_observations,
+                "use_nucleus": plan.use_nucleus,
+                "fusion_method": plan.fusion_method,
+                "fallback_chain": list(plan.fallback_chain),
+                "notes": list(plan.notes),
+            }
+
+        return Result(kind="nodes", data=results, count=len(results), meta=meta)
