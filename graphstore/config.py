@@ -60,7 +60,7 @@ class DslConfig(msgspec.Struct, frozen=True):
     auto_optimize: bool = False
     optimize_interval: int = 500
     recall_decay: float = 0.5912428069710964
-    remember_weights: list[float] = msgspec.field(default_factory=lambda: [0.30, 0.20, 0.15, 0.20, 0.15])
+    remember_weights: list[float] = msgspec.field(default_factory=lambda: [0.50, 0.20, 0.10, 0.15, 0.05])
     fusion_method: str = "weighted"  # "rrf" or "weighted"
     rrf_k: float = 60.0
     retrieval_strategy: str = "full"
@@ -69,7 +69,7 @@ class DslConfig(msgspec.Struct, frozen=True):
     max_query_entities: int = 6
     recency_mode: str = "multiplicative"  # "additive" or "multiplicative"
     recency_boost_k: int = 4
-    recency_half_life_days: float = 36500.0  # ~100 years - agent memory should decay very slowly
+    recency_half_life_days: float = 7300.0  # ~20 years
     similar_to_oversample: int = 2
     lexical_search_oversample: int = 3
     hybridrag_weight: float = 0.15

@@ -153,20 +153,26 @@ class EdgeMatrices:
         if base is not None:
             n = max(n, base.shape[0])
             
-        delta = csr_matrix((data, (tgts, srcs)), shape=(n, n))
-        
+        # Transpose: swap row/col so matrix_t[src, tgt] allows tgt to activate src
+        delta = csr_matrix((data, (srcs, tgts)), shape=(n, n))
+
         if base is None:
             result = delta
         else:
             if base.shape[0] < n:
                 base = resize_csr(base, n)
             result = base + delta
-            
+
         self._dynamic_transpose_cache[edge_type] = result
         return result
 
     def get_combined_transpose_split(self) -> tuple[csr_matrix | None, csr_matrix | None]:
-        """Cached transpose of combined-all matrix. Returns (base, delta) to avoid O(N) merge."""
+        """Cached transpose of combined-all matrix. Returns (base, delta) to avoid O(N) merge.
+
+        The transpose convention: matrix_t[i, j] > 0 means "activation at j
+        flows to i". For an original edge src -> tgt, the transpose has
+        matrix_t[src, tgt] so that activating tgt spreads back to src.
+        """
         base = None
         if self._combined_all is not None:
             if self._combined_transpose is None:
@@ -193,8 +199,9 @@ class EdgeMatrices:
         n = self._num_nodes
         if base is not None:
             n = max(n, base.shape[0])
-            
-        delta = csr_matrix((data, (tgts, srcs)), shape=(n, n))
+
+        # Transpose: swap row/col so matrix_t[src, tgt] allows tgt to activate src
+        delta = csr_matrix((data, (srcs, tgts)), shape=(n, n))
         
         if base is not None and base.shape[0] < n:
             base = resize_csr(base, n)
@@ -234,8 +241,9 @@ class EdgeMatrices:
         n = self._num_nodes
         if base is not None:
             n = max(n, base.shape[0])
-            
-        delta = csr_matrix((data, (tgts, srcs)), shape=(n, n))
+
+        # Transpose: swap row/col so matrix_t[src, tgt] allows tgt to activate src
+        delta = csr_matrix((data, (srcs, tgts)), shape=(n, n))
         
         if base is None:
             result = delta

@@ -27,6 +27,7 @@ from graphstore.core.errors import OptimizationInProgress
 from graphstore.dsl.handlers import is_write_op
 from graphstore.core.memory import estimate as _estimate_memory
 from graphstore.config import GraphStoreConfig, load_config, merge_kwargs, apply_env_overrides
+from graphstore.retrieval import RetrievalPlanner
 
 # All system AST types
 _SYS_TYPES = tuple(
@@ -289,6 +290,7 @@ class GraphStore:
                                   ingestor_registry=self._ingestor_registry,
                                   chunker=self._chunker)
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
+        self._executor._retrieval_planner = RetrievalPlanner()
         from graphstore.dsl.parser import set_cache_size
         set_cache_size(cfg.dsl.plan_cache_size)
         self._executor.cost_threshold = cfg.dsl.cost_threshold
@@ -859,7 +861,6 @@ class GraphStore:
         from graphstore.persistence.database import set_metadata
         set_metadata(conn, "embedder_name", emb.name)
         set_metadata(conn, "embedder_dims", str(emb.dims))
-
 
 
 
