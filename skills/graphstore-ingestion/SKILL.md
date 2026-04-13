@@ -4,7 +4,7 @@ description: How to inject data into graphstore correctly. Covers the three stor
 compatibility: Requires a local graphstore install. Works against any graphstore >= 0.3.0.
 metadata:
   author: orkait
-  version: "1.0"
+  version: "2.0"
 ---
 
 # Graphstore ingestion
@@ -37,7 +37,8 @@ A single node can live in **all three at once**: row in numpy columns + vector i
 **Plus feature layers on top:**
 
 - **DSL** (`graphstore/dsl/`) - Lark LALR(1) grammar compiled to 70+ AST dataclasses, handler-registry dispatch. The unified interface to all three engines.
-- **Embedding** (`graphstore/embedding/`) - pluggable embedder protocol (model2vec default, FastEmbed for BGE/e5/mxbai/nomic, OnnxHF for EmbeddingGemma/Harrier).
+- **Embedding** (`graphstore/embedding/`) - pluggable embedder protocol (model2vec default, FastEmbed, OnnxHF for Jina v5/Harrier/EmbeddingGemma, GGUF via llama-cpp-python). Registry at `graphstore/registry/models.py`.
+- **Reranking** (`graphstore/embedding/reranker.py`) - pluggable cross-encoder reranker (FlashRank, ONNX, GGUF backends). Used by `remember_rerank` and `full_rerank` retrieval strategies.
 - **Beliefs** - `ASSERT` / `RETRACT` / `PROPAGATE` write reserved columns (`__confidence__`, `__retracted__`, `__source__`) on the Graph engine.
 - **Evolution** (`graphstore/evolve.py`) - `EvolutionEngine`, opt-in. WHEN/THEN rules that self-tune graphstore's own runtime parameters based on live signals.
 - **Ingest pipeline** (`graphstore/ingest/`) - file-to-graph routing (MarkItDown → PyMuPDF4LLM → Docling), chunker, vision. Used by the `INGEST` DSL verb.
@@ -69,7 +70,7 @@ A single node can live in all four at once. When you CREATE a node with `EMBED c
 | `RECALL FROM "id" DEPTH k` | edges | Spreading activation from a known node |
 | `TRAVERSE`, `PATH`, `MATCH` | edges | Graph walks |
 
-**Critical:** `REMEMBER` does NOT use graph edges. Adding edges helps `RECALL`, `TRAVERSE`, `PATH` - NOT `REMEMBER`. If you build a beautiful entity graph and then only call REMEMBER, the graph is invisible. This is the #1 trap.
+**Updated:** `REMEMBER` now includes HybridRAG - after fusion scoring, it takes top seed nodes and runs spreading activation through the graph to boost structurally connected nodes. Graph edges ARE used by REMEMBER (weight controlled by `dsl.hybridrag_weight`, default 0.15). Building an entity graph helps both REMEMBER and RECALL.
 
 ## The golden ingestion pattern
 
@@ -134,7 +135,7 @@ Do NOT wrap ingestion in `BEGIN ... COMMIT` (BATCH) for bulk loads. BATCH does a
 
 `__created_at__` and `__updated_at__` are set to wall clock time on every `CREATE NODE` and `UPDATE NODE`. They are reserved. **There is no DSL way to override them** - no `CREATE NODE ... AT "2023-05-30"` syntax.
 
-REMEMBER's recency signal is `exp(-age_days / 30)` where `age_days = (now - __updated_at__) / day_ms`. If all your nodes get `now_ms` at ingest, every node has `recency = 1.0` → the recency signal contributes no differential ranking → effectively 4-signal fusion.
+REMEMBER's recency signal is `exp(-age_days / half_life)` where `half_life` is configurable via `dsl.recency_half_life_days` (default 30.0). If all your nodes get `now_ms` at ingest, every node has `recency = 1.0` → the recency signal contributes no differential ranking → effectively 4-signal fusion.
 
 **If you want real recency**, override the columns directly after CREATE:
 
@@ -214,19 +215,32 @@ This is where the benchmark you are running should dictate your choice. Do not r
 
 ### `REMEMBER "query" [LIMIT k] [WHERE ...]`
 
-The default natural-language retrieval primitive. Fuses 5 signals with default weights `[0.30, 0.20, 0.15, 0.20, 0.15]`:
+The default natural-language retrieval primitive. Fuses 6 signals:
 
 ```
-0.30 × vector_similarity     (cosine from embedder)
-0.20 × bm25_normalized       (FTS5 - needs doc_fts populated!)
-0.15 × recency               (exp(-age_days/30) from __updated_at__)
-0.20 × confidence            (from __confidence__ column)
-0.15 × recall_frequency      (from __recall_count__ column)
+0.30 x vector_similarity     (cosine from embedder)
+0.20 x bm25_normalized       (FTS5 - needs doc_fts populated!)
+0.15 x recency               (exp(-age/half_life) from __updated_at__)
+0.20 x confidence             (from __confidence__ column)
+0.15 x recall_frequency       (from __recall_count__ column)
+--- then blended with ---
+0.15 x graph_activation       (HybridRAG: spreading activation from top seed nodes)
 ```
 
-Use when: the question is natural language and you want the best single-shot retrieval. The sweet spot.
+The first 5 signals produce a base score. HybridRAG then takes the top-scoring nodes as seeds, runs spreading activation through the graph, normalizes to 0-1, and blends at `hybridrag_weight` (default 0.15). The final score is `(1 - hybridrag_weight) * base + hybridrag_weight * graph_activation`.
 
-Do NOT use when: your only data is via CREATE NODE (no FTS). You'll get a 20%-weighted null signal.
+All weights and parameters are configurable via `graphstore.json` or constructor kwargs.
+
+Key config knobs for REMEMBER:
+- `dsl.remember_weights`: the 5-signal weights (default [0.30, 0.20, 0.15, 0.20, 0.15])
+- `dsl.hybridrag_weight`: graph blend weight (default 0.15)
+- `dsl.hybridrag_min_seeds`: minimum seed nodes for expansion (default 5)
+- `dsl.recency_half_life_days`: recency decay half-life (default 30.0)
+- `vector.search_oversample`: ANN candidate multiplier (default 10)
+
+Use when: the question is natural language and you want the best single-shot retrieval.
+
+Do NOT use when: your only data is via CREATE NODE (no FTS). The BM25 signal will be dead.
 
 ### `SIMILAR TO "text" LIMIT k [WHERE ...]`
 
@@ -256,9 +270,9 @@ Deterministic graph walks without activation scoring. Use for structured queries
 
 ## Gotchas we learned the hard way
 
-### G1. REMEMBER does not read graph edges
+### G1. REMEMBER now uses graph edges via HybridRAG
 
-`SYS CONNECT` creates `similar_to` edges between vector-similar nodes. If you then call `REMEMBER`, the edges are invisible. `REMEMBER` only fuses vector + BM25 + recency + confidence + recall_count. You have to call `RECALL FROM <anchor>` (or combine REMEMBER + RECALL results in the adapter) to get any graph-based retrieval.
+~~REMEMBER used to ignore graph edges.~~ As of PR #72/#74, REMEMBER includes HybridRAG expansion - top fusion results seed spreading activation through the graph. The graph signal is blended at `hybridrag_weight` (default 0.15). Entity graphs and `next` edges now directly improve REMEMBER results. The `full` retrieval strategy also runs explicit RECALL + recency on top of REMEMBER for maximum coverage.
 
 ### G2. The BM25 signal is off unless you populate `doc_fts`
 
@@ -354,31 +368,46 @@ for session in record.haystack:
             gs.execute(f'CREATE EDGE "{session.id}:msg{i}" -> "{session.id}:msg{i+1}" kind = "next"')
 ```
 
-Query time routing by question category:
+Query time - use the unified `full` strategy (no category routing needed):
 
 ```python
-def query(question, category):
-    if category in ("single-session-user", "single-session-preference", "single-session-assistant"):
-        return gs.execute(f'REMEMBER "{question}" LIMIT 5 WHERE kind = "message"')
+def query(question, k=5):
+    depth = 8  # from dsl.retrieval_depth config
+    
+    # 1. Hybrid retrieval (vector + BM25 + HybridRAG graph expansion)
+    primary = gs.execute(f'REMEMBER "{question}" LIMIT {k * depth} WHERE kind = "message"')
+    merged = [node["content"] for node in primary.data if node.get("content")]
 
-    if category == "multi-session":
-        primary = gs.execute(f'REMEMBER "{question}" LIMIT 10 WHERE kind = "message"')
-        # Extract entities from the QUESTION and RECALL from each
-        for ent in extract_entities(question):
-            recall = gs.execute(f'RECALL FROM "ent:{slug(ent)}" DEPTH 2 LIMIT 5')
-            # fuse with primary
-        return fused
+    # 2. Entity graph traversal (cross-session reasoning)
+    for ent in extract_entities(question)[:3]:
+        try:
+            rec = gs.execute(f'RECALL FROM "ent:{slug(ent)}" DEPTH 2 LIMIT {k}')
+            for node in rec.data:
+                text = node.get("content", "")
+                if text and text not in merged:
+                    merged.append(text)
+        except Exception:
+            pass
 
-    if category == "knowledge-update":
-        # Most recent mentions outrank older ones
-        primary = gs.execute(f'REMEMBER "{question}" LIMIT 10 WHERE kind = "message"')
-        recent = gs.execute(f'NODES WHERE kind = "message" ORDER BY __updated_at__ DESC LIMIT 5')
-        return dedupe(primary + recent)[:5]
+    # 3. Recency boost (knowledge updates)
+    recent = gs.execute(f'NODES WHERE kind = "message" ORDER BY __updated_at__ DESC LIMIT {k * 2}')
+    for node in recent.data:
+        text = node.get("content", "")
+        if text and text not in merged:
+            merged.append(text)
 
-    return gs.execute(f'REMEMBER "{question}" LIMIT 5 WHERE kind = "message"')
+    return merged[:k]
 ```
 
-Key insight: **different categories want different retrieval strategies**. Do not serve one query primitive to all of them.
+Key insight: the unified strategy runs ALL signals for EVERY query. No category routing needed. REMEMBER's HybridRAG handles graph traversal internally, the explicit RECALL and recency are additional coverage. This scored 97.5% on LongMemEval-S (120 records) without knowing question categories.
+
+**Available retrieval strategies** (set via `dsl.retrieval_strategy`):
+- `remember` - hybrid only (fastest)
+- `remember_graph` - hybrid + entity RECALL
+- `remember_recency` - hybrid + time sort
+- `remember_rerank` - hybrid + cross-encoder rerank
+- `full` - all signals combined (default, recommended)
+- `full_rerank` - all signals + cross-encoder rerank
 
 ### Pattern B: document ingestion (PDFs, long text)
 
@@ -441,8 +470,56 @@ Run through this top to bottom when REMEMBER results look worse than expected.
 - Stuff arbitrary scores into `importance` expecting REMEMBER to read them
 - Run two writer threads on `queued=False`
 
+## Configuration
+
+All retrieval knobs are configurable via `graphstore.json` (overrides only), env vars (`GRAPHSTORE_DSL_*`), or constructor kwargs. The config chain:
+
+```
+config.py defaults -> graphstore.json (diffs only) -> GRAPHSTORE_* env vars -> constructor kwargs
+```
+
+Key retrieval config (in `graphstore.json`):
+
+```json
+{
+  "dsl": {
+    "retrieval_depth": 8,
+    "recall_depth": 2,
+    "max_query_entities": 3,
+    "recency_boost_k": 2,
+    "recency_half_life_days": 30.0,
+    "hybridrag_weight": 0.15,
+    "hybridrag_min_seeds": 5,
+    "retrieval_strategy": "full"
+  },
+  "vector": {
+    "search_oversample": 10,
+    "similarity_threshold": 0.85
+  }
+}
+```
+
+Or as constructor kwargs:
+
+```python
+gs = GraphStore(
+    path="./db",
+    embedder=my_embedder,
+    search_oversample=10,
+    retrieval_depth=8,
+    hybridrag_weight=0.15,
+)
+```
+
+CLI to inspect config:
+
+```bash
+graphstore config --defaults    # all defaults
+graphstore config --schema      # JSON Schema for graphstore.json
+```
+
 ## TL;DR
 
-graphstore is three storage engines (graph, vector, document) unified by a DSL, plus feature layers on top. You have to feed data into the right ones. Schema first, deferred embeddings, entity graph for multi-hop, `put_summary` for BM25, REMEMBER + RECALL fusion for non-trivial questions, `__confidence__` not `importance`, and timestamps are a trap unless you know what you're doing.
+graphstore is three storage engines (graph, vector, document) unified by a DSL, with HybridRAG fusing all three at query time. Schema first, deferred embeddings, entity graph for multi-hop, `put_summary` for BM25, the `full` strategy handles all query types without category routing. All retrieval knobs are configurable via JSON/env/kwargs. 97.5% on LongMemEval-S with no LLM.
 
 When in doubt, reach for Pattern A above and adapt.

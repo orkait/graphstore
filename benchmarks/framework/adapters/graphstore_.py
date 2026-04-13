@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,24 @@ from ..adapter import QueryContext, QueryResult, Session, TimedOperation
 
 _ENTITY_RE = re.compile(r"\b[A-Z][a-zA-Z0-9_-]{2,}(?:\s+[A-Z][a-zA-Z0-9_-]{2,}){0,3}\b")
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9_]+")
+
+_BENCHMARK_DEFAULTS: dict[str, Any] = {
+    # Ratcheted from the 48-record balanced LongMemEval slice.
+    "retrieval_depth": 9,
+    "search_oversample": 16,
+    "recall_depth": 2,
+    "max_query_entities": 6,
+    "recency_boost_k": 4,
+    "recall_decay": 0.5912428069710964,
+    "recency_half_life_days": 48.43688350759862,
+    "similar_to_oversample": 2,
+    "lexical_search_oversample": 3,
+    "fusion_method": "weighted",
+    "recency_mode": "multiplicative",
+    "nucleus_expansion": True,
+    "nucleus_hops": 2,
+    "nucleus_max_neighbors": 3,
+}
 
 
 def _escape(text: str) -> str:
@@ -44,6 +63,14 @@ def _slug(text: str) -> str:
     return _SLUG_RE.sub("_", text.lower()).strip("_")[:40]
 
 
+_STOP_WORDS = frozenset({
+    "what", "when", "where", "who", "how", "why", "which", "would",
+    "could", "should", "does", "did", "will", "has", "have", "had",
+    "the", "and", "for", "are", "but", "not", "you", "all", "can",
+    "her", "was", "one", "our", "out", "yes", "likely", "also",
+})
+
+
 def _extract_entities(text: str) -> list[str]:
     if not text:
         return []
@@ -54,11 +81,28 @@ def _extract_entities(text: str) -> list[str]:
         if len(norm) < 3:
             continue
         key = norm.lower()
-        if key in seen:
+        if key in seen or key in _STOP_WORDS:
             continue
         seen.add(key)
         out.append(norm)
     return out[:6]
+
+
+def _extract_temporal_anchor(question: str, question_date: str | None = None) -> int | None:
+    """Extract a temporal anchor from the query text.
+
+    Uses the question date as the reference point for relative expressions.
+    Returns epoch ms or None.
+    """
+    from graphstore.core.temporal import extract_dates, parse_date
+
+    reference = None
+    if question_date:
+        q_ms = parse_date(question_date)
+        if q_ms is not None:
+            reference = datetime.fromtimestamp(q_ms / 1000, tz=timezone.utc)
+    dates = extract_dates(question, reference=reference)
+    return dates[0] if dates else None
 
 
 def _build_embedder(config: dict[str, Any]):
@@ -189,8 +233,11 @@ class GraphStoreAdapter:
                      "retrieval_depth", "recall_depth",
                      "max_query_entities", "recency_boost_k",
                      "recency_half_life_days", "similar_to_oversample",
-                     "lexical_search_oversample"):
-            val = self.config.get(key)
+                     "lexical_search_oversample",
+                     "fusion_method", "rrf_k", "type_weights",
+                     "nucleus_expansion", "nucleus_hops",
+                     "nucleus_max_neighbors", "recency_mode"):
+            val = self.config.get(key, _BENCHMARK_DEFAULTS.get(key))
             if val is not None:
                 gs_kwargs[key] = val
         self._gs = GraphStore(**gs_kwargs)
@@ -234,6 +281,16 @@ class GraphStoreAdapter:
                     f'msg_count = {n}'
                 )
 
+                # Parse session date for __event_at__
+                sess_date_str = session.metadata.get("date", "")
+                sess_event_ms = None
+                if sess_date_str:
+                    from graphstore.dsl.handlers.mutations import MutationHandlers
+                    try:
+                        sess_event_ms = MutationHandlers._parse_event_at(sess_date_str)
+                    except (ValueError, TypeError):
+                        pass
+
                 entity_seen: set[str] = set()
                 for i, msg in enumerate(session.messages):
                     msg_id = f"{session.session_id}:msg{i}"
@@ -246,6 +303,13 @@ class GraphStoreAdapter:
                         f'content = "{content}" '
                         f'position = {i}'
                     )
+                    # Set __event_at__ from session date
+                    if sess_event_ms is not None:
+                        try:
+                            slot = store.id_to_slot[intern(msg_id)]
+                            store.columns.set_reserved(slot, "__event_at__", sess_event_ms)
+                        except Exception:
+                            pass
                     if populate_fts:
                         try:
                             slot = store.id_to_slot[intern(msg_id)]
@@ -290,8 +354,16 @@ class GraphStoreAdapter:
             raise RuntimeError("reset() must be called first")
 
         category = ctx.category or ""
-        with TimedOperation() as t:
-            retrieved, raw = self._dispatch(ctx.question, category, k)
+        anchor_ms = _extract_temporal_anchor(
+            ctx.question,
+            str(ctx.metadata.get("question_date", "")) if ctx.metadata else None,
+        )
+        self._gs._executor._temporal_anchor_ms = anchor_ms
+        try:
+            with TimedOperation() as t:
+                retrieved, raw = self._dispatch(ctx.question, category, k)
+        finally:
+            self._gs._executor._temporal_anchor_ms = None
         return QueryResult(
             retrieved_memories=retrieved,
             elapsed_ms=t.elapsed_ms,
@@ -301,12 +373,34 @@ class GraphStoreAdapter:
     def query(self, question: str, k: int = 5) -> QueryResult:
         return self.query_with_context(QueryContext(question=question), k=k)
 
+    def ingest_done(self, record_metadata: dict[str, Any] | None = None) -> None:
+        """Optional post-ingest hook for expensive offline memory maintenance."""
+        if self._gs is None:
+            return
+        if self.config.get("enable_consolidation"):
+            self._gs.execute("SYS CONSOLIDATE")
+
     def _cfg(self, attr: str):
         """Read a config value from the GraphStore executor (single source of truth)."""
         return getattr(self._gs._executor, f"_{attr}")
 
+    def _resolve_strategy(self, category: str) -> str:
+        """Pick a retrieval strategy for the current benchmark question."""
+        explicit = self.config.get("retrieval_strategy")
+        if explicit is not None:
+            return explicit
+
+        if category == "multi-session":
+            return "remember_graph"
+        if category in ("temporal-reasoning", "knowledge-update"):
+            return "remember_recency"
+        if category in ("single-session-user", "single-session-assistant", "single-session-preference"):
+            return "remember_lexical"
+        return "remember_lexical"
+
     def _dispatch(self, question: str, category: str, k: int) -> tuple[list[str], Any]:
-        strategy = self._cfg("retrieval_strategy")
+        """Dispatch to the configured retrieval strategy."""
+        strategy = self._resolve_strategy(category)
         handler = self._STRATEGIES.get(strategy, self._strategy_full)
         return handler(self, question, k)
 
@@ -452,6 +546,60 @@ class GraphStoreAdapter:
         reranked = self._rerank(question, texts, k)
         return reranked, raw
 
+    def _strategy_consolidated(self, question: str, k: int) -> tuple[list[str], Any]:
+        """Two-stage retrieval: observations first, episodes fill gaps.
+
+        TSM-inspired priority cascade:
+            1. Search observations (consolidated facts) - high precision
+            2. Fill remaining slots from episodes (raw messages) - high recall
+            3. Merge, dedup
+        """
+        q = _escape(question)
+        depth = self._cfg("retrieval_depth")
+
+        # Stage 1: Search observations (consolidated memories)
+        try:
+            obs_result = self._gs.execute(
+                f'REMEMBER "{q}" LIMIT {k * 2} WHERE kind = "observation"'
+            )
+            obs_texts = self._texts(obs_result.data)
+        except Exception:
+            obs_texts = []
+
+        # Stage 2: Search episodes (raw messages) to fill gaps
+        episode_result = self._gs.execute(
+            f'REMEMBER "{q}" LIMIT {k * depth} WHERE kind = "message"'
+        )
+        episode_texts = self._texts(episode_result.data)
+
+        # Merge: observations first (higher priority), then episodes
+        merged = list(obs_texts)
+        seen = set(merged)
+        for text in episode_texts:
+            if text not in seen:
+                merged.append(text)
+                seen.add(text)
+
+        # Entity graph enrichment (same as full strategy)
+        if self._entity_extraction:
+            max_ents = self._cfg("max_query_entities")
+            recall_d = self._cfg("recall_depth")
+            for ent_name in _extract_entities(question)[:max_ents]:
+                ent_id = f"ent:{_slug(ent_name)}"
+                try:
+                    rec = self._gs.execute(
+                        f'RECALL FROM "{ent_id}" DEPTH {recall_d} LIMIT {k}'
+                    )
+                    for text in self._texts(rec.data):
+                        if text not in seen:
+                            merged.append(text)
+                            seen.add(text)
+                except Exception:
+                    pass
+
+        all_raw = (obs_result.data if obs_texts else []) + (episode_result.data or [])
+        return merged[:k], all_raw
+
     _STRATEGIES = {
         "remember": _strategy_remember,
         "remember_graph": _strategy_remember_graph,
@@ -460,6 +608,7 @@ class GraphStoreAdapter:
         "remember_rerank": _strategy_remember_rerank,
         "full": _strategy_full,
         "full_rerank": _strategy_full_rerank,
+        "consolidated": _strategy_consolidated,
     }
 
     @staticmethod

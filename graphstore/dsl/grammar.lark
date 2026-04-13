@@ -46,7 +46,8 @@ counterfactual: "WHAT" "IF" "RETRACT" STRING
 
 similar_q: "SIMILAR" "TO" similar_target limit_clause? where_clause?
 lexical_q: "LEXICAL" "SEARCH" STRING limit_clause? where_clause?
-remember_q: "REMEMBER" STRING tokens_clause? limit_clause? where_clause?
+remember_q: "REMEMBER" STRING at_clause? tokens_clause? limit_clause? where_clause?
+at_clause: "AT" value
 tokens_clause: "TOKENS" NUMBER
 similar_target: vector_literal      -> similar_vector
               | STRING              -> similar_text
@@ -91,17 +92,18 @@ arrow: "-[" expr "]->"
 connect_node: "CONNECT" "NODE" STRING threshold_clause?
 forget_node: "FORGET" "NODE" STRING
 
-create_node:  "CREATE" "NODE" STRING field_pairs vector_clause? expires_clause? document_clause?
-            | "CREATE" "NODE" "AUTO" field_pairs vector_clause? expires_clause? document_clause? -> create_node_auto
+create_node:  "CREATE" "NODE" STRING field_pairs vector_clause? expires_clause? event_clause? document_clause?
+            | "CREATE" "NODE" "AUTO" field_pairs vector_clause? expires_clause? event_clause? document_clause? -> create_node_auto
 document_clause: "DOCUMENT" STRING
 with_doc: "WITH" "DOCUMENT"
 update_node:  "UPDATE" "NODE" STRING "SET" field_pairs
-upsert_node:  "UPSERT" "NODE" STRING field_pairs vector_clause? expires_clause?
+upsert_node:  "UPSERT" "NODE" STRING field_pairs vector_clause? expires_clause? event_clause?
 vector_clause: "VECTOR" vector_literal
+event_clause: "EVENT_AT" value
 delete_node:  "DELETE" "NODE" STRING
 delete_nodes: "DELETE" "NODES" where_clause
 
-assert_stmt:  "ASSERT" STRING field_pairs confidence_clause? source_clause?
+assert_stmt:  "ASSERT" STRING field_pairs confidence_clause? source_clause? event_clause?
 confidence_clause: "CONFIDENCE" NUMBER
 source_clause: "SOURCE" STRING
 
@@ -218,7 +220,7 @@ system_query: "SYS" sys_command
             | sys_expire | sys_contradictions
             | sys_snapshot | sys_rollback | sys_snapshots
             | sys_duplicates | sys_embedders
-            | sys_connect | sys_reembed | sys_status
+            | sys_connect | sys_consolidate | sys_reembed | sys_status
             | sys_retain
             | sys_health | sys_optimize
             | sys_log | sys_cron
@@ -264,6 +266,8 @@ threshold_clause: "THRESHOLD" NUMBER
 sys_embedders: "EMBEDDERS"
 
 sys_connect: "CONNECT" where_clause? threshold_clause?
+sys_consolidate: "CONSOLIDATE" threshold_clause? min_cluster_clause?
+min_cluster_clause: "MIN_CLUSTER_SIZE" NUMBER
 sys_reembed: "REEMBED"
 sys_status: "STATUS"
 sys_retain: "RETAIN"
