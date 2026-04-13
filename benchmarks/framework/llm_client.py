@@ -20,7 +20,7 @@ _CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "autoresearch" / 
 
 # Model preference for LoCoMo QA (fast, no reasoning overhead)
 QA_MODEL = "gemma4:31b-cloud"
-# Same model on OpenRouter as fallback (consistent answers across providers)
+# Same model family on OpenRouter as fallback
 QA_MODEL_OR = "google/gemma-4-31b-it:free"
 
 
@@ -141,7 +141,7 @@ def _resolve_providers() -> list[dict]:
 
 
 def llm_call_on_provider(prompt: str, provider: dict, max_tokens: int = 1000, temperature: float = 0.0) -> str:
-    """Call LLM on a specific provider. Returns empty string on failure."""
+    """Call LLM on a specific provider with streaming. Returns empty string on failure."""
     import litellm
     litellm.suppress_debug_info = True
     try:
@@ -150,12 +150,17 @@ def llm_call_on_provider(prompt: str, provider: dict, max_tokens: int = 1000, te
             messages=[{"role": "user", "content": prompt}],
             api_base=provider["api_base"],
             api_key=provider["api_key"],
-            stream=False,
-            timeout=30,
+            stream=True,
+            timeout=90,
             temperature=temperature,
             max_tokens=max_tokens,
         )
-        content = response.choices[0].message.content or ""
+        chunks = []
+        for chunk in response:
+            delta = chunk.choices[0].delta.content or ""
+            if delta:
+                chunks.append(delta)
+        content = "".join(chunks)
         return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
     except Exception:
         return ""
