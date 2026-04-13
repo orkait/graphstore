@@ -38,7 +38,7 @@ class VectorConfig(msgspec.Struct, frozen=True):
     gpu_layers: int = 0
     similarity_threshold: float = 0.85
     duplicate_threshold: float = 0.95
-    search_oversample: int = 10
+    search_oversample: int = 16
     model2vec_model: str = "minishlab/M2V_base_output"
     model_cache_dir: str | None = None
 
@@ -59,18 +59,31 @@ class DslConfig(msgspec.Struct, frozen=True):
     plan_cache_size: int = 256
     auto_optimize: bool = False
     optimize_interval: int = 500
-    recall_decay: float = 0.7
+    recall_decay: float = 0.5912428069710964
     remember_weights: list[float] = msgspec.field(default_factory=lambda: [0.30, 0.20, 0.15, 0.20, 0.15])
+    fusion_method: str = "weighted"  # "rrf" or "weighted"
+    rrf_k: float = 60.0
     retrieval_strategy: str = "full"
-    retrieval_depth: int = 8
+    retrieval_depth: int = 9
     recall_depth: int = 2
-    max_query_entities: int = 3
-    recency_boost_k: int = 2
-    recency_half_life_days: float = 30.0
-    similar_to_oversample: int = 3
+    max_query_entities: int = 6
+    recency_mode: str = "multiplicative"  # "additive" or "multiplicative"
+    recency_boost_k: int = 4
+    recency_half_life_days: float = 36500.0  # ~100 years - agent memory should decay very slowly
+    similar_to_oversample: int = 2
     lexical_search_oversample: int = 3
     hybridrag_weight: float = 0.15
     hybridrag_min_seeds: int = 5
+    type_weights: dict = msgspec.field(default_factory=lambda: {
+        "observation": 1.8, "fact": 1.3, "event": 1.2, "preference": 1.3,
+        "claim": 1.2, "decision": 1.5, "lesson": 1.5,
+        "memory": 1.0, "entity": 0.8, "session": 0.7,
+    })
+    temporal_weight: float = 0.15
+    temporal_decay_days: float = 365.0
+    nucleus_expansion: bool = True  # benchmark-tuned default; may append neighbors after top-k
+    nucleus_hops: int = 2
+    nucleus_max_neighbors: int = 3
     cache_gc_threshold: int = 200
 
 
@@ -143,17 +156,26 @@ _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "ceiling_mb":           ("core", "ceiling_mb"),
     "eviction_target_ratio":("core", "eviction_target_ratio"),
     "remember_weights":     ("dsl", "remember_weights"),
+    "fusion_method":        ("dsl", "fusion_method"),
+    "rrf_k":                ("dsl", "rrf_k"),
     "recall_decay":         ("dsl", "recall_decay"),
     "retrieval_strategy":   ("dsl", "retrieval_strategy"),
     "retrieval_depth":      ("dsl", "retrieval_depth"),
     "recall_depth":         ("dsl", "recall_depth"),
     "max_query_entities":   ("dsl", "max_query_entities"),
+    "recency_mode":         ("dsl", "recency_mode"),
     "recency_boost_k":      ("dsl", "recency_boost_k"),
     "recency_half_life_days": ("dsl", "recency_half_life_days"),
     "similar_to_oversample": ("dsl", "similar_to_oversample"),
     "lexical_search_oversample": ("dsl", "lexical_search_oversample"),
     "hybridrag_weight":     ("dsl", "hybridrag_weight"),
     "hybridrag_min_seeds":  ("dsl", "hybridrag_min_seeds"),
+    "type_weights":         ("dsl", "type_weights"),
+    "temporal_weight":      ("dsl", "temporal_weight"),
+    "temporal_decay_days":  ("dsl", "temporal_decay_days"),
+    "nucleus_expansion":    ("dsl", "nucleus_expansion"),
+    "nucleus_hops":         ("dsl", "nucleus_hops"),
+    "nucleus_max_neighbors":("dsl", "nucleus_max_neighbors"),
     "search_oversample":    ("vector", "search_oversample"),
     "similarity_threshold": ("vector", "similarity_threshold"),
     "duplicate_threshold":  ("vector", "duplicate_threshold"),
@@ -270,6 +292,17 @@ def apply_env_overrides(config: GraphStoreConfig) -> GraphStoreConfig:
                 updates.setdefault(section, {})[field] = parsed
             elif field == "protected_kinds" or field == "cors_origins":
                 updates.setdefault(section, {})[field] = [v.strip() for v in env_val.split(",")]
+            elif field == "type_weights":
+                # Format: "fact:1.3,decision:1.5,entity:0.8"
+                try:
+                    parsed = {}
+                    for pair in env_val.split(","):
+                        k, v = pair.strip().split(":")
+                        parsed[k.strip()] = float(v.strip())
+                    updates.setdefault(section, {})[field] = parsed
+                except (ValueError, IndexError):
+                    _log.warning("GRAPHSTORE_DSL_TYPE_WEIGHTS format: 'kind:weight,kind:weight'")
+                    continue
             else:
                 updates.setdefault(section, {})[field] = _coerce(env_val, target_type)
         except (ValueError, TypeError) as e:

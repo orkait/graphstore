@@ -30,6 +30,12 @@ class BeliefHandlers:
         if q.source is not None:
             self.store.columns.set_reserved(slot, "__source__", q.source)
         self.store.columns.set_reserved(slot, "__retracted__", 0)
+        event_at = getattr(q, 'event_at', None)
+        if event_at is not None:
+            from graphstore.dsl.handlers.mutations import MutationHandlers
+            ms = MutationHandlers._parse_event_at(event_at)
+            if ms is not None:
+                self.store.columns.set_reserved(slot, "__event_at__", ms)
         node = self.store.get_node(q.id)
         return Result(kind="node", data=node, count=1)
 

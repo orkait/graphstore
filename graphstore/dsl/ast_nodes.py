@@ -216,6 +216,7 @@ class CreateNode:
     auto_id: bool = False
     expires_in: tuple[int, str] | None = None   # (amount, unit) e.g. (30, "m")
     expires_at: str | None = None                # ISO-8601 string
+    event_at: str | int | None = None            # ISO-8601 string or epoch ms
     vector: list[float] | None = None
     document: str | None = None
 
@@ -235,6 +236,7 @@ class UpsertNode:
     fields: list[FieldPair]
     expires_in: tuple[int, str] | None = None
     expires_at: str | None = None
+    event_at: str | int | None = None
     vector: list[float] | None = None
 
 @dataclass(slots=True)
@@ -286,6 +288,7 @@ class AssertStmt:
     fields: list[FieldPair]
     confidence: float | None = None
     source: str | None = None
+    event_at: str | int | None = None
 
 @dataclass(slots=True)
 class RetractStmt:
@@ -456,6 +459,11 @@ class ConnectNode:
     threshold: float = 0.8
 
 @dataclass(slots=True)
+class SysConsolidate:
+    similarity_threshold: float = 0.7
+    min_cluster_size: int = 2
+
+@dataclass(slots=True)
 class SysReembed:
     pass
 
@@ -527,6 +535,7 @@ class RememberQuery:
     limit: LimitClause | None = None
     where: WhereClause | None = None
     tokens: int | None = None
+    at: int | None = None  # epoch ms anchor for temporal scoring
 
 # --- Forget (hard delete blob + memory) ---
 @dataclass(slots=True)

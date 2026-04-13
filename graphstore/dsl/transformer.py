@@ -94,6 +94,7 @@ from graphstore.dsl.ast_nodes import (
     SysDuplicates,
     SysEmbedders,
     SysConnect,
+    SysConsolidate,
     ConnectNode,
     SysReembed,
     SysStatus,
@@ -335,12 +336,14 @@ class DSLTransformer(Transformer):
         fields = args[1] if isinstance(args[1], list) else []
         vec = self._find_vector(args[2:])
         exp_in, exp_at = self._find_expires(args[2:])
+        event_at = self._find_event_at(args[2:])
         doc = self._find_document(args[2:])
         return CreateNode(
             id=self._str(args[0]),
             fields=fields,
             expires_in=exp_in,
             expires_at=exp_at,
+            event_at=event_at,
             vector=vec,
             document=doc,
         )
@@ -349,6 +352,7 @@ class DSLTransformer(Transformer):
         fields = args[0] if isinstance(args[0], list) else []
         vec = self._find_vector(args[1:])
         exp_in, exp_at = self._find_expires(args[1:])
+        event_at = self._find_event_at(args[1:])
         doc = self._find_document(args[1:])
         return CreateNode(
             id=None,
@@ -356,6 +360,7 @@ class DSLTransformer(Transformer):
             auto_id=True,
             expires_in=exp_in,
             expires_at=exp_at,
+            event_at=event_at,
             vector=vec,
             document=doc,
         )
@@ -389,11 +394,13 @@ class DSLTransformer(Transformer):
         fields = args[1] if isinstance(args[1], list) else []
         vec = self._find_vector(args[2:])
         exp_in, exp_at = self._find_expires(args[2:])
+        event_at = self._find_event_at(args[2:])
         return UpsertNode(
             id=self._str(args[0]),
             fields=fields,
             expires_in=exp_in,
             expires_at=exp_at,
+            event_at=event_at,
             vector=vec,
         )
 
@@ -403,17 +410,23 @@ class DSLTransformer(Transformer):
     def expires_at(self, args):
         return ("expires_at", self._str(args[0]))
 
+    def event_clause(self, args):
+        return ("event_at", args[0])
+
     def assert_stmt(self, args):
         node_id = self._str(args[0])
         fields = args[1] if isinstance(args[1], list) else []
         confidence = None
         source = None
+        event_at = None
         for a in args[2:]:
             if isinstance(a, tuple) and a[0] == "confidence":
                 confidence = a[1]
             elif isinstance(a, tuple) and a[0] == "source":
                 source = a[1]
-        return AssertStmt(id=node_id, fields=fields, confidence=confidence, source=source)
+            elif isinstance(a, tuple) and a[0] == "event_at":
+                event_at = a[1]
+        return AssertStmt(id=node_id, fields=fields, confidence=confidence, source=source, event_at=event_at)
 
     def confidence_clause(self, args):
         return ("confidence", self._num(args[0]))
@@ -703,15 +716,28 @@ class DSLTransformer(Transformer):
     def tokens_clause(self, args):
         return ("tokens", self._num(args[0]))
 
+    def at_clause(self, args):
+        val = args[0]
+        if isinstance(val, (int, float)):
+            return ("at", int(val))
+        from graphstore.core.temporal import parse_date
+        ms = parse_date(str(val))
+        if ms is None:
+            raise ValueError(f"Cannot parse AT date: {val!r}")
+        return ("at", ms)
+
     def remember_q(self, args):
         query = self._str(args[0])
         limit = self._find(args[1:], LimitClause)
         where = self._find(args[1:], WhereClause)
         tokens = None
+        at = None
         for a in args[1:]:
             if isinstance(a, tuple) and a[0] == "tokens":
                 tokens = int(a[1])
-        return RememberQuery(query=query, limit=limit, where=where, tokens=tokens)
+            elif isinstance(a, tuple) and a[0] == "at":
+                at = int(a[1])
+        return RememberQuery(query=query, limit=limit, where=where, tokens=tokens, at=at)
 
     def vector_literal(self, args):
         return [self._num(a) for a in args]
@@ -935,6 +961,19 @@ class DSLTransformer(Transformer):
             if isinstance(a, tuple) and a[0] == "threshold":
                 threshold = a[1]
         return SysConnect(where=where, threshold=threshold)
+
+    def sys_consolidate(self, args):
+        threshold = 0.7
+        min_size = 2
+        for a in args:
+            if isinstance(a, tuple) and a[0] == "threshold":
+                threshold = a[1]
+            elif isinstance(a, tuple) and a[0] == "min_cluster_size":
+                min_size = int(a[1])
+        return SysConsolidate(similarity_threshold=threshold, min_cluster_size=min_size)
+
+    def min_cluster_clause(self, args):
+        return ("min_cluster_size", self._num(args[0]))
 
     def connect_node(self, args):
         node_id = self._str(args[0])
@@ -1194,5 +1233,12 @@ class DSLTransformer(Transformer):
         """Extract document text from args. Returns str or None."""
         for a in args:
             if isinstance(a, tuple) and a[0] == "document":
+                return a[1]
+        return None
+
+    def _find_event_at(self, args):
+        """Extract EVENT_AT from args. Returns raw value or None."""
+        for a in args:
+            if isinstance(a, tuple) and a[0] == "event_at":
                 return a[1]
         return None

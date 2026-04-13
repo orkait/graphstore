@@ -165,8 +165,111 @@ def load_longmemeval(
     )
 
 
-def load_locomo(data_path: str | Path) -> BenchmarkDataset:
-    raise NotImplementedError("LoCoMo loader is a stub.")
+def load_locomo(
+    data_path: str | Path,
+    max_conversations: int | None = None,
+    max_questions: int | None = None,
+) -> BenchmarkDataset:
+    """Load LoCoMo dataset.
+
+    Each record = one QA pair. Sessions are shared across QAs from the same conversation.
+    Format: 10 conversations, ~200 QAs each, 19+ sessions per conversation.
+
+    Category mapping: 1=single-hop, 2=multi-hop, 3=temporal, 4=open-domain, 5=adversarial
+    """
+    p = Path(data_path)
+    candidates = [
+        p / "locomo10.json",
+        p / "raw" / "locomo10.json",
+    ]
+    data_file = next((c for c in candidates if c.exists()), None)
+    if data_file is None:
+        raise FileNotFoundError(
+            f"LoCoMo data not found. Looked in: {', '.join(str(c) for c in candidates)}. "
+            f"Download from https://huggingface.co/datasets/Percena/locomo-mc10"
+        )
+
+    with open(data_file) as f:
+        raw = json.load(f)
+
+    if max_conversations is not None:
+        raw = raw[:max_conversations]
+
+    cat_names = {1: "single-hop", 2: "multi-hop", 3: "temporal", 4: "open-domain", 5: "adversarial"}
+
+    records: list[BenchmarkRecord] = []
+    for conv in raw:
+        conversation = conv["conversation"]
+        speaker_a = conversation.get("speaker_a", "A")
+        speaker_b = conversation.get("speaker_b", "B")
+
+        # Build sessions from observations (structured facts, not raw turns)
+        # Observations are pre-extracted facts with evidence IDs
+        observations = conv.get("observation", {})
+        sessions: list[Session] = []
+        sess_idx = 1
+        while f"session_{sess_idx}_observation" in observations:
+            obs_key = f"session_{sess_idx}_observation"
+            date = conversation.get(f"session_{sess_idx}_date_time", "")
+            msgs = []
+            for speaker, facts in observations[obs_key].items():
+                for fact_text, evidence_id in facts:
+                    msgs.append(Message(
+                        role=speaker,
+                        content=f"[{date}] {speaker}: {fact_text}",
+                    ))
+            sessions.append(Session(
+                session_id=f"s{sess_idx}",
+                messages=msgs,
+                metadata={"date": date, "position": sess_idx},
+            ))
+            sess_idx += 1
+
+        # Fallback to raw turns if no observations
+        if not sessions:
+            sess_idx = 1
+            while f"session_{sess_idx}" in conversation:
+                turns = conversation[f"session_{sess_idx}"]
+                date = conversation.get(f"session_{sess_idx}_date_time", "")
+                msgs = [
+                    Message(
+                        role=t.get("speaker", "user"),
+                        content=f"[{date}] {t.get('speaker', 'unknown')}: {t.get('text', '')}",
+                    )
+                    for t in turns
+                ]
+                sessions.append(Session(
+                    session_id=f"s{sess_idx}",
+                    messages=msgs,
+                    metadata={"date": date, "position": sess_idx},
+                ))
+                sess_idx += 1
+
+        # Build QA records
+        for qa in conv["qa"]:
+            cat_id = qa.get("category", 0)
+            category = cat_names.get(cat_id, f"cat-{cat_id}")
+            gold = qa.get("answer", "")
+            if isinstance(gold, list):
+                gold_answers = [str(a) for a in gold]
+            else:
+                gold_answers = [str(gold)]
+
+            question = BenchmarkQuestion(
+                question=qa["question"],
+                gold_answers=gold_answers,
+                category=category,
+                metadata={
+                    "evidence": qa.get("evidence", []),
+                    "sample_id": conv.get("sample_id"),
+                },
+            )
+            records.append(BenchmarkRecord(question=question, sessions=sessions))
+
+    if max_questions is not None:
+        records = records[:max_questions]
+
+    return BenchmarkDataset(name="LoCoMo", records=records)
 
 
 def load_amb(data_path: str | Path) -> BenchmarkDataset:

@@ -147,6 +147,27 @@ class MutationHandlers:
                     children.append((tgt_id, t))
         return children
 
+    @staticmethod
+    def _parse_event_at(val) -> int | None:
+        """Parse EVENT_AT value to epoch ms using the core temporal parser."""
+        if val is None:
+            return None
+        if isinstance(val, (int, float)):
+            return int(val)
+        from graphstore.core.temporal import parse_date
+        ms = parse_date(str(val))
+        if ms is None:
+            raise ValueError(f"Cannot parse EVENT_AT date: {val!r}")
+        return ms
+
+    def _apply_event_at(self, node_id: str, event_at) -> None:
+        """Set __event_at__ reserved column from EVENT_AT clause."""
+        ms = self._parse_event_at(event_at)
+        if ms is not None:
+            str_id = self.store.string_table.intern(node_id)
+            slot = self.store.id_to_slot[str_id]
+            self.store.columns.set_reserved(slot, "__event_at__", ms)
+
     @handles(CreateNode, write=True)
     def _create_node(self, q: CreateNode) -> Result:
         data = {fp.name: fp.value for fp in q.fields}
@@ -158,6 +179,7 @@ class MutationHandlers:
             node_id = q.id
         self.store.put_node(node_id, kind, data)
         self._apply_ttl(node_id, q.expires_in, q.expires_at)
+        self._apply_event_at(node_id, getattr(q, 'event_at', None))
         if self.store._active_context:
             str_id = self.store.string_table.intern(node_id)
             slot = self.store.id_to_slot[str_id]
@@ -207,6 +229,7 @@ class MutationHandlers:
         self.schema.validate_node(kind, data)
         self.store.upsert_node(q.id, kind, data)
         self._apply_ttl(q.id, q.expires_in, q.expires_at)
+        self._apply_event_at(q.id, getattr(q, 'event_at', None))
         str_id = self.store.string_table.intern(q.id)
         slot = self.store.id_to_slot[str_id]
         self._handle_vector(slot, kind, data, q.vector)

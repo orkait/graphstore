@@ -19,6 +19,36 @@ from pathlib import Path
 import optuna
 
 
+_DSL_OUTPUT_KEYS = (
+    "retrieval_depth",
+    "recall_depth",
+    "max_query_entities",
+    "recency_boost_k",
+    "recall_decay",
+    "recency_half_life_days",
+    "similar_to_oversample",
+    "lexical_search_oversample",
+    "retrieval_strategy",
+    "fusion_method",
+    "rrf_k",
+    "recency_mode",
+    "nucleus_expansion",
+    "nucleus_hops",
+    "nucleus_max_neighbors",
+)
+
+_VECTOR_OUTPUT_KEYS = ("search_oversample",)
+
+
+def build_output_config(params: dict) -> dict:
+    """Convert tuned params into graphstore.json override shape."""
+    config_out = {
+        "dsl": {k: v for k, v in params.items() if k in _DSL_OUTPUT_KEYS},
+        "vector": {k: v for k, v in params.items() if k in _VECTOR_OUTPUT_KEYS},
+    }
+    return {k: v for k, v in config_out.items() if v}
+
+
 def objective(trial: optuna.Trial, args: argparse.Namespace) -> float:
     retrieval_depth = trial.suggest_int("retrieval_depth", 2, 12)
     search_oversample = trial.suggest_int("search_oversample", 5, 20)
@@ -29,6 +59,23 @@ def objective(trial: optuna.Trial, args: argparse.Namespace) -> float:
     recency_half_life_days = trial.suggest_float("recency_half_life_days", 7.0, 90.0, log=True)
     similar_to_oversample = trial.suggest_int("similar_to_oversample", 2, 8)
     lexical_search_oversample = trial.suggest_int("lexical_search_oversample", 2, 8)
+    retrieval_strategy = trial.suggest_categorical(
+        "retrieval_strategy",
+        ["remember", "remember_graph", "remember_recency", "remember_lexical", "full"],
+    )
+    fusion_method = trial.suggest_categorical("fusion_method", ["rrf", "weighted"])
+    recency_mode = trial.suggest_categorical("recency_mode", ["multiplicative", "additive"])
+    nucleus_expansion = trial.suggest_categorical("nucleus_expansion", [False, True])
+    if fusion_method == "rrf":
+        rrf_k = trial.suggest_float("rrf_k", 20.0, 100.0)
+    else:
+        rrf_k = 60.0
+    if nucleus_expansion:
+        nucleus_hops = trial.suggest_int("nucleus_hops", 1, 2)
+        nucleus_max_neighbors = trial.suggest_int("nucleus_max_neighbors", 1, 5)
+    else:
+        nucleus_hops = 1
+        nucleus_max_neighbors = 3
 
     from benchmarks.framework.adapters.graphstore_ import GraphStoreAdapter
     from benchmarks.framework.datasets import load_longmemeval
@@ -52,6 +99,13 @@ def objective(trial: optuna.Trial, args: argparse.Namespace) -> float:
         "recency_half_life_days": recency_half_life_days,
         "similar_to_oversample": similar_to_oversample,
         "lexical_search_oversample": lexical_search_oversample,
+        "retrieval_strategy": retrieval_strategy,
+        "fusion_method": fusion_method,
+        "rrf_k": rrf_k,
+        "recency_mode": recency_mode,
+        "nucleus_expansion": nucleus_expansion,
+        "nucleus_hops": nucleus_hops,
+        "nucleus_max_neighbors": nucleus_max_neighbors,
     }
 
     adapter = GraphStoreAdapter(config=config)
@@ -88,20 +142,7 @@ def main():
     print(f"{'='*60}")
 
     # Save best config as graphstore.json format (diffs only)
-    config_out = {
-        "dsl": {
-            k: v for k, v in best.params.items()
-            if k in ("retrieval_depth", "recall_depth", "max_query_entities",
-                     "recency_boost_k", "recall_decay", "recency_half_life_days",
-                     "similar_to_oversample", "lexical_search_oversample")
-        },
-        "vector": {
-            k: v for k, v in best.params.items()
-            if k in ("search_oversample",)
-        },
-    }
-    # Remove sections with no diffs
-    config_out = {k: v for k, v in config_out.items() if v}
+    config_out = build_output_config(best.params)
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
