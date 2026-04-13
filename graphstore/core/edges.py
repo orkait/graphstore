@@ -153,8 +153,9 @@ class EdgeMatrices:
         if base is not None:
             n = max(n, base.shape[0])
             
-        # Transpose: swap row/col so matrix_t[src, tgt] allows tgt to activate src
-        delta = csr_matrix((data, (srcs, tgts)), shape=(n, n))
+        # BFS convention: matrix_t[tgt, src] so row-access from tgt finds incoming srcs
+        # (This is used by ANCESTORS and neighbors_in for BFS traversal)
+        delta = csr_matrix((data, (tgts, srcs)), shape=(n, n))
 
         if base is None:
             result = delta
@@ -200,12 +201,14 @@ class EdgeMatrices:
         if base is not None:
             n = max(n, base.shape[0])
 
-        # Transpose: swap row/col so matrix_t[src, tgt] allows tgt to activate src
-        delta = csr_matrix((data, (srcs, tgts)), shape=(n, n))
-        
+        # Transpose convention: matrix_t[tgt, src] so that:
+        # - BFS from tgt finds incoming srcs (row access)
+        # - matrix_t @ activation propagates activation backwards (mat-vec)
+        delta = csr_matrix((data, (tgts, srcs)), shape=(n, n))
+
         if base is not None and base.shape[0] < n:
             base = resize_csr(base, n)
-            
+
         return base, delta
 
     def get_combined_transpose(self) -> csr_matrix | None:
@@ -242,8 +245,8 @@ class EdgeMatrices:
         if base is not None:
             n = max(n, base.shape[0])
 
-        # Transpose: swap row/col so matrix_t[src, tgt] allows tgt to activate src
-        delta = csr_matrix((data, (srcs, tgts)), shape=(n, n))
+        # Transpose convention: matrix_t[tgt, src] (same as get_combined_transpose_split)
+        delta = csr_matrix((data, (tgts, srcs)), shape=(n, n))
         
         if base is None:
             result = delta

@@ -1,11 +1,16 @@
 """Tests for benchmark adapter routing and retrieval tuning config output."""
 
+import pytest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from benchmarks.framework.adapters.graphstore_ import GraphStoreAdapter
 from benchmarks.framework.adapter import QueryContext
-from autoresearch import tune_config
+
+try:
+    from autoresearch import tune_config
+except ImportError:
+    tune_config = None
 
 
 def test_adapter_routes_categories_when_no_explicit_strategy():
@@ -67,6 +72,7 @@ def test_adapter_ingest_done_skips_consolidation_by_default():
     execute.assert_not_called()
 
 
+@pytest.mark.skipif(tune_config is None, reason="optuna not installed")
 def test_build_output_config_keeps_extended_retrieval_keys():
     params = {
         "retrieval_depth": 8,
