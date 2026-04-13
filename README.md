@@ -334,7 +334,16 @@ Retrieval recall (keyword in top-K passages, no LLM):
 | top-20 | 84% |
 | top-50 | 96% |
 
-Full methodology, reproduction instructions, and comparison details: see [summary.md](summary.md).
+**BEAM** support is included via `benchmarks/framework/run_beam.py` - generates BEAM-compatible answer JSON for external evaluation.
+
+Full methodology, reproduction instructions, and comparison details: see [BENCHMARKS.md](BENCHMARKS.md).
+
+All three benchmarks run from one CLI:
+```bash
+python -m benchmarks.framework.cli run --dataset longmemeval --data-path ./data --variant s
+python -m benchmarks.framework.cli run --dataset locomo --data-path ./data
+python -m benchmarks.framework.cli run --dataset beam --data-path /tmp/BEAM --variant 16k --end-index 10
+```
 
 ---
 
@@ -503,6 +512,16 @@ graphstore/
   persistence/            # SQLite serialization
   server.py               # Playground web UI
   cli.py                  # CLI
+benchmarks/
+  framework/
+    cli.py                # Unified benchmark CLI (longmemeval, locomo, beam)
+    runner.py             # Generic per-record evaluation loop
+    run_locomo.py         # LoCoMo protocol (F1 scoring)
+    run_beam.py           # BEAM protocol (answer generation)
+    run_longmemeval.py    # LongMemEval native (NDCG, per-type)
+    adapters/graphstore_.py  # Benchmark adapter
+  kaggle/                 # Kaggle notebook entries
+  algos/                  # Algorithm micro-benchmarks
 ```
 
 </details>
@@ -516,7 +535,7 @@ git clone https://github.com/orkait/graphstore.git
 cd graphstore
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest     # 1166 tests
+pytest     # 1185 tests
 ```
 
 ---
