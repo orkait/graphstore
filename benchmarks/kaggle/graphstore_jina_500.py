@@ -4,6 +4,7 @@ All config lives in bench_config.py - this script only orchestrates.
 """
 import subprocess, sys, os
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from bench_config import (
     PIP_DEPS, EMBEDDER, EMBEDDER_MODEL_REPO, EMBEDDER_MODEL_PATTERNS,
     EMBEDDER_POOLING, EMBEDDER_MAX_LENGTH, EMBEDDER_OUTPUT_DIMS,
