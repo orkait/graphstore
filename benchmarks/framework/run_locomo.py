@@ -115,76 +115,26 @@ def run_locomo(
             total_query_ms += t.elapsed_ms
             retrieval_results.append(qres)
 
-        # Phase 2: LLM answer generation - dual-provider with cross-retry
-        # Split questions across providers (8 each = 16 concurrent).
-        # If a provider's batch has failures, retry those on the other provider.
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        # Phase 2: LLM answer generation (async batch with provider rotation)
+        from .llm_batch import generate_all_answers
+        from .llm_client import _resolve_providers
+        import asyncio
 
         providers = _resolve_providers()
-        n_prov = len(providers)
-        print(f"[{conv_id}] Retrieval done ({total_query_ms:.0f}ms). Generating {len(qas)} answers ({n_prov} providers x {llm_workers} threads)...")
+        print(f"[{conv_id}] Retrieval done ({total_query_ms:.0f}ms). Generating {len(qas)} answers ({len(providers)} providers)...")
 
-        def _build_prompt(idx):
-            rec = qas[idx]
-            context = "\n\n".join(f"[{j+1}]: {t}" for j, t in enumerate(retrieval_results[idx].retrieved_memories))
-            return (
+        questions = []
+        for i, rec in enumerate(qas):
+            context = "\n\n".join(f"[{j+1}]: {t}" for j, t in enumerate(retrieval_results[i].retrieved_memories))
+            prompt = (
                 f"Based on the below context, write an answer in the form of a short phrase "
                 f"for the following question. Answer with exact words from the context whenever possible.\n\n"
                 f"Context:\n{context}\n\n"
                 f"Question: {rec.question.question} Short answer:"
             )
+            questions.append({"idx": i, "prompt": prompt})
 
-        def _call_on_provider(idx, provider):
-            prompt = _build_prompt(idx)
-            return idx, llm_call_on_provider(prompt, provider, max_tokens=1000, temperature=0.0)
-
-        answers = [None] * len(qas)
-        all_indices = list(range(len(qas)))
-
-        if n_prov >= 2:
-            # Split: even indices -> provider 0, odd indices -> provider 1
-            # This interleaves so both providers work from the start
-            assignments = {i: providers[i % 2] for i in all_indices}
-        elif n_prov == 1:
-            assignments = {i: providers[0] for i in all_indices}
-        else:
-            assignments = {}
-            for i in all_indices:
-                answers[i] = generate_answer(qas[i].question.question, retrieval_results[i].retrieved_memories)
-
-        # Round 1: all questions to their assigned provider (both run concurrently)
-        if assignments:
-            with ThreadPoolExecutor(max_workers=llm_workers * min(n_prov, 2)) as pool:
-                futures = {pool.submit(_call_on_provider, idx, prov): idx for idx, prov in assignments.items()}
-                done_count = 0
-                for future in as_completed(futures):
-                    idx, answer = future.result()
-                    if answer:
-                        answers[idx] = answer
-                    done_count += 1
-                    if done_count % 20 == 0:
-                        answered = sum(1 for a in answers if a)
-                        print(f"  [{conv_id}] LLM {answered}/{len(qas)} answered")
-
-            answered = sum(1 for a in answers if a)
-            failed_indices = [i for i in all_indices if answers[i] is None]
-            print(f"  [{conv_id}] Round 1: {answered}/{len(qas)} answered, {len(failed_indices)} failed")
-
-            # Round 2: retry failures on the OTHER provider
-            if failed_indices and n_prov >= 2:
-                print(f"  [{conv_id}] Retrying {len(failed_indices)} on alternate provider...")
-                with ThreadPoolExecutor(max_workers=llm_workers) as pool:
-                    retry_futures = {}
-                    for idx in failed_indices:
-                        original = assignments[idx]
-                        alt = providers[1] if original is providers[0] else providers[0]
-                        retry_futures[pool.submit(_call_on_provider, idx, alt)] = idx
-                    for future in as_completed(retry_futures):
-                        idx, answer = future.result()
-                        if answer:
-                            answers[idx] = answer
-
-        answers = [a or "" for a in answers]
+        answers = asyncio.run(generate_all_answers(questions, providers))
         answered_total = sum(1 for a in answers if a)
         print(f"  [{conv_id}] LLM complete: {answered_total}/{len(qas)} answered")
 
