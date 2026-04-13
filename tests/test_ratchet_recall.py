@@ -1,11 +1,16 @@
 import json
 from pathlib import Path
 
+import pytest
 
+_LOCOMO_PATH = Path("/tmp/locomo/raw/locomo10.json")
+
+
+@pytest.mark.skipif(not _LOCOMO_PATH.exists(), reason="LoCoMo dataset not present")
 def test_build_evidence_lookup_maps_observation_ids_to_message_ids():
     from benchmarks.framework.ratchet_recall import build_evidence_lookup
 
-    raw = json.loads(Path("/tmp/locomo/raw/locomo10.json").read_text())
+    raw = json.loads(_LOCOMO_PATH.read_text())
     conv = raw[0]
     lookup = build_evidence_lookup(conv)
 
