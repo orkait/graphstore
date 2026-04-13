@@ -170,9 +170,28 @@ nucleus_hops = 2
 
 | Bug | Impact | Fix |
 |---|---|---|
-| Delta transpose (tgts, srcs) swapped in 3 places | RECALL returned 0, HybridRAG was no-op | Swap to (srcs, tgts) in edges.py |
 | Recency decay from wall clock killed historical data | exp(-1071/48) = 2e-10, all results zeroed | Data-relative reference per timestamp group |
 | Mixed __event_at__ + __updated_at__ reference | Nodes without event_at got reference=now, crushing event_at nodes | Separate reference per group |
+
+### Known Limitation: Spreading activation from dead-end nodes (UNFIXED)
+
+**RECALL FROM entities (or any node with only incoming edges) returns 0 results.**
+
+Root cause: The transpose matrix convention in `graphstore/core/edges.py` uses `(tgts, srcs)` which gives `matrix_t[tgt, src] > 0`. This works for BFS-based operations (ANCESTORS, neighbors_in) where you do row access from the target to find sources. But `spreading_activation` uses `matrix_t.dot(activation)` which does `result[i] = sum(matrix_t[i, j] * activation[j])`. For activation at node `ent` to flow to `msg`, you need `matrix_t[msg, ent] > 0`. But the convention gives `matrix_t[ent, msg] > 0`. So mat-vec never propagates to the msg.
+
+This affects:
+- `RECALL FROM "ent:caroline"` - returns 0 (entity has 113 incoming "mentions" edges but 0 outgoing)
+- `HybridRAG` in REMEMBER when seeds are entity/session nodes
+- Any spreading activation from leaf/sink nodes
+
+This is a **pre-existing bug** (existed before this session). All 1156 tests pass because they only test RECALL from nodes WITH outgoing edges. The frozen CSR base (after `_rebuild_edges()`) has the same convention, so it's not a dynamic-buffer-only issue.
+
+**To fix:** Either:
+1. Change spreading_activation to use `matrix_t.T.dot(activation)` (transpose again before mat-vec)
+2. Create a separate `get_spreading_matrix()` that returns `(srcs, tgts)` convention while keeping `get_transpose()` as `(tgts, srcs)` for BFS
+3. Store two matrices: one for BFS, one for mat-vec
+
+Option 2 is cleanest - add a new method that the RECALL handler and HybridRAG call instead of `get_combined_transpose_split`. All BFS callers (ANCESTORS, neighbors_in) keep using the current `(tgts, srcs)` convention.
 
 ### High
 
