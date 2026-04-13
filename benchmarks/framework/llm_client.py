@@ -18,9 +18,8 @@ logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "autoresearch" / "config.json"
 
-# Model preference for LoCoMo QA (fast, no reasoning overhead)
+# Model preference for LoCoMo QA
 QA_MODEL = "gemma4:31b-cloud"
-# Same model family on OpenRouter as fallback
 QA_MODEL_OR = "google/gemma-4-31b-it:free"
 
 
@@ -168,7 +167,7 @@ def llm_call_on_provider(prompt: str, provider: dict, max_tokens: int = 1000, te
 
 def health_check() -> bool:
     """Verify LLM is reachable. Call before starting a benchmark."""
-    result = llm_call("Say OK", max_tokens=10)
+    result = llm_call("Say OK", max_tokens=500)
     if not result:
         raise RuntimeError(
             "LLM health check failed: got empty response. "
