@@ -204,23 +204,42 @@ def load_config(path: str | Path | None = None) -> GraphStoreConfig:
     The file is expected to be a partial dict - only sections/fields the user
     changed. Missing sections and fields fall back to config.py defaults.
     Returns full defaults if the file doesn't exist or is empty.
+
+    If a base tuned config exists alongside the path, it is loaded first and
+    the main config overrides it. For example, if path is benchmarks/graphstore.json,
+    autoresearch/tuned_config.48.json is loaded first (if it exists).
     """
     if path is None:
         return GraphStoreConfig()
     p = Path(path)
+
+    # Try to load tuned base config if it exists
+    base_config = GraphStoreConfig()
+    tuned_path = p.parent.parent / "autoresearch" / "tuned_config.48.json"
+    if tuned_path.exists():
+        raw_tuned = tuned_path.read_bytes().strip()
+        if raw_tuned:
+            try:
+                tuned_overrides = json.loads(raw_tuned)
+                if isinstance(tuned_overrides, dict) and tuned_overrides:
+                    base_config = _rebuild_config(base_config, tuned_overrides)
+            except (json.JSONDecodeError, ValueError) as e:
+                _log.debug("tuned config parse error in %s: %s - skipping", tuned_path, e)
+
+    # Load and apply main config on top of tuned base
     if not p.exists():
-        return GraphStoreConfig()
+        return base_config
     raw = p.read_bytes().strip()
     if not raw:
-        return GraphStoreConfig()
+        return base_config
     try:
         overrides = json.loads(raw)
     except (json.JSONDecodeError, ValueError) as e:
-        _log.warning("config parse error in %s: %s - using defaults", p, e)
-        return GraphStoreConfig()
+        _log.warning("config parse error in %s: %s - using tuned base or defaults", p, e)
+        return base_config
     if not isinstance(overrides, dict) or not overrides:
-        return GraphStoreConfig()
-    return _rebuild_config(GraphStoreConfig(), overrides)
+        return base_config
+    return _rebuild_config(base_config, overrides)
 
 
 def save_config(config: GraphStoreConfig, path: str | Path) -> None:
