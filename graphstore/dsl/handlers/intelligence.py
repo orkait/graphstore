@@ -353,6 +353,35 @@ class IntelligenceHandlers:
                     1.0 - np.asarray(dists, dtype=np.float64), 0.0
                 )
 
+            # Sentence query expansion: split query into sentences, search each,
+            # merge candidate scores via max(similarity) per slot.
+            use_sqe = getattr(self, '_sentence_query_expansion', False)
+            if use_sqe:
+                from graphstore.algos.sentence_split import split_sentences
+                sentences = split_sentences(q.query)
+                if len(sentences) > 1:
+                    _vec_max_sim: dict[int, float] = {}
+                    for i, s in enumerate(vec_slots_np):
+                        _vec_max_sim[int(s)] = float(vec_sims_np[i])
+                    sent_vecs = self._embedder.encode_queries(sentences)
+                    for svec in sent_vecs:
+                        s_slots, s_dists = self._vector_store.search(
+                            svec, k=oversample, mask=combined, oversample_factor=oversample_factor,
+                        )
+                        if len(s_slots) > 0:
+                            s_sims = np.maximum(
+                                1.0 - np.asarray(s_dists, dtype=np.float64), 0.0
+                            )
+                            for j, slot in enumerate(s_slots):
+                                slot_int = int(slot)
+                                sim = float(s_sims[j])
+                                if slot_int not in _vec_max_sim or sim > _vec_max_sim[slot_int]:
+                                    _vec_max_sim[slot_int] = sim
+
+                    if _vec_max_sim:
+                        vec_slots_np = np.array(list(_vec_max_sim.keys()), dtype=np.int64)
+                        vec_sims_np = np.array(list(_vec_max_sim.values()), dtype=np.float64)
+
         bm25_slots_np = np.empty(0, dtype=np.int64)
         bm25_scores_np = np.empty(0, dtype=np.float64)
         if self._document_store:
