@@ -34,6 +34,10 @@ graphstore/algos/*.best
 
 # Benchmark run artifacts
 benchmarks/results/
+results/
+
+# Kaggle CLI auto-generated kernel metadata (ephemeral push artifact)
+benchmarks/kaggle/kernel-metadata.json
 
 # pytest tmpdir cache
 pytest-of-*/
