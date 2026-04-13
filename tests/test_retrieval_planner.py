@@ -114,3 +114,37 @@ def test_planner_temporal_filter_is_reflected_in_result_meta():
     assert "planner" in result.meta
     assert result.meta["planner"]["use_temporal_filter"] is True
     gs.close()
+
+
+def test_planner_observation_mode_surfaces_in_result_meta():
+    from tests.test_retrieval_improvements import FixedEmbedder
+
+    gs = GraphStore(embedder=FixedEmbedder())
+    gs.execute('SYS REGISTER NODE KIND "fact" REQUIRED claim:string EMBED claim')
+    gs.execute('SYS REGISTER NODE KIND "observation" REQUIRED claim:string EMBED claim')
+    gs.execute('CREATE NODE "msg1" kind = "fact" claim = "the user prefers premiere pro for advanced editing"')
+    gs.execute('CREATE NODE "obs1" kind = "observation" claim = "user prefers premiere pro"')
+    result = gs.execute('REMEMBER "what do I prefer for video editing?" LIMIT 5')
+    assert "planner" in result.meta
+    assert result.meta["planner"]["use_observations"] is True
+    gs.close()
+
+
+def test_planner_can_increase_candidate_k():
+    planner = RetrievalPlanner()
+    ctx = planner.build_context(
+        query="what happened on 2023-05-08",
+        limit=5,
+        token_budget=None,
+        query_anchor_ms=1,
+        query_time_range=None,
+        has_entities=False,
+        entity_candidates=[],
+        has_temporal_signal=True,
+        has_observations=False,
+        has_graph_edges=False,
+        has_fts=True,
+        has_vectors=True,
+    )
+    plan = planner.plan(ctx, explicit_overrides={})
+    assert plan.candidate_k >= 15

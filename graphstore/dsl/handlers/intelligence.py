@@ -377,6 +377,29 @@ class IntelligenceHandlers:
 
         slot_arr = np.union1d(vec_slots_np, bm25_slots_np)
 
+        use_observations = plan.use_observations if plan is not None else False
+        obs_slots_np = np.empty(0, dtype=np.int64)
+        if use_observations and self._embedder and self._vector_store and ("observation" in self.store.string_table):
+            try:
+                query_vec = self._embedder.encode_queries([q.query])[0]
+                obs_kind_mask = self.store._live_mask("observation")
+                vs_cap = self._vector_store._capacity
+                vs_mask = np.zeros(n, dtype=bool)
+                cap = min(n, vs_cap)
+                vs_mask[:cap] = self._vector_store._has_vector[:cap]
+                obs_mask = obs_kind_mask & vs_mask
+                obs_slots, _obs_dists = self._vector_store.search(
+                    query_vec,
+                    k=max(target_k * 2, 1),
+                    mask=obs_mask,
+                    oversample_factor=oversample_factor,
+                )
+                if len(obs_slots) > 0:
+                    obs_slots_np = np.asarray(obs_slots, dtype=np.int64)
+                    slot_arr = np.union1d(slot_arr, obs_slots_np)
+            except Exception:
+                pass
+
         # ── Stage 2: Signal computation (all 5 differentiate) ─────────
 
         # Signal 1: Vector similarity
