@@ -414,6 +414,14 @@ class IntelligenceHandlers:
             scattered[bm25_slots_np] = bm25_scores_np
             bm25_signal = _algo_normalize_bm25(scattered)
 
+        # Co-occurrence boost: candidates found by BOTH vector AND BM25
+        if len(vec_slots_np) > 0 and len(bm25_slots_np) > 0:
+            vec_set = set(vec_slots_np.tolist())
+            bm25_set = set(bm25_slots_np.tolist())
+            both = np.array(list(vec_set & bm25_set), dtype=np.int64)
+            if len(both) > 0:
+                vec_signal[both] *= (1.0 + bm25_signal[both])
+
         # Signal 3: Smart recency - per-slot best timestamp
         # Use __event_at__ where available, __updated_at__ as fallback per-slot.
         # This ensures batch-ingested data with different event dates gets
@@ -457,9 +465,9 @@ class IntelligenceHandlers:
                 u_scores = _algo_recency_decay(u_ts, u_pres_at, u_ref, half_life_days=half_life)
                 recency_signal[no_event_cands] = u_scores
 
-        # Signal 4: Graph degree + confidence override
-        # Well-connected nodes are more likely central; explicit __confidence__
-        # overrides degree when present (for ASSERT-ed beliefs).
+        # Signal 4: Graph degree + entity-hop boost + confidence override
+        # Base: normalized out-degree. Boost: messages sharing entities with
+        # the query get amplified (entity-hop). Override: explicit __confidence__.
         graph_signal = np.zeros(n, dtype=np.float64)
         combined_mat = self.store.edge_matrices.get(None)
         if combined_mat is not None:
@@ -468,6 +476,8 @@ class IntelligenceHandlers:
             max_deg = max(1.0, float(out_deg.max()))
             valid = slot_arr[slot_arr < mat_n]
             graph_signal[valid] = out_deg[valid] / max_deg
+
+        # [entity-hop: no effect on LoCoMo - Caroline/Melanie too common]
         conf_col = self.store.columns.get_column("__confidence__", n)
         if conf_col is not None:
             col_data, col_pres, _ = conf_col

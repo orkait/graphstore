@@ -32,21 +32,7 @@ _ENTITY_RE = re.compile(r"\b[A-Z][a-zA-Z0-9_-]{2,}(?:\s+[A-Z][a-zA-Z0-9_-]{2,}){
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9_]+")
 
 _BENCHMARK_DEFAULTS: dict[str, Any] = {
-    # Ratcheted from the 48-record balanced LongMemEval slice.
-    "retrieval_depth": 9,
-    "search_oversample": 16,
-    "recall_depth": 2,
-    "max_query_entities": 6,
-    "recency_boost_k": 4,
-    "recall_decay": 0.5912428069710964,
-    "recency_half_life_days": 48.43688350759862,
-    "similar_to_oversample": 2,
-    "lexical_search_oversample": 3,
-    "fusion_method": "weighted",
-    "recency_mode": "multiplicative",
-    "nucleus_expansion": True,
-    "nucleus_hops": 2,
-    "nucleus_max_neighbors": 3,
+    # No overrides - trust config.py defaults as single source of truth.
 }
 
 
