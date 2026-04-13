@@ -64,25 +64,25 @@ class IntelligenceHandlers:
 
         live_mask = self._compute_live_mask(n)
 
-        mat_t, mat_t_delta = self.store.edge_matrices.get_combined_transpose_split()
-        if mat_t is None and mat_t_delta is None:
+        mat, mat_delta = self.store.edge_matrices.get_combined_spread_split()
+        if mat is None and mat_delta is None:
             return Result(kind="nodes", data=[], count=0)
             
-        if mat_t is not None and mat_t.shape[0] < n:
-            mat_t = resize_csr(mat_t, n)
-        if mat_t_delta is not None and mat_t_delta.shape[0] < n:
-            mat_t_delta = resize_csr(mat_t_delta, n)
+        if mat is not None and mat.shape[0] < n:
+            mat = resize_csr(mat, n)
+        if mat_delta is not None and mat_delta.shape[0] < n:
+            mat_delta = resize_csr(mat_delta, n)
 
         decay = getattr(self, '_recall_decay', 0.7)
         activation = _algo_spreading_activation(
-            matrix_t=mat_t,
+            matrix_t=mat,
             cue_slot=cue_slot,
             depth=q.depth,
             decay=decay,
             live_mask=live_mask,
             importance=importance,
             recency=recency,
-            matrix_t_delta=mat_t_delta,
+            matrix_t_delta=mat_delta,
         )
 
         if q.where:
@@ -333,6 +333,8 @@ class IntelligenceHandlers:
             )
 
         # ── Stage 1: Candidate gathering (vector + BM25) ──────────────
+        query_vec = None
+        vs_mask = None
         vec_slots_np = np.empty(0, dtype=np.int64)
         vec_sims_np = np.empty(0, dtype=np.float64)
         if self._embedder and self._vector_store and self._vector_store.count() > 0:
@@ -379,14 +381,9 @@ class IntelligenceHandlers:
 
         use_observations = plan.use_observations if plan is not None else False
         obs_slots_np = np.empty(0, dtype=np.int64)
-        if use_observations and self._embedder and self._vector_store and ("observation" in self.store.string_table):
+        if use_observations and query_vec is not None and vs_mask is not None and ("observation" in self.store.string_table):
             try:
-                query_vec = self._embedder.encode_queries([q.query])[0]
                 obs_kind_mask = self.store._live_mask("observation")
-                vs_cap = self._vector_store._capacity
-                vs_mask = np.zeros(n, dtype=bool)
-                cap = min(n, vs_cap)
-                vs_mask[:cap] = self._vector_store._has_vector[:cap]
                 obs_mask = obs_kind_mask & vs_mask
                 obs_slots, _obs_dists = self._vector_store.search(
                     query_vec,
@@ -583,20 +580,20 @@ class IntelligenceHandlers:
             seed_slots = base_order[:seed_count].astype(np.int64)
             seed_scores = base_final[seed_slots].astype(np.float32)
 
-            mat_t, mat_t_delta = self.store.edge_matrices.get_combined_transpose_split()
-            if mat_t is not None or mat_t_delta is not None:
-                if mat_t is not None and mat_t.shape[0] < n:
-                    mat_t = resize_csr(mat_t, n)
-                if mat_t_delta is not None and mat_t_delta.shape[0] < n:
-                    mat_t_delta = resize_csr(mat_t_delta, n)
+            mat, mat_delta = self.store.edge_matrices.get_combined_spread_split()
+            if mat is not None or mat_delta is not None:
+                if mat is not None and mat.shape[0] < n:
+                    mat = resize_csr(mat, n)
+                if mat_delta is not None and mat_delta.shape[0] < n:
+                    mat_delta = resize_csr(mat_delta, n)
 
                 activation = _algo_spreading_activation(
-                    matrix_t=mat_t,
+                    matrix_t=mat,
                     cue_slot=seed_slots,
                     depth=getattr(self, '_recall_depth', 2),
                     decay=getattr(self, '_recall_decay', 0.7),
                     live_mask=live_mask,
-                    matrix_t_delta=mat_t_delta,
+                    matrix_t_delta=mat_delta,
                     cue_scores=seed_scores,
                 )
 
@@ -613,18 +610,17 @@ class IntelligenceHandlers:
 
         # ── Stage 7: Type-weighted scoring ────────────────────────────
         type_weights = getattr(self, '_type_weights', None)
-        if type_weights:
+        valid_slots = np.where(final_scores > 0)[0]
+        if type_weights and len(valid_slots) > 0:
             lookup = self.store.string_table.lookup
             kind_ids = self.store.node_kinds
-            valid = np.where(final_scores > 0)[0]
-            for s in valid:
+            for s in valid_slots:
                 kind_str = lookup(int(kind_ids[s]))
                 w = type_weights.get(kind_str, 1.0)
                 if w != 1.0:
                     final_scores[s] *= w
 
         # ── Stage 8: Top-k selection + materialization ────────────────
-        valid_slots = np.where(final_scores > 0)[0]
         if len(valid_slots) == 0:
             return Result(kind="nodes", data=[], count=0)
 
@@ -632,6 +628,7 @@ class IntelligenceHandlers:
 
         results = []
         retrieved_slots = []
+        running_tokens = 0
         for slot in order:
             slot = int(slot)
             node = self.store._materialize_slot(slot)
@@ -653,11 +650,10 @@ class IntelligenceHandlers:
             retrieved_slots.append(slot)
 
             if q.tokens is not None:
-                total_tokens = sum(
-                    len(r.get("summary", "") + r.get("claim", "") + r.get("text", "")) // 4
-                    for r in results
-                )
-                if total_tokens >= q.tokens:
+                running_tokens += len(
+                    node.get("summary", "") + node.get("claim", "") + node.get("text", "")
+                ) // 4
+                if running_tokens >= q.tokens:
                     break
             elif len(results) >= target_k:
                 break
@@ -677,11 +673,7 @@ class IntelligenceHandlers:
             frontier = list(retrieved_slots)
             nucleus_results = []
             token_budget = q.tokens
-            if token_budget is not None:
-                current_tokens = sum(
-                    len(r.get("summary", "") + r.get("claim", "") + r.get("text", "")) // 4
-                    for r in results
-                )
+            current_tokens = running_tokens
             for _hop in range(n_hops):
                 next_frontier = []
                 for seed_slot in frontier:

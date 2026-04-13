@@ -131,11 +131,12 @@ print(f'_recall_score:   {n["_recall_score"]}')
 
 ## Run Retrieval Recall Test (no LLM needed)
 
-Tests if gold answer keywords appear in top-10 retrieved passages for 50 validated questions:
+Tests direct LoCoMo evidence recall:
+- strict: exact supporting message retrieved
+- pragmatic: any message from a supporting session retrieved
 
 ```bash
-uv run python3 -m benchmarks.framework.ratchet50
-# Expected: ~40/50 (80%) with jina-v5-small
+uv run python3 -m benchmarks.framework.ratchet_recall
 ```
 
 ## Run LoCoMo Benchmark with LLM

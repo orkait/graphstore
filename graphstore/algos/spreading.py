@@ -39,22 +39,24 @@ def spreading_activation(
     """
     n = len(live_mask)
     activation = np.zeros(n, dtype=np.float32)
-    
-    if isinstance(cue_slot, int):
-        if cue_slot >= 0 and cue_slot < n:
+
+    cue_is_scalar = isinstance(cue_slot, int)
+    if cue_is_scalar:
+        cue_valid = cue_slot >= 0 and cue_slot < n
+        if cue_valid:
             activation[cue_slot] = cue_scores if cue_scores is not None else 1.0
     else:
-        valid_idx = (cue_slot >= 0) & (cue_slot < n)
-        valid_cues = cue_slot[valid_idx]
+        cue_valid_mask = (cue_slot >= 0) & (cue_slot < n)
+        valid_cues = cue_slot[cue_valid_mask]
         if len(valid_cues) > 0:
             if cue_scores is not None:
-                activation[valid_cues] = cue_scores[valid_idx]
+                activation[valid_cues] = cue_scores[cue_valid_mask]
             else:
                 activation[valid_cues] = 1.0
 
     live_f = live_mask.astype(np.float32)
     decay_f = np.float32(decay)
-    
+
     for _ in range(depth):
         spread = None
         if matrix_t is not None:
@@ -64,11 +66,11 @@ def spreading_activation(
                 spread = matrix_t_delta.dot(activation) * decay_f
             else:
                 spread += matrix_t_delta.dot(activation) * decay_f
-        
+
         if spread is not None:
             activation += spread
         np.multiply(activation, live_f, out=activation)
-    
+
     if importance is not None:
         imp_len = len(activation)
         np.multiply(activation, importance[:imp_len].astype(np.float32), out=activation)
@@ -76,11 +78,10 @@ def spreading_activation(
         rec_len = len(activation)
         np.multiply(activation, recency[:rec_len].astype(np.float32), out=activation)
 
-    if isinstance(cue_slot, int):
-        if cue_slot >= 0 and cue_slot < n:
+    if cue_is_scalar:
+        if cue_valid:
             activation[cue_slot] = 0.0
     else:
-        valid_idx = (cue_slot >= 0) & (cue_slot < n)
-        activation[cue_slot[valid_idx]] = 0.0
+        activation[valid_cues] = 0.0
 
     return activation.astype(np.float64)

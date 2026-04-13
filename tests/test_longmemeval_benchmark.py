@@ -5,7 +5,7 @@ import numpy as np
 
 from graphstore.embedding.base import Embedder
 
-from benchmarks.longmemeval import (
+from benchmarks.framework.run_longmemeval import (
     build_corpus,
     evaluate_retrieval,
     iter_scored_entries,

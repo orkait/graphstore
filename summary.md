@@ -356,14 +356,16 @@ Credits: ~$2.34 remaining on OpenRouter. MiniMax pricing: $0.30/1M input, $1.20/
 
 Fast-fail iterative testing: make one change, test on a fixed dataset, keep if improves, revert if not.
 
-### Test Harness (`benchmarks/framework/ratchet50.py`)
+### Test Harness (`benchmarks/framework/ratchet_recall.py`)
 
-- 50 validated questions from LoCoMo conv-26
-- **Validated** = the gold answer keyword MUST exist in the ingested data (eliminates impossible questions)
-- GraphStore populated ONCE with all 19 sessions, kept alive for all 50 queries
-- Metric: keyword from gold answer found in top-K retrieved passages
-- Fixed random seed (42) for reproducibility
-- Categories: multi-hop, open-domain, single-hop (no temporal in this sample)
+- Direct LoCoMo evidence-recall harness
+- GraphStore populated ONCE with all 19 sessions, kept alive for all queries
+- Metrics:
+  - `strict_hit`: exact supporting evidence message retrieved
+  - `strict_coverage`: fraction of evidence messages retrieved
+  - `pragmatic_hit`: any message from an evidence session retrieved
+  - `pragmatic_coverage`: fraction of evidence sessions represented
+- Fixed random seed (42) for reproducibility in any sampling layer
 
 ### Ratchet Results (jina-v5-small, top-10)
 
@@ -542,8 +544,8 @@ install_embedder('jina-v5-small-retrieval')
 # Full test suite (1166 tests)
 uv run python -m pytest tests/ -x -q
 
-# Retrieval recall test (no LLM, 50Q, ~30s)
-uv run python3 -m benchmarks.framework.ratchet50
+# Retrieval recall test (no LLM, direct LoCoMo evidence)
+uv run python3 -m benchmarks.framework.ratchet_recall
 
 # LoCoMo with LLM (50Q random sample, ~5 min with paid API)
 # Set QA_MODEL in benchmarks/framework/llm_client.py first
@@ -641,7 +643,7 @@ QA_MODEL_OR = "minimax/minimax-m2.7:nitro"
 | `benchmarks/framework/llm_client.py` | LLM client (litellm + provider fallback) |
 | `benchmarks/framework/llm_batch.py` | Async batch scheduler (dual-provider) |
 | `benchmarks/framework/llm_judge.py` | LongMemEval official judge prompts |
-| `benchmarks/framework/ratchet50.py` | 50Q validated retrieval recall test |
+| `benchmarks/framework/ratchet_recall.py` | Direct LoCoMo evidence recall test |
 | `benchmarks/framework/docker_runner.py` | Docker-based benchmark runner |
 | `benchmarks/kaggle/graphstore_jina_500.py` | Kaggle notebook for LongMemEval |
 
