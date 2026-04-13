@@ -1,5 +1,6 @@
 """Intelligence handlers: RECALL, SIMILAR, LEXICAL SEARCH, WHAT IF."""
 
+import re
 import time
 from collections import deque
 
@@ -304,6 +305,32 @@ class IntelligenceHandlers:
 
         live_mask = self._compute_live_mask(n)
         now_ms = int(time.time() * 1000)
+        planner = getattr(self, "_retrieval_planner", None)
+        anchor_ms = getattr(q, 'at', None) or getattr(self, '_temporal_anchor_ms', None)
+        query_entities = re.findall(r"\b[A-Z][a-zA-Z0-9_-]{2,}(?:\s+[A-Z][a-zA-Z0-9_-]{2,}){0,3}\b", q.query)
+        plan = None
+        if planner is not None:
+            plan_ctx = planner.build_context(
+                query=q.query,
+                limit=target_k,
+                token_budget=q.tokens,
+                query_anchor_ms=anchor_ms,
+                query_time_range=None,
+                has_entities=bool(query_entities),
+                entity_candidates=query_entities,
+                has_temporal_signal=anchor_ms is not None,
+                has_observations=("observation" in self.store.string_table),
+                has_graph_edges=self.store.edge_matrices.total_edges > 0,
+                has_fts=bool(self._document_store),
+                has_vectors=bool(self._embedder and self._vector_store and self._vector_store.count() > 0),
+            )
+            plan = planner.plan(
+                plan_ctx,
+                explicit_overrides={
+                    "fusion_method": getattr(self, "_fusion_method", "weighted"),
+                    "use_nucleus": getattr(self, "_nucleus_expansion", False),
+                },
+            )
 
         # ── Stage 1: Candidate gathering (vector + BM25) ──────────────
         vec_slots_np = np.empty(0, dtype=np.int64)
@@ -350,6 +377,29 @@ class IntelligenceHandlers:
 
         slot_arr = np.union1d(vec_slots_np, bm25_slots_np)
 
+        use_observations = plan.use_observations if plan is not None else False
+        obs_slots_np = np.empty(0, dtype=np.int64)
+        if use_observations and self._embedder and self._vector_store and ("observation" in self.store.string_table):
+            try:
+                query_vec = self._embedder.encode_queries([q.query])[0]
+                obs_kind_mask = self.store._live_mask("observation")
+                vs_cap = self._vector_store._capacity
+                vs_mask = np.zeros(n, dtype=bool)
+                cap = min(n, vs_cap)
+                vs_mask[:cap] = self._vector_store._has_vector[:cap]
+                obs_mask = obs_kind_mask & vs_mask
+                obs_slots, _obs_dists = self._vector_store.search(
+                    query_vec,
+                    k=max(target_k * 2, 1),
+                    mask=obs_mask,
+                    oversample_factor=oversample_factor,
+                )
+                if len(obs_slots) > 0:
+                    obs_slots_np = np.asarray(obs_slots, dtype=np.int64)
+                    slot_arr = np.union1d(slot_arr, obs_slots_np)
+            except Exception:
+                pass
+
         # ── Stage 2: Signal computation (all 5 differentiate) ─────────
 
         # Signal 1: Vector similarity
@@ -363,6 +413,14 @@ class IntelligenceHandlers:
             scattered = np.zeros(n, dtype=np.float64)
             scattered[bm25_slots_np] = bm25_scores_np
             bm25_signal = _algo_normalize_bm25(scattered)
+
+        # Co-occurrence boost: candidates found by BOTH vector AND BM25
+        if len(vec_slots_np) > 0 and len(bm25_slots_np) > 0:
+            vec_set = set(vec_slots_np.tolist())
+            bm25_set = set(bm25_slots_np.tolist())
+            both = np.array(list(vec_set & bm25_set), dtype=np.int64)
+            if len(both) > 0:
+                vec_signal[both] *= (1.0 + bm25_signal[both])
 
         # Signal 3: Smart recency - per-slot best timestamp
         # Use __event_at__ where available, __updated_at__ as fallback per-slot.
@@ -407,9 +465,9 @@ class IntelligenceHandlers:
                 u_scores = _algo_recency_decay(u_ts, u_pres_at, u_ref, half_life_days=half_life)
                 recency_signal[no_event_cands] = u_scores
 
-        # Signal 4: Graph degree + confidence override
-        # Well-connected nodes are more likely central; explicit __confidence__
-        # overrides degree when present (for ASSERT-ed beliefs).
+        # Signal 4: Graph degree + entity-hop boost + confidence override
+        # Base: normalized out-degree. Boost: messages sharing entities with
+        # the query get amplified (entity-hop). Override: explicit __confidence__.
         graph_signal = np.zeros(n, dtype=np.float64)
         combined_mat = self.store.edge_matrices.get(None)
         if combined_mat is not None:
@@ -418,6 +476,8 @@ class IntelligenceHandlers:
             max_deg = max(1.0, float(out_deg.max()))
             valid = slot_arr[slot_arr < mat_n]
             graph_signal[valid] = out_deg[valid] / max_deg
+
+        # [entity-hop: no effect on LoCoMo - Caroline/Melanie too common]
         conf_col = self.store.columns.get_column("__confidence__", n)
         if conf_col is not None:
             col_data, col_pres, _ = conf_col
@@ -442,11 +502,11 @@ class IntelligenceHandlers:
                 )
 
         # ── Stage 3: Temporal-first filtering (TSM-inspired) ──────────
-        anchor_ms = getattr(q, 'at', None) or getattr(self, '_temporal_anchor_ms', None)
         temporal_filtered_slots = None
         has_temporal = False
 
-        if anchor_ms is not None:
+        use_temporal_filter = plan.use_temporal_filter if plan is not None else anchor_ms is not None
+        if use_temporal_filter and anchor_ms is not None:
             t_event_col = self.store.columns.get_column("__event_at__", n)
             if t_event_col is not None:
                 col_data, col_pres, _ = t_event_col
@@ -469,7 +529,7 @@ class IntelligenceHandlers:
         multiplicative = recency_mode == 'multiplicative'
         recency_for_fusion = np.zeros(n, dtype=np.float64) if multiplicative else recency_signal
 
-        fusion_method = getattr(self, '_fusion_method', 'rrf')
+        fusion_method = plan.fusion_method if plan is not None else getattr(self, '_fusion_method', 'rrf')
         if fusion_method not in ('rrf', 'weighted'):
             fusion_method = 'rrf'
         if fusion_method == 'rrf':
@@ -517,7 +577,8 @@ class IntelligenceHandlers:
         seed_count = min(len(fusion_slots), max(min_seeds, target_k // 2))
         final_scores = base_final.copy()
 
-        if seed_count > 0 and self.store.edge_matrices.total_edges > 0:
+        use_graph_expansion = plan.use_graph_expansion if plan is not None else True
+        if use_graph_expansion and seed_count > 0 and self.store.edge_matrices.total_edges > 0:
             base_order = fusion_slots[np.argsort(-base_final[fusion_slots])]
             seed_slots = base_order[:seed_count].astype(np.int64)
             seed_scores = base_final[seed_slots].astype(np.float32)
@@ -608,7 +669,7 @@ class IntelligenceHandlers:
         # ── Stage 9: Nucleus expansion (context windowing) ────────────
         # Neighbors are NOT filtered by q.where - they provide context,
         # not primary results. Only live_mask and token budget are enforced.
-        nucleus_on = getattr(self, '_nucleus_expansion', False)
+        nucleus_on = plan.use_nucleus if plan is not None else getattr(self, '_nucleus_expansion', False)
         if nucleus_on and results and self.store.edge_matrices.total_edges > 0:
             max_nb = getattr(self, '_nucleus_max_neighbors', 3)
             n_hops = getattr(self, '_nucleus_hops', 1)
@@ -672,4 +733,17 @@ class IntelligenceHandlers:
             except Exception:
                 pass
 
-        return Result(kind="nodes", data=results, count=len(results))
+        meta = {}
+        if plan is not None:
+            meta["planner"] = {
+                "candidate_k": plan.candidate_k,
+                "use_temporal_filter": plan.use_temporal_filter,
+                "use_graph_expansion": plan.use_graph_expansion,
+                "use_observations": plan.use_observations,
+                "use_nucleus": plan.use_nucleus,
+                "fusion_method": plan.fusion_method,
+                "fallback_chain": list(plan.fallback_chain),
+                "notes": list(plan.notes),
+            }
+
+        return Result(kind="nodes", data=results, count=len(results), meta=meta)
