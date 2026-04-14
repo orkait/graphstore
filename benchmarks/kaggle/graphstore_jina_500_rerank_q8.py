@@ -34,8 +34,8 @@ projector_path = hf_hub_download(repo_id="jinaai/jina-reranker-v3-GGUF", filenam
 print("Downloading LongMemEval-S...")
 snapshot_download("xiaowu0162/longmemeval-cleaned",
     repo_type="dataset", local_dir="/kaggle/working/longmemeval-data")
-print("Cloning graphstore...")
-subprocess.check_call(["git", "clone", "--depth", "1",
+print("Cloning graphstore (feat/sentence-level-embeddings)...")
+subprocess.check_call(["git", "clone", "--depth", "1", "--branch", "feat/sentence-level-embeddings",
     "https://github.com/orkait/graphstore.git", "/kaggle/working/graphstore"])
 
 # Point GraphStore at the benchmark config (single source of truth for tuning)
