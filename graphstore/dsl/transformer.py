@@ -323,7 +323,8 @@ class DSLTransformer(Transformer):
         return args[0]
 
     def arrow(self, args):
-        return PatternArrow(expr=args[0])
+        expr = args[0] if args else None
+        return PatternArrow(expr=expr)
 
     # --- Writes ---
     def vector_clause(self, args):
@@ -532,21 +533,27 @@ class DSLTransformer(Transformer):
         return args[0]
 
     def condition(self, args):
-        return Condition(field=str(args[0]), op=str(args[1]), value=args[2])
+        return Condition(field=self._field(args[0]), op=str(args[1]), value=args[2])
+
+    def field_ref(self, args):
+        """Return dot-notation field reference as string, e.g. 'x.kind'."""
+        if len(args) == 1:
+            return str(args[0])
+        return f"{str(args[0])}.{str(args[1])}"
 
     def contains_cond(self, args):
-        return ContainsCondition(field=str(args[0]), value=self._str(args[1]))
+        return ContainsCondition(field=self._field(args[0]), value=self._str(args[1]))
 
     def like_cond(self, args):
-        return LikeCondition(field=str(args[0]), pattern=self._str(args[1]))
+        return LikeCondition(field=self._field(args[0]), pattern=self._str(args[1]))
 
     def in_cond(self, args):
-        field = str(args[0])
+        field = self._field(args[0])
         values = args[1:]
         return InCondition(field=field, values=values)
 
     def similar_cond(self, args):
-        return SimilarCondition(field=str(args[0]), query=self._str(args[1]), threshold=float(args[2]))
+        return SimilarCondition(field=self._field(args[0]), query=self._str(args[1]), threshold=float(args[2]))
 
     def degree_condition(self, args):
         degree_type = args[0]
@@ -1242,6 +1249,12 @@ class DSLTransformer(Transformer):
             if isinstance(a, tuple) and a[0] == "document":
                 return a[1]
         return None
+
+    def _field(self, arg) -> str:
+        """Extract field reference string, handling dot-notation."""
+        if isinstance(arg, str):
+            return arg
+        return str(arg)
 
     def _find_event_at(self, args):
         """Extract EVENT_AT from args. Returns raw value or None."""
