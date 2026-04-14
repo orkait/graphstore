@@ -148,6 +148,7 @@ def _build_reranker(config: dict[str, Any]):
         return GGUFReranker(
             model_path=config.get("reranker_model_dir", ""),
             projector_path=config.get("reranker_projector_path"),
+            n_ctx=int(config.get("reranker_max_length", 131072)),
             n_gpu_layers=int(config.get("reranker_gpu_layers", -1)),
         )
     return None

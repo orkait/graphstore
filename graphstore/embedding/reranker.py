@@ -116,7 +116,7 @@ class GGUFReranker:
     """
 
     def __init__(self, model_path: str, projector_path: str | None = None,
-                 n_ctx: int = 2048, n_gpu_layers: int = -1):
+                 n_ctx: int = 131072, n_gpu_layers: int = -1):
         try:
             from llama_cpp import Llama
         except ImportError as e:
