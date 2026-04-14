@@ -37,11 +37,17 @@ class IngestHandlers:
     def _ingest(self, q: IngestStmt) -> Result:
         """INGEST: parse file, chunk, create graph nodes + edges, store documents."""
         from graphstore.ingest.router import ingest_file, EXTENSION_MAP
+        import os as _os
 
         resolved = _Path(q.file_path).resolve()
+        # Also resolve the real path following symlinks to prevent symlink traversal
+        real_resolved = _Path(_os.path.realpath(resolved))
         if self._ingest_root:
             root = _Path(self._ingest_root).resolve()
-            if not str(resolved).startswith(str(root)):
+            real_root = _Path(_os.path.realpath(root))
+            root_str = str(real_root)
+            # Use os.sep to prevent prefix collision (/data vs /data2)
+            if str(real_resolved) != root_str and not str(real_resolved).startswith(root_str + _os.sep):
                 raise GraphStoreError(
                     f"Path traversal not allowed: {q.file_path} "
                     f"is outside ingest root {self._ingest_root}"

@@ -607,7 +607,10 @@ class GraphStore:
 
             with gs.deferred_embeddings(batch_size=128):
                 for item in items:
-                    gs.execute(f'CREATE NODE "{item.id}" text = "{item.text}" DOCUMENT "{item.text}"')
+                    # Use DSL escaping to prevent injection from special chars
+                    safe_id = item.id.replace('"', '\\"')
+                    safe_text = item.text.replace('"', '\\"').replace("\\\\", "\\\\")
+                    gs.execute(f'CREATE NODE "{safe_id}" text = "{safe_text}" DOCUMENT "{safe_text}"')
             # All embeddings flushed here.
         """
         executor = self._executor
