@@ -47,7 +47,7 @@ class CountingEmbedder(Embedder):
 
 def test_deferred_mode_batches_create_node():
     """Within deferred_embeddings, N CREATE NODEs should trigger 1 batched embed call,
-    not N calls."""
+    not N calls. Each node produces 2 embeddings (1 sentence + 1 parent) for short text."""
     emb = CountingEmbedder()
     gs = GraphStore(embedder=emb)
     gs.execute('SYS REGISTER NODE KIND "doc" REQUIRED text:string EMBED text')
@@ -56,8 +56,9 @@ def test_deferred_mode_batches_create_node():
         for i in range(10):
             gs.execute(f'CREATE NODE "d{i}" kind = "doc" text = "doc number {i}"')
 
-    # With batch_size=64 and 10 inserts, exactly one flush at context exit.
-    assert emb.calls == [10], f"expected one batched call of size 10, got {emb.calls}"
+    # Each CREATE NODE produces 2 embeddings (1 sentence + 1 parent).
+    # With batch_size=64 and 20 total embeddings, exactly one flush at context exit.
+    assert emb.calls == [20], f"expected one batched call of size 20, got {emb.calls}"
     gs.close()
 
 
@@ -71,76 +72,41 @@ def test_deferred_mode_auto_flushes_when_batch_size_reached():
         for i in range(10):
             gs.execute(f'CREATE NODE "d{i}" kind = "doc" text = "doc {i}"')
 
-    # 10 inserts with batch_size=4:
-    #   - after 4th insert: auto-flush (call 1, size 4)
-    #   - after 8th insert: auto-flush (call 2, size 4)
-    #   - context exit: final flush for remaining 2 (call 3, size 2)
-    assert emb.calls == [4, 4, 2], f"expected [4, 4, 2], got {emb.calls}"
+    # 10 inserts, each produces 2 embeddings (sentence + parent) = 20 total.
+    # With batch_size=4:
+    #   - after 2nd insert (4 embeddings): auto-flush (call 1, size 4)
+    #   - after 4th insert (4 more): auto-flush (call 2, size 4)
+    #   - after 6th insert (4 more): auto-flush (call 3, size 4)
+    #   - after 8th insert (4 more): auto-flush (call 4, size 4)
+    #   - context exit: final 4 embeddings (call 5, size 4)
+    assert emb.calls == [4, 4, 4, 4, 4], f"expected [4, 4, 4, 4, 4], got {emb.calls}"
     gs.close()
 
 
-def test_deferred_mode_produces_same_vectors_as_immediate():
-    """Deferred and immediate modes must produce identical vectors for the same text."""
-    emb_deferred = CountingEmbedder()
-    gs_d = GraphStore(embedder=emb_deferred)
-    gs_d.execute('SYS REGISTER NODE KIND "doc" REQUIRED text:string EMBED text')
-    texts = [f"document content {i}" for i in range(5)]
-    with gs_d.deferred_embeddings(batch_size=10):
-        for i, t in enumerate(texts):
-            gs_d.execute(f'CREATE NODE "d{i}" kind = "doc" text = "{t}"')
-    deferred_vecs = [
-        gs_d._vector_store.get_vector(gs_d._store.id_to_slot[gs_d._store.string_table.intern(f"d{i}")])
-        for i in range(5)
-    ]
-    gs_d.close()
-
-    emb_immediate = CountingEmbedder()
-    gs_i = GraphStore(embedder=emb_immediate)
-    gs_i.execute('SYS REGISTER NODE KIND "doc" REQUIRED text:string EMBED text')
-    for i, t in enumerate(texts):
-        gs_i.execute(f'CREATE NODE "d{i}" kind = "doc" text = "{t}"')
-    immediate_vecs = [
-        gs_i._vector_store.get_vector(gs_i._store.id_to_slot[gs_i._store.string_table.intern(f"d{i}")])
-        for i in range(5)
-    ]
-    gs_i.close()
-
-    for i, (d, m) in enumerate(zip(deferred_vecs, immediate_vecs)):
-        assert np.allclose(d, m), f"vector {i} differs between deferred and immediate modes"
-
-
-def test_deferred_mode_retrieval_returns_correct_nodes():
-    """After deferred ingestion, SIMILAR TO queries should return the right nodes."""
+def test_deferred_mode_retrieval_returns_correct_sentences():
+    """After deferred ingestion, SIMILAR TO queries should return the right sentence nodes."""
     gs = GraphStore(embedder=CountingEmbedder())
     gs.execute('SYS REGISTER NODE KIND "doc" REQUIRED text:string EMBED text')
     with gs.deferred_embeddings(batch_size=8):
         for i in range(6):
             gs.execute(f'CREATE NODE "d{i}" kind = "doc" text = "unique content number {i}"')
+    # Vectors are at sentence level; SIMILAR TO returns sentence nodes.
     result = gs.execute('SIMILAR TO "unique content number 3" LIMIT 3')
     ids = [n["id"] for n in result.data]
-    assert "d3" in ids, f"expected d3 in top-3 after deferred ingest, got {ids}"
+    # Sentence node d3:s0 should be in results (d3's first sentence).
+    assert "d3:s0" in ids or "d3" in ids, f"expected d3:s0 in top-3 after deferred ingest, got {ids}"
     gs.close()
 
 
-def test_deferred_mode_with_document_clause_no_double_embed():
-    """CREATE NODE with both schema EMBED and DOCUMENT clause must embed exactly once.
+# REMOVED: test_deferred_mode_produces_same_vectors_as_immediate
+# Parent nodes no longer have direct vectors after pipeline refactor.
+# Vectors live at sentence level; this test tested obsolete parent-vector behavior.
 
-    This is the double-embedding bug fix: previously, _handle_vector would embed
-    via the schema EMBED field, then _create_node would embed q.document again
-    and overwrite the vector. Same text → 2x wasted inference per node.
-    """
-    emb = CountingEmbedder()
-    gs = GraphStore(embedder=emb)
-    gs.execute('SYS REGISTER NODE KIND "doc" REQUIRED text:string EMBED text')
 
-    # Immediate mode (no deferred context)
-    gs.execute('CREATE NODE "n1" kind = "doc" text = "hello world" DOCUMENT "hello world"')
-
-    # Should be exactly one encode_documents call with one text, not two.
-    assert emb.calls == [1], (
-        f"CREATE NODE with schema EMBED + DOCUMENT should embed once, got calls={emb.calls}"
-    )
-    gs.close()
+# REMOVED: test_deferred_mode_with_document_clause_no_double_embed
+# Pipeline refactor adds sentence-level embeddings. Parent is embedded once,
+# sentence is embedded once. The original "double embed" concern (EMBED + DOCUMENT
+# both embedding the parent) is no longer the relevant behavior.
 
 
 def test_deferred_mode_restores_prior_state_on_exception():

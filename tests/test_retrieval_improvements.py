@@ -337,17 +337,19 @@ class TestTemporalDslWiring:
         assert event_at is not None
         gs.close()
 
-    def test_remember_at_prefers_temporally_matching_nodes(self):
+    def test_remember_at_filters_by_exact_date(self):
+        """AT clause is a hard filter — only nodes matching the date range are returned."""
         gs = _make_gs()
-        # Use identical claim text so vector similarity is equal for all
-        gs.execute('CREATE NODE "recent1" kind = "fact" claim = "museum trip with family" EVENT_AT "2023-05-08"')
-        gs.execute('CREATE NODE "recent2" kind = "fact" claim = "museum trip with family" EVENT_AT "2023-05-10"')
+        gs.execute('CREATE NODE "may8" kind = "fact" claim = "museum trip with family" EVENT_AT "2023-05-08"')
+        gs.execute('CREATE NODE "may9" kind = "fact" claim = "museum trip with family" EVENT_AT "2023-05-09"')
         gs.execute('CREATE NODE "neutral" kind = "fact" claim = "museum trip with family"')
         gs.execute('CREATE NODE "old" kind = "fact" claim = "museum trip with family" EVENT_AT "2021-05-08"')
-        result = gs.execute('REMEMBER "museum trip with family" AT "2023-05-09" LIMIT 3')
+        # AT "2023-05-09" is a hard single-day filter
+        result = gs.execute('REMEMBER "museum trip with family" AT "2023-05-09" LIMIT 5')
         ids = [r["id"] for r in result.data]
-        assert "old" not in ids
-        assert "recent1" in ids or "recent2" in ids
+        assert "may9" in ids, f"expected may9 (exact date match) in results, got {ids}"
+        assert "old" not in ids, f"old node should be filtered out, got {ids}"
+        assert "may8" not in ids, f"may8 is different date, should be filtered out, got {ids}"
         gs.close()
 
 

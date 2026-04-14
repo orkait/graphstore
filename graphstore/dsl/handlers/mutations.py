@@ -207,6 +207,8 @@ class MutationHandlers:
 
         need_sentence_nodes = len(sentences) >= 1
         if need_sentence_nodes and len(sentences) >= 1:
+            # Parse parent's EVENT_AT for inheritance by sentence nodes
+            parent_event_ms = self._parse_event_at(getattr(q, 'event_at', None))
             for i, sent_text in enumerate(sentences):
                 sent_id = f"{node_id}:s{i}"
                 sent_slot = self.store.put_node(sent_id, "sentence", {
@@ -214,6 +216,8 @@ class MutationHandlers:
                     "parent_node": node_id,
                 })
                 self.store.columns.set_reserved(sent_slot, "__blob_state__", "warm")
+                if parent_event_ms is not None:
+                    self.store.columns.set_reserved(sent_slot, "__event_at__", parent_event_ms)
                 self.store.put_edge(node_id, sent_id, "has_sentence")
 
                 # Embed sentence (respect deferred mode)
@@ -259,12 +263,15 @@ class MutationHandlers:
                             pass
 
         # ── Standard embedding / document handling ──────────────
+        # Parent nodes retain their vector for SIMILAR TO NODE and system ops.
+        # Sentence vectors supplement the parent for fine-grained retrieval.
         str_id = self.store.string_table.intern(node_id)
         slot = self.store.id_to_slot[str_id]
         embedded = self._handle_vector(slot, kind, data, q.vector)
         if q.document and self._document_store:
             self._document_store.put_document(slot, q.document.encode("utf-8"), "text/plain")
-            if not embedded and q.vector is None and self._embedder:
+            # Only fallback-embed parent if no sentence nodes and no explicit vector
+            if not need_sentence_nodes and not embedded and q.vector is None and self._embedder:
                 self._embed_and_store(slot, q.document)
         node = self.store.get_node(node_id)
         return Result(kind="node", data=node, count=1)
