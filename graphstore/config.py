@@ -42,14 +42,6 @@ class VectorConfig(msgspec.Struct, frozen=True):
     search_oversample: int = 16
     model2vec_model: str = "minishlab/M2V_base_output"
     model_cache_dir: str | None = None
-    reranker: str | None = None
-    reranker_model: str | None = None
-    reranker_model_dir: str | None = None
-    reranker_projector_path: str | None = None
-    reranker_gpu_layers: int = 0
-    reranker_max_length: int | None = None
-    reranker_onnx_file: str = "onnx/model_int8.onnx"
-    rerank_oversample: int = 10
 
 
 class DocumentConfig(msgspec.Struct, frozen=True):
@@ -69,7 +61,7 @@ class DslConfig(msgspec.Struct, frozen=True):
     auto_optimize: bool = False
     optimize_interval: int = 500
     recall_decay: float = 0.5912428069710964
-    remember_weights: list[float] = msgspec.field(default_factory=lambda: [0.50, 0.20, 0.10, 0.15, 0.05])
+    remember_weights: list[float] = msgspec.field(default_factory=lambda: [0.55, 0.25, 0.20])
     fusion_method: str = "weighted"  # "rrf" or "weighted"
     rrf_k: float = 60.0
     retrieval_strategy: str = "full"
@@ -81,7 +73,7 @@ class DslConfig(msgspec.Struct, frozen=True):
     recency_half_life_days: float = 7300.0  # ~20 years
     similar_to_oversample: int = 2
     lexical_search_oversample: int = 3
-    hybridrag_weight: float = 0.15
+    hybridrag_weight: float = 0.0
     hybridrag_min_seeds: int = 5
     type_weights: dict = msgspec.field(default_factory=lambda: {
         "observation": 1.8, "fact": 1.3, "event": 1.2, "preference": 1.3,
@@ -90,10 +82,24 @@ class DslConfig(msgspec.Struct, frozen=True):
     })
     temporal_weight: float = 0.15
     temporal_decay_days: float = 365.0
-    nucleus_expansion: bool = True  # benchmark-tuned default; may append neighbors after top-k
-    nucleus_hops: int = 2
+    nucleus_expansion: bool = False
+    nucleus_hops: int = 1
     nucleus_max_neighbors: int = 3
-    sentence_query_expansion: bool = False  # split query into sentences, search each, merge by max(sim)
+    nucleus_neighbors_per_hop: int = 3
+    nucleus_min_text_length: int = 20
+    nucleus_allowed_kinds: list[str] = msgspec.field(default_factory=lambda: ["message", "chunk", "section"])
+    sentence_query_expansion: bool = True
+    graph_signal_enabled: bool = False
+    entity_extractor: str = "tinybert_onnx"
+    entity_model_dir: str | None = None
+    entity_score_threshold: float = 0.6
+    entity_max_length: int = 256
+    reranker: str | None = None
+    reranker_model_dir: str | None = None
+    reranker_projector_path: str | None = None
+    reranker_max_length: int = 2048
+    reranker_gpu_layers: int = -1
+    rerank_oversample: int = 10
     cache_gc_threshold: int = 200
 
 
@@ -188,18 +194,24 @@ _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "nucleus_expansion":    ("dsl", "nucleus_expansion"),
     "nucleus_hops":         ("dsl", "nucleus_hops"),
     "nucleus_max_neighbors":("dsl", "nucleus_max_neighbors"),
+    "nucleus_neighbors_per_hop": ("dsl", "nucleus_neighbors_per_hop"),
+    "nucleus_min_text_length": ("dsl", "nucleus_min_text_length"),
+    "nucleus_allowed_kinds":   ("dsl", "nucleus_allowed_kinds"),
     "sentence_query_expansion": ("dsl", "sentence_query_expansion"),
+    "graph_signal_enabled": ("dsl", "graph_signal_enabled"),
+    "entity_extractor":     ("dsl", "entity_extractor"),
+    "entity_model_dir":     ("dsl", "entity_model_dir"),
+    "entity_score_threshold": ("dsl", "entity_score_threshold"),
+    "entity_max_length":    ("dsl", "entity_max_length"),
+    "reranker":             ("dsl", "reranker"),
+    "reranker_model_dir":   ("dsl", "reranker_model_dir"),
+    "reranker_projector_path": ("dsl", "reranker_projector_path"),
+    "reranker_max_length":  ("dsl", "reranker_max_length"),
+    "reranker_gpu_layers":  ("dsl", "reranker_gpu_layers"),
+    "rerank_oversample":    ("dsl", "rerank_oversample"),
     "search_oversample":    ("vector", "search_oversample"),
     "similarity_threshold": ("vector", "similarity_threshold"),
     "duplicate_threshold":  ("vector", "duplicate_threshold"),
-    "reranker":             ("vector", "reranker"),
-    "reranker_model":       ("vector", "reranker_model"),
-    "reranker_model_dir":   ("vector", "reranker_model_dir"),
-    "reranker_projector_path":("vector", "reranker_projector_path"),
-    "reranker_gpu_layers":  ("vector", "reranker_gpu_layers"),
-    "reranker_max_length":  ("vector", "reranker_max_length"),
-    "reranker_onnx_file":   ("vector", "reranker_onnx_file"),
-    "rerank_oversample":    ("vector", "rerank_oversample"),
     "fts_tokenizer":        ("document", "fts_tokenizer"),
 }
 
