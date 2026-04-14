@@ -136,11 +136,17 @@ class GGUFReranker:
         # 2. Final initialization using native or user-provided budget
         actual_ctx = n_ctx if n_ctx is not None else native_ctx
 
+        # n_batch controls the compute buffer size on GPU. We only ever
+        # embed single text at a time, so cap it at 2048 to avoid
+        # allocating the full context window on GPU (which causes OOM
+        # when combined with an ONNX embedder on the same GPU).
+        actual_batch = min(actual_ctx, 2048)
+
         self._model = Llama(
             model_path=model_path,
             embedding=True,
             n_ctx=actual_ctx,
-            n_batch=actual_ctx, 
+            n_batch=actual_batch,
             n_gpu_layers=n_gpu_layers,
             verbose=False,
         )
