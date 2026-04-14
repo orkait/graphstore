@@ -62,10 +62,6 @@ class ExecutorBase(VisibilityMixin, FilteringMixin):
     def _embedder(self):
         return self._runtime.embedder
 
-    @property
-    def _reranker(self):
-        return self._runtime.reranker
-
     def execute(self, ast) -> Result:
         """Execute a parsed AST node and return a Result."""
         start = time.perf_counter_ns()

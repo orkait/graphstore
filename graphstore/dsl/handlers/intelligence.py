@@ -284,20 +284,12 @@ class IntelligenceHandlers:
 
     @handles(RememberQuery)
     def _remember(self, q: RememberQuery) -> Result:
-        """REMEMBER: 5-signal hybrid retrieval with temporal-first filtering.
+        """REMEMBER: 3-signal fusion with optional reranker and nucleus.
 
-        Signals (all 5 actively differentiate):
-            1. vec_signal      - cosine similarity from vector search
-            2. bm25_signal     - normalized BM25 from FTS5
-            3. recency_signal  - decay from __event_at__ (preferred) or __updated_at__
-            4. graph_signal    - normalized degree (how connected is this node)
-            5. confidence_signal - __confidence__ column or recall frequency fallback
-
-        Pipeline: gather -> signals -> temporal filter -> fuse -> HybridRAG -> type-weight -> top-k -> nucleus
+        Pipeline: gather → 3-signal fusion → top-N → reranker → results
         """
         target_k = q.limit.value if q.limit else 10
         oversample_factor = getattr(self, '_search_oversample', 5)
-        oversample = target_k * oversample_factor
 
         n = self.store._next_slot
         if n == 0:
@@ -305,99 +297,56 @@ class IntelligenceHandlers:
 
         live_mask = self._compute_live_mask(n)
         now_ms = int(time.time() * 1000)
-        planner = getattr(self, "_retrieval_planner", None)
         anchor_ms = getattr(q, 'at', None) or getattr(self, '_temporal_anchor_ms', None)
-        query_entities = re.findall(r"\b[A-Z][a-zA-Z0-9_-]{2,}(?:\s+[A-Z][a-zA-Z0-9_-]{2,}){0,3}\b", q.query)
-        plan = None
-        if planner is not None:
-            plan_ctx = planner.build_context(
-                query=q.query,
-                limit=target_k,
-                token_budget=q.tokens,
-                query_anchor_ms=anchor_ms,
-                query_time_range=None,
-                has_entities=bool(query_entities),
-                entity_candidates=query_entities,
-                has_temporal_signal=anchor_ms is not None,
-                has_observations=("observation" in self.store.string_table),
-                has_graph_edges=self.store.edge_matrices.total_edges > 0,
-                has_fts=bool(self._document_store),
-                has_vectors=bool(self._embedder and self._vector_store and self._vector_store.count() > 0),
-                has_reranker=self._reranker is not None,
-                rerank_oversample=getattr(self, "_rerank_oversample", 10),
-            )
-            plan = planner.plan(
-                plan_ctx,
-                explicit_overrides={
-                    "fusion_method": getattr(self, "_fusion_method", "weighted"),
-                    "use_nucleus": getattr(self, "_nucleus_expansion", False),
-                },
-            )
-            oversample = plan.candidate_k
 
-        # ── Stage 1: Candidate gathering (vector + BM25) ──────────────
-        query_vec = None
+        # Sentence query expansion
+        use_sqe = getattr(self, '_sentence_query_expansion', True)
+        if use_sqe:
+            from graphstore.algos.sentence_split import split_sentences
+            sentences = split_sentences(q.query)
+        else:
+            sentences = [q.query]
+        num_sentences = max(len(sentences), 1)
+
+        # ── Stage 1: Candidate Gathering ──────────────────────────────
         vs_mask = None
         vec_slots_np = np.empty(0, dtype=np.int64)
         vec_sims_np = np.empty(0, dtype=np.float64)
+
         if self._embedder and self._vector_store and self._vector_store.count() > 0:
-            query_vec = self._embedder.encode_queries([q.query])[0]
             vs_cap = self._vector_store._capacity
             vs_mask = np.zeros(n, dtype=bool)
             cap = min(n, vs_cap)
             vs_mask[:cap] = self._vector_store._has_vector[:cap]
             combined = live_mask & vs_mask
-            slots, dists = self._vector_store.search(
-                query_vec, k=oversample, mask=combined, oversample_factor=oversample_factor,
-            )
-            if len(slots) > 0:
-                vec_slots_np = np.asarray(slots, dtype=np.int64)
-                vec_sims_np = np.maximum(
-                    1.0 - np.asarray(dists, dtype=np.float64), 0.0
+
+            _vec_max_sim: dict[int, float] = {}
+            sent_vecs = self._embedder.encode_queries(sentences)
+            per_sent_oversample = max(oversample_factor, 2)
+            for svec in sent_vecs:
+                slots, dists = self._vector_store.search(
+                    svec, k=target_k * per_sent_oversample,
+                    mask=combined, oversample_factor=per_sent_oversample,
                 )
+                if len(slots) > 0:
+                    s_sims = np.maximum(1.0 - np.asarray(dists, dtype=np.float64), 0.0)
+                    for j, slot in enumerate(slots):
+                        slot_int = int(slot)
+                        sim = float(s_sims[j])
+                        if slot_int not in _vec_max_sim or sim > _vec_max_sim[slot_int]:
+                            _vec_max_sim[slot_int] = sim
 
-            # Sentence query expansion: split query into sentences, search each,
-            # merge candidate scores via max(similarity) per slot.
-            use_sqe = getattr(self, '_sentence_query_expansion', False)
-            if use_sqe:
-                from graphstore.algos.sentence_split import split_sentences
-                sentences = split_sentences(q.query)
-                if len(sentences) > 1:
-                    _vec_max_sim: dict[int, float] = {}
-                    for i, s in enumerate(vec_slots_np):
-                        _vec_max_sim[int(s)] = float(vec_sims_np[i])
-                    sent_vecs = self._embedder.encode_queries(sentences)
-                    for svec in sent_vecs:
-                        s_slots, s_dists = self._vector_store.search(
-                            svec, k=oversample, mask=combined, oversample_factor=oversample_factor,
-                        )
-                        if len(s_slots) > 0:
-                            s_sims = np.maximum(
-                                1.0 - np.asarray(s_dists, dtype=np.float64), 0.0
-                            )
-                            for j, slot in enumerate(s_slots):
-                                slot_int = int(slot)
-                                sim = float(s_sims[j])
-                                if slot_int not in _vec_max_sim or sim > _vec_max_sim[slot_int]:
-                                    _vec_max_sim[slot_int] = sim
-
-                    if _vec_max_sim:
-                        vec_slots_np = np.array(list(_vec_max_sim.keys()), dtype=np.int64)
-                        vec_sims_np = np.array(list(_vec_max_sim.values()), dtype=np.float64)
+            if _vec_max_sim:
+                vec_slots_np = np.array(list(_vec_max_sim.keys()), dtype=np.int64)
+                vec_sims_np = np.array(list(_vec_max_sim.values()), dtype=np.float64)
 
         bm25_slots_np = np.empty(0, dtype=np.int64)
         bm25_scores_np = np.empty(0, dtype=np.float64)
         if self._document_store:
-            hits = self._document_store.search_text(q.query, limit=oversample)
+            hits = self._document_store.search_text(q.query, limit=target_k * oversample_factor)
             if hits:
-                raw_slots = np.fromiter(
-                    (s for s, _ in hits), dtype=np.int64, count=len(hits),
-                )
-                raw_scores = np.abs(
-                    np.fromiter(
-                        (sc for _, sc in hits), dtype=np.float64, count=len(hits),
-                    )
-                )
+                raw_slots = np.fromiter((s for s, _ in hits), dtype=np.int64, count=len(hits))
+                raw_scores = np.abs(np.fromiter((sc for _, sc in hits), dtype=np.float64, count=len(hits)))
                 in_range = raw_slots < n
                 if in_range.any():
                     rs = raw_slots[in_range]
@@ -409,69 +358,57 @@ class IntelligenceHandlers:
         if len(vec_slots_np) == 0 and len(bm25_slots_np) == 0:
             return Result(kind="nodes", data=[], count=0)
 
+        # Adaptive oversample cap
+        max_candidates = min(num_sentences * oversample_factor * target_k, 200)
         slot_arr = np.union1d(vec_slots_np, bm25_slots_np)
+        if len(slot_arr) > max_candidates:
+            combined_scores = np.zeros(n, dtype=np.float64)
+            if len(vec_slots_np) > 0:
+                combined_scores[vec_slots_np] = vec_sims_np
+            if len(bm25_slots_np) > 0:
+                bm25_norm = np.zeros(n, dtype=np.float64)
+                bm25_norm[bm25_slots_np] = bm25_scores_np
+                m = bm25_norm.max()
+                if m > 0:
+                    bm25_norm /= m
+                combined_scores += bm25_norm
+            top_indices = np.argsort(-combined_scores)[:max_candidates]
+            slot_arr = top_indices
 
-        use_observations = plan.use_observations if plan is not None else False
-        obs_slots_np = np.empty(0, dtype=np.int64)
-        if use_observations and query_vec is not None and vs_mask is not None and ("observation" in self.store.string_table):
-            try:
-                obs_kind_mask = self.store._live_mask("observation")
-                obs_mask = obs_kind_mask & vs_mask
-                obs_slots, _obs_dists = self._vector_store.search(
-                    query_vec,
-                    k=max(target_k * 2, 1),
-                    mask=obs_mask,
-                    oversample_factor=oversample_factor,
-                )
-                if len(obs_slots) > 0:
-                    obs_slots_np = np.asarray(obs_slots, dtype=np.int64)
-                    slot_arr = np.union1d(slot_arr, obs_slots_np)
-            except Exception:
-                pass
+        # ── Stage 2: Signal Fusion ───────────────────────────────────
+        weights = getattr(self, '_remember_weights', [0.55, 0.25, 0.20])
 
-        # ── Stage 2: Signal computation (all 5 differentiate) ─────────
-
-        # Signal 1: Vector similarity
         vec_signal = np.zeros(n, dtype=np.float64)
         if len(vec_slots_np) > 0:
             vec_signal[vec_slots_np] = vec_sims_np
 
-        # Signal 2: BM25
         bm25_signal = np.zeros(n, dtype=np.float64)
         if len(bm25_slots_np) > 0:
             scattered = np.zeros(n, dtype=np.float64)
             scattered[bm25_slots_np] = bm25_scores_np
-            bm25_signal = _algo_normalize_bm25(scattered)
+            m = scattered.max()
+            if m > 0:
+                bm25_signal = scattered / m
 
-        # Co-occurrence boost: candidates found by BOTH vector AND BM25
+        # Co-occurrence bonus (counted once, not amplified by fusion weights)
+        co_bonus = np.zeros(n, dtype=np.float64)
         if len(vec_slots_np) > 0 and len(bm25_slots_np) > 0:
             vec_set = set(vec_slots_np.tolist())
             bm25_set = set(bm25_slots_np.tolist())
             both = np.array(list(vec_set & bm25_set), dtype=np.int64)
             if len(both) > 0:
-                vec_signal[both] *= (1.0 + bm25_signal[both])
+                co_bonus[both] = np.minimum(vec_signal[both], bm25_signal[both]) * 0.10
 
-        # Signal 3: Smart recency - per-slot best timestamp
-        # Use __event_at__ where available, __updated_at__ as fallback per-slot.
-        # This ensures batch-ingested data with different event dates gets
-        # real differentiation, not uniform 1.0.
         recency_signal = np.zeros(n, dtype=np.float64)
-        recency_signal[slot_arr] = 1.0
-        half_life = getattr(self, '_recency_half_life_days', 30.0)
+        half_life = getattr(self, '_recency_half_life_days', 7300.0)
         event_col = self.store.columns.get_column("__event_at__", n)
         updated_col = self.store.columns.get_column("__updated_at__", n)
 
-        # Compute recency per-slot using data-relative references.
-        # Candidates with __event_at__ decay relative to the newest event.
-        # Candidates without __event_at__ decay relative to the newest __updated_at__.
-        # The two groups use SEPARATE references so __updated_at__=now doesn't
-        # make all __event_at__ candidates score zero.
         has_event_mask = np.zeros(n, dtype=bool)
         if event_col is not None:
             _, e_pres, _ = event_col
             has_event_mask[:n] = e_pres[:n]
 
-        # Group 1: candidates with __event_at__
         if event_col is not None:
             e_data, e_pres, _ = event_col
             event_cands = slot_arr[has_event_mask[slot_arr]]
@@ -482,7 +419,6 @@ class IntelligenceHandlers:
                 e_scores = _algo_recency_decay(e_ts, e_pres_at, e_ref, half_life_days=half_life)
                 recency_signal[event_cands] = e_scores
 
-        # Group 2: candidates WITHOUT __event_at__ (fallback to __updated_at__)
         if updated_col is not None:
             u_data, u_pres, _ = updated_col
             no_event_cands = slot_arr[~has_event_mask[slot_arr]]
@@ -494,48 +430,38 @@ class IntelligenceHandlers:
                 u_scores = _algo_recency_decay(u_ts, u_pres_at, u_ref, half_life_days=half_life)
                 recency_signal[no_event_cands] = u_scores
 
-        # Signal 4: Graph degree + entity-hop boost + confidence override
-        # Base: normalized out-degree. Boost: messages sharing entities with
-        # the query get amplified (entity-hop). Override: explicit __confidence__.
+        # Graph signal (opt-in)
+        graph_enabled = getattr(self, '_graph_signal_enabled', False)
         graph_signal = np.zeros(n, dtype=np.float64)
-        combined_mat = self.store.edge_matrices.get(None)
-        if combined_mat is not None:
-            mat_n = combined_mat.shape[0]
-            out_deg = np.diff(combined_mat.indptr).astype(np.float64)
-            max_deg = max(1.0, float(out_deg.max()))
-            valid = slot_arr[slot_arr < mat_n]
-            graph_signal[valid] = out_deg[valid] / max_deg
+        if graph_enabled:
+            combined_mat = self.store.edge_matrices.get(None)
+            if combined_mat is not None:
+                mat_n = combined_mat.shape[0]
+                out_deg = np.diff(combined_mat.indptr).astype(np.float64)
+                max_deg = max(1.0, float(out_deg.max()))
+                valid = slot_arr[slot_arr < mat_n]
+                graph_signal[valid] = out_deg[valid] / max_deg
 
-        # [entity-hop: no effect on LoCoMo - Caroline/Melanie too common]
-        conf_col = self.store.columns.get_column("__confidence__", n)
-        if conf_col is not None:
-            col_data, col_pres, _ = conf_col
-            pres_at = col_pres[slot_arr]
-            if pres_at.any():
-                clamped = np.clip(col_data[slot_arr].astype(np.float64), 0.0, 1.0)
-                graph_signal[slot_arr] = np.where(pres_at, clamped, graph_signal[slot_arr])
+        # Fusion
+        fusion_method = getattr(self, '_fusion_method', 'weighted')
+        if fusion_method == 'weighted':
+            w = weights if len(weights) >= 3 else [0.55, 0.25, 0.20]
+            if graph_enabled and len(weights) >= 4:
+                base_final = (w[0] * vec_signal + w[1] * bm25_signal +
+                              w[2] * graph_signal + w[3] * recency_signal)
+            else:
+                base_final = w[0] * vec_signal + w[1] * bm25_signal + w[2] * recency_signal
+        else:
+            signals = [vec_signal, bm25_signal, recency_signal]
+            if graph_enabled:
+                signals.append(graph_signal)
+            base_final = _algo_rrf_fusion(*signals, candidate_slots=slot_arr,
+                                           k_rrf=max(getattr(self, '_rrf_k', 60.0), 1.0))
 
-        # Signal 5: Recall frequency + confidence fallback
-        # Nodes recalled more often are more likely relevant (retrieval feedback).
-        # When no recall history, uses confidence if available; else baseline 0.5.
-        recall_signal = np.zeros(n, dtype=np.float64)
-        recall_col = self.store.columns.get_column("__recall_count__", n)
-        if recall_col is not None:
-            col_data, col_pres, _ = recall_col
-            pres_at = col_pres[slot_arr]
-            if pres_at.any():
-                counts = col_data[slot_arr].astype(np.float64)
-                max_recalls = max(1.0, float(counts[pres_at].max()))
-                recall_signal[slot_arr] = np.where(
-                    pres_at, counts / max_recalls, 0.0,
-                )
+        base_final += co_bonus
 
-        # ── Stage 3: Temporal-first filtering (TSM-inspired) ──────────
-        temporal_filtered_slots = None
-        has_temporal = False
-
-        use_temporal_filter = plan.use_temporal_filter if plan is not None else anchor_ms is not None
-        if use_temporal_filter and anchor_ms is not None:
+        # ── Stage 3: Temporal Filter ─────────────────────────────────
+        if anchor_ms is not None:
             t_event_col = self.store.columns.get_column("__event_at__", n)
             if t_event_col is not None:
                 col_data, col_pres, _ = t_event_col
@@ -545,160 +471,27 @@ class IntelligenceHandlers:
                 sa_pres = col_pres[slot_arr]
                 sa_dist = np.abs(col_data[slot_arr].astype(np.float64) - anchor_ms)
                 in_range[slot_arr] = np.where(sa_pres, sa_dist <= range_ms, True)
-
                 temporal_hits = slot_arr[in_range[slot_arr]]
                 if len(temporal_hits) >= min(3, len(slot_arr)):
-                    temporal_filtered_slots = temporal_hits
-                    has_temporal = True
+                    allowed = np.zeros(n, dtype=np.float64)
+                    allowed[temporal_hits] = 1.0
+                    base_final *= allowed
 
-        fusion_slots = temporal_filtered_slots if temporal_filtered_slots is not None else slot_arr
-
-        # ── Stage 4: Fusion ───────────────────────────────────────────
-        recency_mode = getattr(self, '_recency_mode', 'multiplicative')
-        multiplicative = recency_mode == 'multiplicative'
-        recency_for_fusion = np.zeros(n, dtype=np.float64) if multiplicative else recency_signal
-
-        fusion_method = plan.fusion_method if plan is not None else getattr(self, '_fusion_method', 'rrf')
-        if fusion_method not in ('rrf', 'weighted'):
-            fusion_method = 'rrf'
-        if fusion_method == 'rrf':
-            rrf_k = max(getattr(self, '_rrf_k', 60.0), 1.0)
-            base_final = _algo_rrf_fusion(
-                vec_signal, bm25_signal, recency_for_fusion,
-                graph_signal, recall_signal,
-                candidate_slots=fusion_slots,
-                k_rrf=rrf_k,
-            )
-        else:
-            weights = getattr(self, '_remember_weights', [0.30, 0.20, 0.15, 0.20, 0.15])
-            base_final = _algo_weighted_fusion(
-                vec_signal, bm25_signal, recency_for_fusion,
-                graph_signal, recall_signal, list(weights),
-            )
-
-        # ── Stage 5: Post-fusion modifiers ────────────────────────────
-        # Enforce temporal hard filter
-        if temporal_filtered_slots is not None:
-            allowed = np.zeros(n, dtype=np.float64)
-            allowed[fusion_slots] = 1.0
-            base_final *= allowed
-
-        # Temporal soft proximity boost within range
-        if has_temporal:
-            t_event_col = self.store.columns.get_column("__event_at__", n)
-            if t_event_col is not None:
-                col_data, col_pres, _ = t_event_col
-                decay_days = getattr(self, '_temporal_decay_days', 365.0)
-                t_scores = _algo_temporal_proximity(
-                    col_data[fusion_slots], col_pres[fusion_slots],
-                    anchor_ms, decay_days=decay_days,
-                )
-                base_final[fusion_slots] *= t_scores
-
-        # Multiplicative recency (post-fusion)
-        if multiplicative:
-            base_final[fusion_slots] *= recency_signal[fusion_slots]
         base_final *= live_mask
 
-        # ── Stage 6: HybridRAG graph expansion ────────────────────────
-        graph_weight = getattr(self, '_hybridrag_weight', 0.15)
-        min_seeds = getattr(self, '_hybridrag_min_seeds', 5)
-        seed_count = min(len(fusion_slots), max(min_seeds, target_k // 2))
-        final_scores = base_final.copy()
-
-        use_graph_expansion = plan.use_graph_expansion if plan is not None else True
-        if use_graph_expansion and seed_count > 0 and self.store.edge_matrices.total_edges > 0:
-            base_order = fusion_slots[np.argsort(-base_final[fusion_slots])]
-            seed_slots = base_order[:seed_count].astype(np.int64)
-            seed_scores = base_final[seed_slots].astype(np.float32)
-
-            mat, mat_delta = self.store.edge_matrices.get_combined_spread_split()
-            if mat is not None or mat_delta is not None:
-                if mat is not None and mat.shape[0] < n:
-                    mat = resize_csr(mat, n)
-                if mat_delta is not None and mat_delta.shape[0] < n:
-                    mat_delta = resize_csr(mat_delta, n)
-
-                activation = _algo_spreading_activation(
-                    matrix_t=mat,
-                    cue_slot=seed_slots,
-                    depth=getattr(self, '_recall_depth', 2),
-                    decay=getattr(self, '_recall_decay', 0.7),
-                    live_mask=live_mask,
-                    matrix_t_delta=mat_delta,
-                    cue_scores=seed_scores,
-                )
-
-                # FIX: Mask activation to respect temporal filter
-                if temporal_filtered_slots is not None:
-                    temporal_mask = np.zeros(n, dtype=np.float64)
-                    temporal_mask[fusion_slots] = 1.0
-                    activation *= temporal_mask
-
-                act_max = activation.max()
-                if act_max > 0:
-                    activation /= act_max
-                    final_scores = (1 - graph_weight) * base_final + graph_weight * activation
-
-        # ── Stage 7: Type-weighted scoring ────────────────────────────
-        type_weights = getattr(self, '_type_weights', None)
-        valid_slots = np.where(final_scores > 0)[0]
-        if type_weights and len(valid_slots) > 0:
-            lookup = self.store.string_table.lookup
-            kind_ids = self.store.node_kinds
-            for s in valid_slots:
-                kind_str = lookup(int(kind_ids[s]))
-                w = type_weights.get(kind_str, 1.0)
-                if w != 1.0:
-                    final_scores[s] *= w
-
-        # ── Stage 8: Top-k selection + materialization ────────────────
+        # ── Stage 4: Top-N Selection + Materialization ───────────────
+        valid_slots = np.where(base_final > 0)[0]
         if len(valid_slots) == 0:
             return Result(kind="nodes", data=[], count=0)
 
-        order = valid_slots[np.argsort(-final_scores[valid_slots])]
+        order = valid_slots[np.argsort(-base_final[valid_slots])]
 
-        use_reranker = plan.use_reranker if plan is not None else False
-        if use_reranker and getattr(self, "_reranker", None) and len(order) > 0:
-            import logging
-            logger = logging.getLogger(__name__)
-            oversample_multiplier = getattr(self, "_rerank_oversample", 10)
-            rerank_k = min(len(order), target_k * oversample_multiplier)
-            top_slots = order[:rerank_k]
-            texts = []
-            valid_top = []
-            for slot in top_slots:
-                slot = int(slot)
-                node = self.store._materialize_slot(slot)
-                if node is None:
-                    continue
-                if q.where and not self._eval_where(q.where.expr, node):
-                    continue
-                text = node.get("text") or node.get("summary") or node.get("claim") or ""
-                texts.append(text)
-                valid_top.append(slot)
-            if texts:
-                try:
-                    logger.info("Reranking %d candidates for query: %s", len(texts), q.query[:50])
-                    rerank_scores = self._reranker.score(q.query, texts)
-                    ranked = sorted(zip(rerank_scores, valid_top), reverse=True)
-                    reranked_slots = np.array([s for _, s in ranked], dtype=np.int64)
-                    
-                    # Correctly rebuild order: reranked_slots first, then everything else in order
-                    # avoiding duplicates from the reranked set.
-                    reranked_set = set(reranked_slots.tolist())
-                    remaining = np.array([s for s in order if s not in reranked_set], dtype=np.int64)
-                    order = np.concatenate((reranked_slots, remaining))
-                    
-                    # update final_scores so the top-K selection loop assigns the rerank score
-                    for score, slot in ranked:
-                        final_scores[slot] = score
-                except Exception as e:
-                    logger.warning("Reranking failed: %s", e)
-
+        # Materialize candidates for reranker
         results = []
         retrieved_slots = []
         running_tokens = 0
+        texts_for_rerank = []
+
         for slot in order:
             slot = int(slot)
             node = self.store._materialize_slot(slot)
@@ -707,17 +500,16 @@ class IntelligenceHandlers:
             if q.where and not self._eval_where(q.where.expr, node):
                 continue
 
-            node["_remember_score"] = round(float(final_scores[slot]), 4)
+            node["_remember_score"] = round(float(base_final[slot]), 4)
             node["_vector_sim"] = round(float(vec_signal[slot]), 4)
             node["_bm25_score"] = round(float(bm25_signal[slot]), 4)
             node["_recency_score"] = round(float(recency_signal[slot]), 4)
-            node["_graph_score"] = round(float(graph_signal[slot]), 4)
-            node["_recall_score"] = round(float(recall_signal[slot]), 4)
-            if has_temporal:
-                node["_temporal_filtered"] = True
 
             results.append(node)
             retrieved_slots.append(slot)
+
+            text = node.get("content") or node.get("summary") or node.get("text") or ""
+            texts_for_rerank.append(text)
 
             if q.tokens is not None:
                 running_tokens += len(
@@ -725,30 +517,42 @@ class IntelligenceHandlers:
                 ) // 4
                 if running_tokens >= q.tokens:
                     break
-            elif len(results) >= target_k:
-                break
 
-        buf = getattr(self._runtime, "similarity_buffer", None)
-        if buf is not None and results:
-            buf.append(results[0].get("_vector_sim", 0.0))
+        # Reranker stage
+        reranker = getattr(self, '_reranker', None)
+        if reranker is not None and len(texts_for_rerank) > target_k:
+            try:
+                rerank_scores = reranker.score(q.query, texts_for_rerank)
+                ranked = sorted(zip(rerank_scores, results, retrieved_slots),
+                               key=lambda x: x[0], reverse=True)
+                results = [r for _, r, _ in ranked[:target_k]]
+                retrieved_slots = [s for _, _, s in ranked[:target_k]]
+                # Update scores with reranker scores
+                for score, node, slot in ranked[:target_k]:
+                    node["_remember_score"] = round(float(score), 4)
+            except Exception:
+                results = results[:target_k]
+                retrieved_slots = retrieved_slots[:target_k]
+        else:
+            results = results[:target_k]
+            retrieved_slots = retrieved_slots[:target_k]
 
-        # ── Stage 9: Nucleus expansion (context windowing) ────────────
-        # Neighbors are NOT filtered by q.where - they provide context,
-        # not primary results. Only live_mask and token budget are enforced.
-        nucleus_on = plan.use_nucleus if plan is not None else getattr(self, '_nucleus_expansion', False)
+        # ── Optional: Nucleus Expansion ──────────────────────────────
+        nucleus_on = getattr(self, '_nucleus_expansion', False)
+        meta = {}
         if nucleus_on and results and self.store.edge_matrices.total_edges > 0:
-            max_nb = getattr(self, '_nucleus_max_neighbors', 3)
+            max_nb = getattr(self, '_nucleus_neighbors_per_hop', 3)
             n_hops = getattr(self, '_nucleus_hops', 1)
+            min_text = getattr(self, '_nucleus_min_text_length', 20)
+            allowed_kinds = set(getattr(self, '_nucleus_allowed_kinds',
+                                        ["message", "chunk", "section"]))
             seen_slots = set(retrieved_slots)
             frontier = list(retrieved_slots)
             nucleus_results = []
-            token_budget = q.tokens
-            current_tokens = running_tokens
             for _hop in range(n_hops):
                 next_frontier = []
                 for seed_slot in frontier:
                     nb_slots = self.store.edge_matrices.neighbors_out(seed_slot, edge_type=None)
-                    added = 0
                     for nb in nb_slots:
                         nb = int(nb)
                         if nb in seen_slots or not live_mask[nb]:
@@ -756,32 +560,28 @@ class IntelligenceHandlers:
                         nb_node = self.store._materialize_slot(nb)
                         if nb_node is None:
                             continue
-                        # Skip nodes without meaningful text content
-                        nb_text = (nb_node.get("content") or nb_node.get("summary")
-                                   or nb_node.get("claim") or nb_node.get("text") or "")
-                        if len(nb_text) < 20:
-                            seen_slots.add(nb)  # still mark seen to avoid revisiting
+                        nb_kind = nb_node.get("kind", "")
+                        if nb_kind not in allowed_kinds:
+                            seen_slots.add(nb)
                             continue
-                        if token_budget is not None:
-                            node_tokens = len(
-                                nb_node.get("summary", "") + nb_node.get("claim", "") + nb_node.get("text", "")
-                            ) // 4
-                            if current_tokens + node_tokens > token_budget:
-                                break
-                            current_tokens += node_tokens
+                        nb_text = (nb_node.get("content") or nb_node.get("summary")
+                                   or nb_node.get("text") or "")
+                        if len(nb_text) < min_text:
+                            seen_slots.add(nb)
+                            continue
                         nb_node["_nucleus"] = True
-                        nb_node["_remember_score"] = round(float(final_scores[nb]) if nb < n else 0.0, 4)
                         nucleus_results.append(nb_node)
                         seen_slots.add(nb)
                         next_frontier.append(nb)
-                        added += 1
-                        if added >= max_nb:
+                        if len(next_frontier) >= max_nb:
                             break
                 frontier = next_frontier
-            results.extend(nucleus_results)
+            meta["nucleus"] = nucleus_results
 
-        # ── Stage 10: Retrieval feedback ──────────────────────────────
+        # ── Retrieval Feedback ───────────────────────────────────────
         for slot in retrieved_slots:
+            if slot is None:
+                continue
             try:
                 if self.store.columns.has_column("__recall_count__"):
                     if self.store.columns._presence["__recall_count__"][slot]:
@@ -795,17 +595,8 @@ class IntelligenceHandlers:
             except Exception:
                 pass
 
-        meta = {}
-        if plan is not None:
-            meta["planner"] = {
-                "candidate_k": plan.candidate_k,
-                "use_temporal_filter": plan.use_temporal_filter,
-                "use_graph_expansion": plan.use_graph_expansion,
-                "use_observations": plan.use_observations,
-                "use_nucleus": plan.use_nucleus,
-                "fusion_method": plan.fusion_method,
-                "fallback_chain": list(plan.fallback_chain),
-                "notes": list(plan.notes),
-            }
+        buf = getattr(self._runtime, "similarity_buffer", None)
+        if buf is not None and results:
+            buf.append(results[0].get("_vector_sim", 0.0))
 
         return Result(kind="nodes", data=results, count=len(results), meta=meta)

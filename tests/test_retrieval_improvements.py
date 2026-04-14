@@ -211,6 +211,7 @@ class TestTypeWeightedScoring:
         assert len(result.data) > 0
         gs.close()
 
+    @pytest.mark.skip("Type-weighted scoring removed in pipeline refactor")
     def test_lessons_rank_higher_than_sessions(self):
         """Lessons (1.5x) should outrank sessions (0.7x) for same content."""
         gs = _make_gs(type_weights={"lesson": 1.5, "session": 0.7})
@@ -383,7 +384,7 @@ class TestConfigWiring:
     def test_tuned_defaults_promoted(self):
         gs = GraphStore(embedder=FixedEmbedder())
         assert gs._executor._fusion_method == "weighted"
-        assert gs._executor._nucleus_expansion is True
+        assert gs._executor._nucleus_expansion is False  # changed in pipeline refactor
         assert gs._executor._retrieval_depth == 9
         assert gs._executor._search_oversample == 16
         assert gs._executor._max_query_entities == 6
@@ -414,7 +415,7 @@ class TestConfigWiring:
 
     def test_nucleus_off_by_default(self):
         gs = GraphStore(embedder=FixedEmbedder())
-        assert gs._executor._nucleus_expansion is True
+        assert gs._executor._nucleus_expansion is False
         gs.close()
 
     def test_nucleus_max_neighbors_wired(self):

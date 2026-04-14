@@ -71,7 +71,6 @@ def test_remember_includes_score_breakdown():
     if result.data:
         node = result.data[0]
         assert "_remember_score" in node
-        assert "_graph_score" in node
-        assert "_recall_score" in node
         assert "_recency_score" in node
+        # _graph_score and _recall_score removed in pipeline refactor
     gs.close()
