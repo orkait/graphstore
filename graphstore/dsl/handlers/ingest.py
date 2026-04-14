@@ -149,12 +149,67 @@ class IngestHandlers:
                     (chunk_slot, fts_text))
 
             embed_text = f"{chunk.heading}: {chunk.text}" if chunk.heading else chunk.text
-            embed_batch.append((chunk_slot, embed_text))
 
             if chunk.heading and chunk.heading in sections:
                 self.store.put_edge(sections[chunk.heading], chunk_id, "has_chunk")
             else:
                 self.store.put_edge(parent_id, chunk_id, "has_chunk")
+
+            # Sentence splitting + entity extraction
+            from graphstore.algos.sentence_split import split_sentences
+            from graphstore.ingest.entity_extract import (
+                extract_entities, CoReferenceResolver, slug as _ent_slug,
+            )
+
+            resolver = CoReferenceResolver()
+            entity_model_dir = getattr(self, '_entity_model_dir', None)
+            entity_score_threshold = getattr(self, '_entity_score_threshold', 0.6)
+            entity_max_length = getattr(self, '_entity_max_length', 256)
+            all_entities: dict[str, str] = {}
+
+            sentences = split_sentences(chunk.text)
+            for si, sent_text in enumerate(sentences):
+                sent_id = f"{chunk_id}:s{si}"
+                sent_slot = self.store.put_node(sent_id, "sentence", {
+                    "text": sent_text,
+                    "parent_chunk": chunk_id,
+                })
+                set_reserved(sent_slot, "__blob_state__", "warm")
+                embed_batch.append((sent_slot, sent_text))
+                self.store.put_edge(chunk_id, sent_id, "has_sentence")
+
+                # Entity extraction
+                if entity_model_dir:
+                    ents = extract_entities(
+                        sent_text, model_dir=entity_model_dir,
+                        score_threshold=entity_score_threshold,
+                        max_length=entity_max_length,
+                    )
+                    # Apply co-reference
+                    resolved = resolver.resolve(sent_text)
+                    for name in resolved:
+                        s = _ent_slug(name)
+                        if s and s not in all_entities:
+                            all_entities[s] = name
+                    for ent in ents:
+                        s = _ent_slug(ent.text)
+                        if s and s not in all_entities:
+                            all_entities[s] = ent.text
+                            if ent.label == "PER":
+                                resolver.update_context(ent.text)
+
+            # Create entity nodes and mention edges
+            for ent_slug_val, ent_display in all_entities.items():
+                ent_id = f"ent:{ent_slug_val}"
+                try:
+                    self.store.put_node(ent_id, "entity", {"name": ent_display})
+                except Exception:
+                    pass
+                # Mention edge from chunk to entity
+                try:
+                    self.store.put_edge(chunk_id, ent_id, "mentions")
+                except Exception:
+                    pass
 
         if ds:
             ds._conn.commit()
