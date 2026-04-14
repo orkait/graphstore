@@ -1,6 +1,7 @@
-# Graphstore Playground
+# Graphstore Playground (Under Development)
 
 Interactive browser-based workbench for the graphstore DSL. Write queries, execute them, and visualize the graph in real-time.
+
 
 ## Quick Start
 

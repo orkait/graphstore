@@ -31,5 +31,6 @@ class RuntimeState:
     vector_store: "VectorStore | None" = None
     document_store: "DocumentStore | None" = None
     embedder: "Embedder | None" = None
+    reranker: "Reranker | None" = None
     conn: "sqlite3.Connection | None" = None
     similarity_buffer: Any = field(default_factory=lambda: deque(maxlen=100))

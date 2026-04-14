@@ -28,6 +28,7 @@ class CoreConfig(msgspec.Struct, frozen=True):
     compact_threshold: float = 0.2
     string_gc_threshold: float = 3.0
     eviction_target_ratio: float = 0.8
+    use_compression: bool = False
     protected_kinds: list[str] = msgspec.field(default_factory=lambda: ["schema", "config", "system"])
 
 
@@ -41,6 +42,14 @@ class VectorConfig(msgspec.Struct, frozen=True):
     search_oversample: int = 16
     model2vec_model: str = "minishlab/M2V_base_output"
     model_cache_dir: str | None = None
+    reranker: str | None = None
+    reranker_model: str | None = None
+    reranker_model_dir: str | None = None
+    reranker_projector_path: str | None = None
+    reranker_gpu_layers: int = 0
+    reranker_max_length: int | None = None
+    reranker_onnx_file: str = "onnx/model_int8.onnx"
+    rerank_oversample: int = 10
 
 
 class DocumentConfig(msgspec.Struct, frozen=True):
@@ -84,6 +93,7 @@ class DslConfig(msgspec.Struct, frozen=True):
     nucleus_expansion: bool = True  # benchmark-tuned default; may append neighbors after top-k
     nucleus_hops: int = 2
     nucleus_max_neighbors: int = 3
+    sentence_query_expansion: bool = False  # split query into sentences, search each, merge by max(sim)
     cache_gc_threshold: int = 200
 
 
@@ -154,7 +164,9 @@ _SECTION_MAP: dict[str, tuple[type, dict[str, type]]] = {
 # Flat kwarg name -> (section, field) for constructor shortcuts
 _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "ceiling_mb":           ("core", "ceiling_mb"),
+    "initial_capacity":     ("core", "initial_capacity"),
     "eviction_target_ratio":("core", "eviction_target_ratio"),
+    "use_compression":      ("core", "use_compression"),
     "remember_weights":     ("dsl", "remember_weights"),
     "fusion_method":        ("dsl", "fusion_method"),
     "rrf_k":                ("dsl", "rrf_k"),
@@ -176,9 +188,18 @@ _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "nucleus_expansion":    ("dsl", "nucleus_expansion"),
     "nucleus_hops":         ("dsl", "nucleus_hops"),
     "nucleus_max_neighbors":("dsl", "nucleus_max_neighbors"),
+    "sentence_query_expansion": ("dsl", "sentence_query_expansion"),
     "search_oversample":    ("vector", "search_oversample"),
     "similarity_threshold": ("vector", "similarity_threshold"),
     "duplicate_threshold":  ("vector", "duplicate_threshold"),
+    "reranker":             ("vector", "reranker"),
+    "reranker_model":       ("vector", "reranker_model"),
+    "reranker_model_dir":   ("vector", "reranker_model_dir"),
+    "reranker_projector_path":("vector", "reranker_projector_path"),
+    "reranker_gpu_layers":  ("vector", "reranker_gpu_layers"),
+    "reranker_max_length":  ("vector", "reranker_max_length"),
+    "reranker_onnx_file":   ("vector", "reranker_onnx_file"),
+    "rerank_oversample":    ("vector", "rerank_oversample"),
     "fts_tokenizer":        ("document", "fts_tokenizer"),
 }
 

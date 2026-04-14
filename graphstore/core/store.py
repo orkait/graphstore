@@ -26,9 +26,9 @@ from graphstore.core.strings import StringTable
 class CoreStore:
     """In-memory graph store backed by numpy arrays and sparse matrices."""
 
-    def __init__(self, ceiling_bytes: int = DEFAULT_CEILING_BYTES, capacity: int = 1024):
+    def __init__(self, ceiling_bytes: int = DEFAULT_CEILING_BYTES, capacity: int = 1024, use_compression: bool = False):
         self.string_table = StringTable()
-        self._edge_matrices = EdgeMatrices()
+        self._edge_matrices = EdgeMatrices(use_compression=use_compression)
         self._ceiling_bytes = ceiling_bytes
 
         # Node storage - pre-allocate
