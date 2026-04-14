@@ -75,7 +75,7 @@ pattern: match_step (arrow match_step)+
 match_step: "(" STRING ")" -> bound_step
           | "(" IDENTIFIER step_where? ")" -> var_step
 step_where: "WHERE" expr
-arrow: "-[" expr "]->"
+arrow: "-[" expr? "]->"
 
 // --- Writes ---
 ?write_query: create_node | update_node | upsert_node
@@ -158,12 +158,13 @@ and_expr: not_expr "AND" and_expr | not_expr
 not_expr: "NOT" not_expr -> not_term
         | atom
 ?atom: condition | contains_cond | like_cond | in_cond | "(" expr ")" | degree_condition | similar_cond
-condition: IDENTIFIER OP value
-contains_cond: IDENTIFIER "CONTAINS" STRING
-like_cond: IDENTIFIER "LIKE" STRING
-in_cond: IDENTIFIER "IN" "(" value ("," value)* ")"
-similar_cond: "SIMILAR" "(" IDENTIFIER "," STRING ")" ">" NUMBER
-degree_condition: degree_kw IDENTIFIER? OP NUMBER
+condition: field_ref OP value
+field_ref: IDENTIFIER ("." IDENTIFIER)?
+contains_cond: field_ref "CONTAINS" STRING
+like_cond: field_ref "LIKE" STRING
+in_cond: field_ref "IN" "(" value ("," value)* ")"
+similar_cond: "SIMILAR" "(" field_ref "," STRING ")" ">" NUMBER
+degree_condition: degree_kw field_ref? OP NUMBER
 degree_kw: "INDEGREE" -> indegree
           | "OUTDEGREE" -> outdegree
 
