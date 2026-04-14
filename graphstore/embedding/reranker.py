@@ -126,20 +126,15 @@ class GGUFReranker:
             ) from e
 
         # 1. Metadata-only pass to extract native n_ctx
-        # We use n_ctx=1 and n_gpu_layers=0 to minimize VRAM during the check
         temp_model = Llama(model_path=model_path, n_ctx=1, n_gpu_layers=0, verbose=False)
-        # llama-cpp-python exposes metadata in the .metadata attribute
         native_ctx = int(temp_model.metadata.get("llama.context_length", 2048))
-        # Important: clear the temp model immediately
         del temp_model
 
-        # 2. Final initialization using native or user-provided budget
-        actual_ctx = n_ctx if n_ctx is not None else native_ctx
+        # 2. Cap n_ctx to prevent massive VRAM allocation for KV cache
+        actual_ctx = n_ctx if n_ctx is not None else min(native_ctx, 16384)
 
-        # n_batch controls the compute buffer size on GPU. We only ever
-        # embed single text at a time, so cap it at 2048 to avoid
-        # allocating the full context window on GPU (which causes OOM
-        # when combined with an ONNX embedder on the same GPU).
+        # n_batch controls compute buffer size. Cap at 2048 since we embed
+        # one document at a time.
         actual_batch = min(actual_ctx, 2048)
 
         self._model = Llama(
