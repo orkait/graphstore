@@ -29,6 +29,46 @@ from graphstore.core.errors import EmbedderRequired, NodeNotFound, VectorError, 
 
 class IntelligenceHandlers:
 
+    _NUCLEUS_STRUCTURAL_EDGES = ("next", "prev", "has_section", "has_chunk")
+
+    def _resolve_remember_parent_slot(self, slot: int, n: int) -> int:
+        """Collapse sentence hits back to their parent message/chunk slot."""
+        if slot < 0 or slot >= n:
+            return slot
+
+        kind = self.store.string_table.lookup(int(self.store.node_kinds[slot]))
+        if kind != "sentence":
+            return slot
+
+        for field in ("parent_chunk", "parent_node"):
+            col_info = self.store.columns.get_column(field, n)
+            if col_info is None:
+                continue
+            col_data, col_pres, _ = col_info
+            if not col_pres[slot]:
+                continue
+            parent_slot = self.store.id_to_slot.get(int(col_data[slot]))
+            if parent_slot is not None:
+                return int(parent_slot)
+        return slot
+
+    def _nucleus_neighbors(self, slot: int) -> np.ndarray:
+        """Traverse only structural edges for nucleus expansion."""
+        seen: set[int] = set()
+        neighbors: list[int] = []
+        for edge_type in self._NUCLEUS_STRUCTURAL_EDGES:
+            for arr in (
+                self.store.edge_matrices.neighbors_out(slot, edge_type=edge_type),
+                self.store.edge_matrices.neighbors_in(slot, edge_type=edge_type),
+            ):
+                for nb in arr:
+                    nb_int = int(nb)
+                    if nb_int in seen:
+                        continue
+                    seen.add(nb_int)
+                    neighbors.append(nb_int)
+        return np.asarray(neighbors, dtype=np.int32)
+
     @handles(RecallQuery)
     def _recall(self, q: RecallQuery) -> Result:
         """RECALL: spreading activation from a cue node."""
@@ -298,6 +338,7 @@ class IntelligenceHandlers:
         live_mask = self._compute_live_mask(n)
         now_ms = int(time.time() * 1000)
         anchor_ms = getattr(q, 'at', None) or getattr(self, '_temporal_anchor_ms', None)
+        at_range = getattr(q, 'at_range', None)
 
         # Sentence query expansion
         use_sqe = getattr(self, '_sentence_query_expansion', True)
@@ -331,7 +372,7 @@ class IntelligenceHandlers:
                 if len(slots) > 0:
                     s_sims = np.maximum(1.0 - np.asarray(dists, dtype=np.float64), 0.0)
                     for j, slot in enumerate(slots):
-                        slot_int = int(slot)
+                        slot_int = self._resolve_remember_parent_slot(int(slot), n)
                         sim = float(s_sims[j])
                         if slot_int not in _vec_max_sim or sim > _vec_max_sim[slot_int]:
                             _vec_max_sim[slot_int] = sim
@@ -352,8 +393,21 @@ class IntelligenceHandlers:
                     rs = raw_slots[in_range]
                     rsc = raw_scores[in_range]
                     live_pick = live_mask[rs]
-                    bm25_slots_np = rs[live_pick]
+                    bm25_slots_np = np.array(
+                        [self._resolve_remember_parent_slot(int(slot), n) for slot in rs[live_pick]],
+                        dtype=np.int64,
+                    )
                     bm25_scores_np = rsc[live_pick]
+                    if len(bm25_slots_np) > 0:
+                        bm25_max: dict[int, float] = {}
+                        for slot, score in zip(bm25_slots_np, bm25_scores_np):
+                            slot_int = int(slot)
+                            score_f = float(score)
+                            prev = bm25_max.get(slot_int)
+                            if prev is None or score_f > prev:
+                                bm25_max[slot_int] = score_f
+                        bm25_slots_np = np.array(list(bm25_max.keys()), dtype=np.int64)
+                        bm25_scores_np = np.array(list(bm25_max.values()), dtype=np.float64)
 
         if len(vec_slots_np) == 0 and len(bm25_slots_np) == 0:
             return Result(kind="nodes", data=[], count=0)
@@ -446,36 +500,32 @@ class IntelligenceHandlers:
         fusion_method = getattr(self, '_fusion_method', 'weighted')
         if fusion_method == 'weighted':
             w = weights if len(weights) >= 3 else [0.55, 0.25, 0.20]
-            if graph_enabled and len(weights) >= 4:
-                base_final = (w[0] * vec_signal + w[1] * bm25_signal +
-                              w[2] * graph_signal + w[3] * recency_signal)
-            else:
-                base_final = w[0] * vec_signal + w[1] * bm25_signal + w[2] * recency_signal
+            third_signal = graph_signal if graph_enabled else recency_signal
+            base_final = w[0] * vec_signal + w[1] * bm25_signal + w[2] * third_signal
         else:
-            signals = [vec_signal, bm25_signal, recency_signal]
-            if graph_enabled:
-                signals.append(graph_signal)
+            signals = [vec_signal, bm25_signal, graph_signal if graph_enabled else recency_signal]
             base_final = _algo_rrf_fusion(*signals, candidate_slots=slot_arr,
                                            k_rrf=max(getattr(self, '_rrf_k', 60.0), 1.0))
 
         base_final += co_bonus
 
         # ── Stage 3: Temporal Filter ─────────────────────────────────
-        if anchor_ms is not None:
+        if at_range is not None or anchor_ms is not None:
             t_event_col = self.store.columns.get_column("__event_at__", n)
-            if t_event_col is not None:
+            if t_event_col is None:
+                base_final *= 0.0
+            else:
                 col_data, col_pres, _ = t_event_col
-                decay_days = getattr(self, '_temporal_decay_days', 365.0)
-                range_ms = int(decay_days * 86400000)
-                in_range = np.zeros(n, dtype=bool)
+                if at_range is not None:
+                    start_ms, end_ms = at_range
+                else:
+                    start_ms = end_ms = int(anchor_ms)
+                allowed = np.zeros(n, dtype=np.float64)
                 sa_pres = col_pres[slot_arr]
-                sa_dist = np.abs(col_data[slot_arr].astype(np.float64) - anchor_ms)
-                in_range[slot_arr] = np.where(sa_pres, sa_dist <= range_ms, True)
-                temporal_hits = slot_arr[in_range[slot_arr]]
-                if len(temporal_hits) >= min(3, len(slot_arr)):
-                    allowed = np.zeros(n, dtype=np.float64)
-                    allowed[temporal_hits] = 1.0
-                    base_final *= allowed
+                sa_values = col_data[slot_arr].astype(np.int64)
+                in_range = sa_pres & (sa_values >= start_ms) & (sa_values <= end_ms)
+                allowed[slot_arr[in_range]] = 1.0
+                base_final *= allowed
 
         base_final *= live_mask
 
@@ -552,7 +602,7 @@ class IntelligenceHandlers:
             for _hop in range(n_hops):
                 next_frontier = []
                 for seed_slot in frontier:
-                    nb_slots = self.store.edge_matrices.neighbors_out(seed_slot, edge_type=None)
+                    nb_slots = self._nucleus_neighbors(seed_slot)
                     for nb in nb_slots:
                         nb = int(nb)
                         if nb in seen_slots or not live_mask[nb]:

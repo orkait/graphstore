@@ -22,6 +22,14 @@ import msgspec
 _log = logging.getLogger(__name__)
 
 
+def _coerce_remember_weights(weights) -> list[float]:
+    """Accept exactly 3 weights. No backward compat."""
+    parsed = [float(w) for w in weights]
+    if len(parsed) != 3:
+        raise ValueError(f"remember_weights must have length 3, got {len(parsed)}")
+    return parsed
+
+
 class CoreConfig(msgspec.Struct, frozen=True):
     ceiling_mb: int = 256
     initial_capacity: int = 1024
@@ -337,9 +345,10 @@ def apply_env_overrides(config: GraphStoreConfig) -> GraphStoreConfig:
         target_type = field_types[field]
         try:
             if field == "remember_weights":
-                parsed = [float(w) for w in env_val.split(",")]
-                if len(parsed) != 5:
-                    _log.warning("GRAPHSTORE_DSL_REMEMBER_WEIGHTS needs 5 values, got %d", len(parsed))
+                try:
+                    parsed = _coerce_remember_weights(env_val.split(","))
+                except ValueError as e:
+                    _log.warning("invalid GRAPHSTORE_DSL_REMEMBER_WEIGHTS: %s", e)
                     continue
                 updates.setdefault(section, {})[field] = parsed
             elif field == "protected_kinds" or field == "cors_origins":
@@ -429,6 +438,8 @@ def _rebuild_config(
         field_overrides = updates[section_name]
         current_dict = {f: getattr(current, f) for f in current.__struct_fields__}
         current_dict.update(field_overrides)
+        if section_name == "dsl" and "remember_weights" in current_dict:
+            current_dict["remember_weights"] = _coerce_remember_weights(current_dict["remember_weights"])
         section_cls = type(current)
         sections[section_name] = section_cls(**current_dict)
 

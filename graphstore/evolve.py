@@ -35,7 +35,7 @@ KNOWN_SIGNALS: frozenset = frozenset({
 TUNABLE_PARAMS: dict = {
     "ceiling_mb":            {"type": int,   "min": 32,    "max": None,       "monotonic": True},
     "eviction_target_ratio": {"type": float, "min": 0.5,   "max": 0.95},
-    "remember_weights":      {"type": list,  "min": None,  "max": None,       "normalize": True, "length": 5},
+    "remember_weights":      {"type": list,  "min": None,  "max": None,       "normalize": True, "length": 3},
     "recall_decay":          {"type": float, "min": 0.1,   "max": 1.0},
     "similarity_threshold":  {"type": float, "min": 0.5,   "max": 0.99},
     "duplicate_threshold":   {"type": float, "min": 0.8,   "max": 1.0},
@@ -384,7 +384,11 @@ class EvolutionEngine:
             return "applied"
 
         if name == "remember_weights":
-            if not isinstance(value, (list, tuple)) or len(value) != 5:
+            if not isinstance(value, (list, tuple)):
+                return "skipped:invalid_length"
+            if len(value) == 5:
+                value = value[:3]
+            elif len(value) != 3:
                 return "skipped:invalid_length"
             value = _normalize_weights(list(float(w) for w in value))
             gs._executor._remember_weights = value

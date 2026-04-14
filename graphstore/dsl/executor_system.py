@@ -776,10 +776,24 @@ class SystemExecutor:
             for src_slot, tgt_slot, _data in edge_list:
                 if not live[src_slot] or not live[tgt_slot]:
                     continue
-                # src=message, tgt=entity
+                src_kind = store.string_table.lookup(int(store.node_kinds[src_slot]))
+                if src_kind == "sentence":
+                    for field in ("parent_node", "parent_chunk"):
+                        col_info = store.columns.get_column(field, n)
+                        if col_info is None:
+                            continue
+                        col_data, col_pres, _ = col_info
+                        if not col_pres[src_slot]:
+                            continue
+                        parent_slot = store.id_to_slot.get(int(col_data[src_slot]))
+                        if parent_slot is not None:
+                            src_slot = int(parent_slot)
+                            break
                 entity_id = store._slot_to_id(tgt_slot)
                 if entity_id:
-                    entity_to_slots.setdefault(entity_id, []).append(src_slot)
+                    slots = entity_to_slots.setdefault(entity_id, [])
+                    if src_slot not in slots:
+                        slots.append(src_slot)
 
         if not entity_to_slots:
             return Result(kind="ok", data={"observations": 0, "reason": "no entity edges found"}, count=0)
