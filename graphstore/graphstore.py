@@ -260,30 +260,32 @@ class GraphStore:
 
         # Initialize reranker
         reranker_cfg = (cfg.vector.reranker or "none").lower()
-        if reranker_cfg == "none":
-            _reranker = None
-        elif reranker_cfg == "flashrank":
-            from graphstore.embedding.reranker import FlashRankReranker
-            _reranker = FlashRankReranker(
-                model_name=cfg.vector.reranker_model or "rank-T5-flan",
-                max_length=cfg.vector.reranker_max_length,
-            )
-        elif reranker_cfg == "onnx":
-            from graphstore.embedding.reranker import OnnxReranker
-            _reranker = OnnxReranker(
-                model_dir=cfg.vector.reranker_model_dir or "",
-                onnx_file=cfg.vector.reranker_onnx_file,
-                max_length=cfg.vector.reranker_max_length,
-            ) if cfg.vector.reranker_model_dir else None
-        elif reranker_cfg == "gguf":
-            from graphstore.embedding.reranker import GGUFReranker
-            _reranker = GGUFReranker(
-                model_path=cfg.vector.reranker_model_dir or "",
-                projector_path=cfg.vector.reranker_projector_path,
-                n_gpu_layers=cfg.vector.reranker_gpu_layers,
-                n_ctx=cfg.vector.reranker_max_length,
-            )
-        else:
+        _reranker = None
+        try:
+            if reranker_cfg == "flashrank":
+                from graphstore.embedding.reranker import FlashRankReranker
+                _reranker = FlashRankReranker(
+                    model_name=cfg.vector.reranker_model or "rank-T5-flan",
+                    max_length=cfg.vector.reranker_max_length,
+                )
+            elif reranker_cfg == "onnx":
+                from graphstore.embedding.reranker import OnnxReranker
+                _reranker = OnnxReranker(
+                    model_dir=cfg.vector.reranker_model_dir or "",
+                    onnx_file=cfg.vector.reranker_onnx_file,
+                    max_length=cfg.vector.reranker_max_length,
+                ) if cfg.vector.reranker_model_dir else None
+            elif reranker_cfg == "gguf":
+                from graphstore.embedding.reranker import GGUFReranker
+                _reranker = GGUFReranker(
+                    model_path=cfg.vector.reranker_model_dir or "",
+                    projector_path=cfg.vector.reranker_projector_path,
+                    n_gpu_layers=cfg.vector.reranker_gpu_layers,
+                    n_ctx=cfg.vector.reranker_max_length,
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Reranker initialization failed (%s): %s", reranker_cfg, e)
             _reranker = None
 
         # Custom chunker (None → handler uses chunk_by_heading from chunker.py)

@@ -683,7 +683,13 @@ class IntelligenceHandlers:
                     rerank_scores = self._reranker.score(q.query, texts)
                     ranked = sorted(zip(rerank_scores, valid_top), reverse=True)
                     reranked_slots = np.array([s for _, s in ranked], dtype=np.int64)
-                    order = np.concatenate((reranked_slots, order[rerank_k:]))
+                    
+                    # Correctly rebuild order: reranked_slots first, then everything else in order
+                    # avoiding duplicates from the reranked set.
+                    reranked_set = set(reranked_slots.tolist())
+                    remaining = np.array([s for s in order if s not in reranked_set], dtype=np.int64)
+                    order = np.concatenate((reranked_slots, remaining))
+                    
                     # update final_scores so the top-K selection loop assigns the rerank score
                     for score, slot in ranked:
                         final_scores[slot] = score
