@@ -153,8 +153,8 @@ field_pairs: (IDENTIFIER "=" value)*
 // --- Filters ---
 where_clause: "WHERE" expr
 expr: or_expr
-or_expr: and_expr "OR" or_expr | and_expr
-and_expr: not_expr "AND" and_expr | not_expr
+or_expr: or_expr "OR" and_expr | and_expr
+and_expr: and_expr "AND" not_expr | not_expr
 not_expr: "NOT" not_expr -> not_term
         | atom
 ?atom: condition | contains_cond | like_cond | in_cond | "(" expr ")" | degree_condition | similar_cond
@@ -335,8 +335,8 @@ evolve_reset: "RESET"
 
 STRING: "\"" /[^"\\]*(\\.[^"\\]*)*/ "\""
 NUMBER: /-?[0-9]+(\.[0-9]+)?/
-IDENTIFIER: /[a-zA-Z_][a-zA-Z0-9_]*/
-VARIABLE: /\$[a-zA-Z_][a-zA-Z0-9_]*/
+IDENTIFIER: /[a-zA-Z_\u00c0-\u017f\u0400-\u04ff\u4e00-\u9fff][a-zA-Z0-9_\u00c0-\u017f\u0400-\u04ff\u4e00-\u9fff]*/
+VARIABLE: /\$[a-zA-Z_\u00c0-\u017f\u0400-\u04ff\u4e00-\u9fff][a-zA-Z0-9_\u00c0-\u017f\u0400-\u04ff\u4e00-\u9fff]*/
 _NL: /\n/+
 
 %import common.WS_INLINE
