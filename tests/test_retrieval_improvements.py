@@ -181,50 +181,6 @@ class TestRRFIntegration:
             gs.close()
 
 
-# ── Type-weighted scoring ──────────────────────────────────────────────
-
-
-class TestTypeWeightedScoring:
-    def test_type_weights_boost_decisions(self):
-        """Decisions should rank higher than entities with equal relevance."""
-        gs = _make_gs(type_weights={"decision": 2.0, "entity": 0.5})
-        # Use identical claim text so vector similarity is equal for both
-        gs.execute('CREATE NODE "d1" kind = "decision" claim = "python backend choice"')
-        gs.execute('CREATE NODE "e1" kind = "entity" claim = "python backend choice"')
-        result = gs.execute('REMEMBER "python backend choice" LIMIT 5')
-        assert len(result.data) >= 2
-        kinds = [r["kind"] for r in result.data[:2]]
-        assert kinds[0] == "decision", f"Expected decision first, got {kinds}"
-        gs.close()
-
-    def test_type_weights_empty_dict_noop(self):
-        gs = _make_gs(type_weights={})
-        gs.execute('CREATE NODE "a" kind = "fact" claim = "hello world"')
-        result = gs.execute('REMEMBER "hello" LIMIT 5')
-        assert result.kind == "nodes"
-        gs.close()
-
-    def test_type_weights_unknown_kind_defaults_to_1(self):
-        gs = _make_gs(type_weights={"decision": 2.0})
-        gs.execute('CREATE NODE "x" kind = "fact" claim = "test content here"')
-        result = gs.execute('REMEMBER "test content here" LIMIT 5')
-        assert len(result.data) > 0
-        gs.close()
-
-    @pytest.mark.skip("Type-weighted scoring removed in pipeline refactor")
-    def test_lessons_rank_higher_than_sessions(self):
-        """Lessons (1.5x) should outrank sessions (0.7x) for same content."""
-        gs = _make_gs(type_weights={"lesson": 1.5, "session": 0.7})
-        # Identical claim so vector similarity is equal - type weight decides
-        gs.execute('CREATE NODE "l1" kind = "lesson" claim = "always write tests before shipping"')
-        gs.execute('CREATE NODE "s1" kind = "session" claim = "always write tests before shipping"')
-        result = gs.execute('REMEMBER "always write tests before shipping" LIMIT 5')
-        if len(result.data) >= 2:
-            kinds = [r["kind"] for r in result.data[:2]]
-            assert kinds[0] == "lesson", f"Expected lesson first, got {kinds}"
-        gs.close()
-
-
 # ── Nucleus expansion ──────────────────────────────────────────────────
 
 
