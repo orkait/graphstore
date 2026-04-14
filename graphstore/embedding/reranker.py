@@ -116,7 +116,7 @@ class GGUFReranker:
     """
 
     def __init__(self, model_path: str, projector_path: str | None = None,
-                 n_ctx: int = 131072, n_gpu_layers: int = -1):
+                 n_ctx: int | None = None, n_gpu_layers: int = -1):
         try:
             from llama_cpp import Llama
         except ImportError as e:
@@ -125,11 +125,22 @@ class GGUFReranker:
                 "Install with: pip install llama-cpp-python"
             ) from e
 
+        # 1. Metadata-only pass to extract native n_ctx
+        # We use n_ctx=1 and n_gpu_layers=0 to minimize VRAM during the check
+        temp_model = Llama(model_path=model_path, n_ctx=1, n_gpu_layers=0, verbose=False)
+        # llama-cpp-python exposes metadata in the .metadata attribute
+        native_ctx = int(temp_model.metadata.get("llama.context_length", 2048))
+        # Important: clear the temp model immediately
+        del temp_model
+
+        # 2. Final initialization using native or user-provided budget
+        actual_ctx = n_ctx if n_ctx is not None else native_ctx
+
         self._model = Llama(
             model_path=model_path,
             embedding=True,
-            n_ctx=n_ctx,
-            n_batch=n_ctx, # Allow batching up to full context
+            n_ctx=actual_ctx,
+            n_batch=actual_ctx, 
             n_gpu_layers=n_gpu_layers,
             verbose=False,
         )

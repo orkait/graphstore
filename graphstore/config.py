@@ -47,7 +47,7 @@ class VectorConfig(msgspec.Struct, frozen=True):
     reranker_model_dir: str | None = None
     reranker_projector_path: str | None = None
     reranker_gpu_layers: int = 0
-    reranker_max_length: int = 131072
+    reranker_max_length: int | None = None
     reranker_onnx_file: str = "onnx/model_int8.onnx"
     rerank_oversample: int = 10
 

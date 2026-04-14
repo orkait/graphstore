@@ -145,10 +145,11 @@ def _build_reranker(config: dict[str, Any]):
         )
     if backend == "gguf":
         from graphstore.embedding.reranker import GGUFReranker
+        max_len = config.get("reranker_max_length")
         return GGUFReranker(
             model_path=config.get("reranker_model_dir", ""),
             projector_path=config.get("reranker_projector_path"),
-            n_ctx=int(config.get("reranker_max_length", 131072)),
+            n_ctx=int(max_len) if max_len is not None else None,
             n_gpu_layers=int(config.get("reranker_gpu_layers", -1)),
         )
     return None
