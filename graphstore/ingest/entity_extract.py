@@ -8,6 +8,14 @@ from typing import Any
 
 import numpy as np
 
+_SLUG_RE = re.compile(r"[^a-zA-Z0-9_]+")
+
+
+def slug(text: str) -> str:
+    """Create a URL-safe slug from text."""
+    return _SLUG_RE.sub("_", text.lower()).strip("_")[:40]
+
+
 _PRONOUN_MAP = {
     "she": "PER", "he": "PER", "him": "PER", "her": "PER",
     "they": "PER", "them": "PER",
