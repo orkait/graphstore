@@ -323,6 +323,8 @@ class IntelligenceHandlers:
                 has_graph_edges=self.store.edge_matrices.total_edges > 0,
                 has_fts=bool(self._document_store),
                 has_vectors=bool(self._embedder and self._vector_store and self._vector_store.count() > 0),
+                has_reranker=self._reranker is not None,
+                rerank_oversample=getattr(self, "_rerank_oversample", 10),
             )
             plan = planner.plan(
                 plan_ctx,
@@ -331,6 +333,7 @@ class IntelligenceHandlers:
                     "use_nucleus": getattr(self, "_nucleus_expansion", False),
                 },
             )
+            oversample = plan.candidate_k
 
         # ── Stage 1: Candidate gathering (vector + BM25) ──────────────
         query_vec = None
@@ -654,6 +657,36 @@ class IntelligenceHandlers:
             return Result(kind="nodes", data=[], count=0)
 
         order = valid_slots[np.argsort(-final_scores[valid_slots])]
+
+        use_reranker = plan.use_reranker if plan is not None else False
+        if use_reranker and getattr(self, "_reranker", None) and len(order) > 0:
+            oversample_multiplier = getattr(self, "_rerank_oversample", 10)
+            rerank_k = min(len(order), target_k * oversample_multiplier)
+            top_slots = order[:rerank_k]
+            texts = []
+            valid_top = []
+            for slot in top_slots:
+                slot = int(slot)
+                node = self.store._materialize_slot(slot)
+                if node is None:
+                    continue
+                if q.where and not self._eval_where(q.where.expr, node):
+                    continue
+                text = node.get("text") or node.get("summary") or node.get("claim") or ""
+                texts.append(text)
+                valid_top.append(slot)
+            if texts:
+                try:
+                    rerank_scores = self._reranker.score(q.query, texts)
+                    ranked = sorted(zip(rerank_scores, valid_top), reverse=True)
+                    reranked_slots = np.array([s for _, s in ranked], dtype=np.int64)
+                    order = np.concatenate((reranked_slots, order[rerank_k:]))
+                    # update final_scores so the top-K selection loop assigns the rerank score
+                    for score, slot in ranked:
+                        final_scores[slot] = score
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning("Reranking failed: %s", e)
 
         results = []
         retrieved_slots = []

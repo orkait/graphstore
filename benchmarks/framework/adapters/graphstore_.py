@@ -199,7 +199,8 @@ class GraphStoreAdapter:
                      "lexical_search_oversample",
                      "fusion_method", "rrf_k", "type_weights",
                      "nucleus_expansion", "nucleus_hops",
-                     "nucleus_max_neighbors", "recency_mode"):
+                     "nucleus_max_neighbors", "recency_mode",
+                     "sentence_query_expansion"):
             val = self.config.get(key, _BENCHMARK_DEFAULTS.get(key))
             if val is not None:
                 gs_kwargs[key] = val

@@ -42,6 +42,14 @@ class VectorConfig(msgspec.Struct, frozen=True):
     search_oversample: int = 16
     model2vec_model: str = "minishlab/M2V_base_output"
     model_cache_dir: str | None = None
+    reranker: str | None = None
+    reranker_model: str | None = None
+    reranker_model_dir: str | None = None
+    reranker_projector_path: str | None = None
+    reranker_gpu_layers: int = 0
+    reranker_max_length: int = 512
+    reranker_onnx_file: str = "onnx/model_int8.onnx"
+    rerank_oversample: int = 10
 
 
 class DocumentConfig(msgspec.Struct, frozen=True):
@@ -184,6 +192,14 @@ _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "search_oversample":    ("vector", "search_oversample"),
     "similarity_threshold": ("vector", "similarity_threshold"),
     "duplicate_threshold":  ("vector", "duplicate_threshold"),
+    "reranker":             ("vector", "reranker"),
+    "reranker_model":       ("vector", "reranker_model"),
+    "reranker_model_dir":   ("vector", "reranker_model_dir"),
+    "reranker_projector_path":("vector", "reranker_projector_path"),
+    "reranker_gpu_layers":  ("vector", "reranker_gpu_layers"),
+    "reranker_max_length":  ("vector", "reranker_max_length"),
+    "reranker_onnx_file":   ("vector", "reranker_onnx_file"),
+    "rerank_oversample":    ("vector", "rerank_oversample"),
     "fts_tokenizer":        ("document", "fts_tokenizer"),
 }
 

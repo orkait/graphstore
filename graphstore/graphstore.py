@@ -92,6 +92,9 @@ class GraphStore:
                  sentence_query_expansion=_UNSET,
                  use_compression=_UNSET,
                  initial_capacity=_UNSET,
+                 reranker=_UNSET,
+                 reranker_model=_UNSET,
+                 rerank_oversample=_UNSET,
                  ):
         # Load config: explicit object > explicit path > env var > db dir > defaults
         if config is not None:
@@ -168,6 +171,12 @@ class GraphStore:
             overrides["use_compression"] = use_compression
         if initial_capacity is not self._UNSET:
             overrides["initial_capacity"] = initial_capacity
+        if reranker is not self._UNSET:
+            overrides["reranker"] = reranker
+        if reranker_model is not self._UNSET:
+            overrides["reranker_model"] = reranker_model
+        if rerank_oversample is not self._UNSET:
+            overrides["rerank_oversample"] = rerank_oversample
         if overrides:
             self._config = merge_kwargs(self._config, **overrides)
         cfg = self._config
@@ -249,6 +258,33 @@ class GraphStore:
                 self._ingestor_registry._instances[inst.name] = inst
                 self._ingestor_registry._ext_map[ext] = inst.name
 
+        # Initialize reranker
+        reranker_cfg = (cfg.vector.reranker or "none").lower()
+        if reranker_cfg == "none":
+            _reranker = None
+        elif reranker_cfg == "flashrank":
+            from graphstore.embedding.reranker import FlashRankReranker
+            _reranker = FlashRankReranker(
+                model_name=cfg.vector.reranker_model or "rank-T5-flan",
+                max_length=cfg.vector.reranker_max_length,
+            )
+        elif reranker_cfg == "onnx":
+            from graphstore.embedding.reranker import OnnxReranker
+            _reranker = OnnxReranker(
+                model_dir=cfg.vector.reranker_model_dir or "",
+                onnx_file=cfg.vector.reranker_onnx_file,
+                max_length=cfg.vector.reranker_max_length,
+            ) if cfg.vector.reranker_model_dir else None
+        elif reranker_cfg == "gguf":
+            from graphstore.embedding.reranker import GGUFReranker
+            _reranker = GGUFReranker(
+                model_path=cfg.vector.reranker_model_dir or "",
+                projector_path=cfg.vector.reranker_projector_path,
+                n_gpu_layers=cfg.vector.reranker_gpu_layers,
+            )
+        else:
+            _reranker = None
+
         # Custom chunker (None → handler uses chunk_by_heading from chunker.py)
         self._chunker = chunker
 
@@ -286,7 +322,7 @@ class GraphStore:
         self._runtime = RuntimeState(
             store=_store, schema=_schema,
             vector_store=_vector_store, document_store=_document_store,
-            embedder=_embedder, conn=_conn,
+            embedder=_embedder, reranker=_reranker, conn=_conn,
             similarity_buffer=self._similarity_buffer,
         )
 

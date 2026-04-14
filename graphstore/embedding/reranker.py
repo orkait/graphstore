@@ -140,24 +140,39 @@ class GGUFReranker:
                 self._proj_w1 = f.get_tensor("projector.0.weight")
                 self._proj_w2 = f.get_tensor("projector.2.weight")
 
-    def _embed_and_project(self, text: str) -> np.ndarray:
-        emb = np.array(self._model.embed(text), dtype=np.float32)
-        if emb.ndim == 2:
-            emb = emb.mean(axis=0)
+    def _embed_and_project(self, texts: str | list[str]) -> np.ndarray:
+        if isinstance(texts, str):
+            texts = [texts]
+        
+        # llama-cpp-python embed() accepts list[str] natively if built correctly
+        embs_out = self._model.embed(texts)
+        # It may return list of lists or similar
+        emb = np.array(embs_out, dtype=np.float32)
+        
+        # if the result is 3D (batch, seq, dims), mean pool it
+        if emb.ndim == 3:
+            emb = emb.mean(axis=1)
+        elif emb.ndim == 1:
+            emb = emb[np.newaxis, :]
+            
         if self._proj_w1 is not None:
             emb = emb @ self._proj_w1.T
             emb = np.maximum(emb, 0)  # ReLU
             emb = emb @ self._proj_w2.T
-        norm = np.linalg.norm(emb)
-        return emb / norm if norm > 0 else emb
+            
+        norms = np.linalg.norm(emb, axis=1, keepdims=True)
+        # Avoid division by zero
+        norms[norms == 0] = 1.0
+        return emb / norms
 
     def score(self, query: str, documents: list[str]) -> np.ndarray:
         if not documents:
             return np.empty(0, dtype=np.float64)
 
-        q_emb = self._embed_and_project(query)
-        scores = np.zeros(len(documents), dtype=np.float64)
-        for i, doc in enumerate(documents):
-            d_emb = self._embed_and_project(doc)
-            scores[i] = float(np.dot(q_emb, d_emb))
-        return scores
+        q_emb = self._embed_and_project(query)[0]
+        # Batch embed all documents
+        d_embs = self._embed_and_project(documents)
+        
+        # Vectorized dot product for cosine similarity
+        scores = np.dot(d_embs, q_emb)
+        return scores.astype(np.float64)
