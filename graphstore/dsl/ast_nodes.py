@@ -536,6 +536,7 @@ class RememberQuery:
     where: WhereClause | None = None
     tokens: int | None = None
     at: int | None = None  # epoch ms anchor for temporal scoring
+    at_range: tuple[int, int] | None = None
 
 # --- Forget (hard delete blob + memory) ---
 @dataclass(slots=True)

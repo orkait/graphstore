@@ -195,20 +195,17 @@ class MutationHandlers:
         entity_model_dir = getattr(self, '_entity_model_dir', None)
         entity_score_threshold = getattr(self, '_entity_score_threshold', 0.6)
         entity_max_length = getattr(self, '_entity_max_length', 256)
-        all_entities: dict[str, str] = {}
 
         # Get text to split from embed field or content
         kind_def = self.schema.describe_node_kind(kind)
         embed_field = kind_def.get("embed_field") if kind_def else None
         text_to_split = data.get(embed_field) if embed_field else data.get("content", "")
 
-        # Only split sentences if there are multiple sentences or entity extraction is enabled.
-        # Single-sentence messages don't benefit from sentence-level splitting.
         sentences = []
         if text_to_split and isinstance(text_to_split, str):
-            sentences = split_sentences(text_to_split) if len(text_to_split) > 60 else [text_to_split]
+            sentences = split_sentences(text_to_split)
 
-        need_sentence_nodes = len(sentences) > 1 or entity_model_dir
+        need_sentence_nodes = len(sentences) >= 1
         if need_sentence_nodes and len(sentences) >= 1:
             for i, sent_text in enumerate(sentences):
                 sent_id = f"{node_id}:s{i}"
@@ -237,29 +234,29 @@ class MutationHandlers:
                         score_threshold=entity_score_threshold,
                         max_length=entity_max_length,
                     )
+                    sentence_entities: dict[str, str] = {}
                     resolved = resolver.resolve(sent_text)
                     for name in resolved:
                         s = _ent_slug(name)
-                        if s and s not in all_entities:
-                            all_entities[s] = name
+                        if s:
+                            sentence_entities[s] = name
                     for ent in ents:
                         s = _ent_slug(ent.text)
-                        if s and s not in all_entities:
-                            all_entities[s] = ent.text
+                        if s:
+                            sentence_entities[s] = ent.text
                             if ent.label == "PER":
                                 resolver.update_context(ent.text)
 
-            # Create entity nodes and mention edges
-            for ent_slug_val, ent_display in all_entities.items():
-                ent_id = f"ent:{ent_slug_val}"
-                try:
-                    self.store.put_node(ent_id, "entity", {"name": ent_display})
-                except Exception:
-                    pass
-                try:
-                    self.store.put_edge(node_id, ent_id, "mentions")
-                except Exception:
-                    pass
+                    for ent_slug_val, ent_display in sentence_entities.items():
+                        ent_id = f"ent:{ent_slug_val}"
+                        try:
+                            self.store.put_node(ent_id, "entity", {"name": ent_display})
+                        except Exception:
+                            pass
+                        try:
+                            self.store.put_edge(sent_id, ent_id, "mentions")
+                        except Exception:
+                            pass
 
         # ── Standard embedding / document handling ──────────────
         str_id = self.store.string_table.intern(node_id)

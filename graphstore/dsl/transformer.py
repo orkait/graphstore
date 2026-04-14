@@ -719,12 +719,17 @@ class DSLTransformer(Transformer):
     def at_clause(self, args):
         val = args[0]
         if isinstance(val, (int, float)):
-            return ("at", int(val))
-        from graphstore.core.temporal import parse_date
+            ms = int(val)
+            return ("at", ms, (ms, ms))
+        from graphstore.core.temporal import parse_date, parse_date_range
         ms = parse_date(str(val))
         if ms is None:
             raise ValueError(f"Cannot parse AT date: {val!r}")
-        return ("at", ms)
+        date_range = parse_date_range(str(val))
+        range_tuple = None
+        if date_range is not None:
+            range_tuple = (date_range.start_ms, date_range.end_ms)
+        return ("at", ms, range_tuple)
 
     def remember_q(self, args):
         query = self._str(args[0])
@@ -732,12 +737,14 @@ class DSLTransformer(Transformer):
         where = self._find(args[1:], WhereClause)
         tokens = None
         at = None
+        at_range = None
         for a in args[1:]:
             if isinstance(a, tuple) and a[0] == "tokens":
                 tokens = int(a[1])
             elif isinstance(a, tuple) and a[0] == "at":
                 at = int(a[1])
-        return RememberQuery(query=query, limit=limit, where=where, tokens=tokens, at=at)
+                at_range = a[2] if len(a) > 2 else None
+        return RememberQuery(query=query, limit=limit, where=where, tokens=tokens, at=at, at_range=at_range)
 
     def vector_literal(self, args):
         return [self._num(a) for a in args]

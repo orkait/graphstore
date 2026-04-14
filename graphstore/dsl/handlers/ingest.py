@@ -17,6 +17,22 @@ from graphstore.core.types import Result
 
 class IngestHandlers:
 
+    @staticmethod
+    def _infer_event_at_from_metadata(metadata: dict) -> int | None:
+        """Best-effort event time extraction from parser metadata."""
+        from graphstore.core.temporal import parse_date
+
+        for key in ("event_at", "event_time", "date", "published_at", "published", "timestamp"):
+            value = metadata.get(key)
+            if value is None:
+                continue
+            if isinstance(value, (int, float)):
+                return int(value)
+            ms = parse_date(str(value))
+            if ms is not None:
+                return ms
+        return None
+
     @handles(IngestStmt, write=True)
     def _ingest(self, q: IngestStmt) -> Result:
         """INGEST: parse file, chunk, create graph nodes + edges, store documents."""
@@ -89,6 +105,9 @@ class IngestHandlers:
 
         parent_slot = self.store.put_node(parent_id, parent_kind, metadata_fields)
         self.store.columns.set_reserved(parent_slot, "__blob_state__", "warm")
+        event_at_ms = self._infer_event_at_from_metadata(result.metadata)
+        if event_at_ms is not None:
+            self.store.columns.set_reserved(parent_slot, "__event_at__", event_at_ms)
 
         if self._document_store:
             self._document_store.put_document(
@@ -117,8 +136,6 @@ class IngestHandlers:
                 set_reserved(sec_slot, "__confidence__", 0.6)
                 set_reserved(sec_slot, "__blob_state__", "warm")
                 self.store.put_edge(parent_id, section_id, "has_section")
-                embed_text = f"{chunk.heading}: {chunk.text}" if chunk.heading else chunk.text
-                embed_batch.append((sec_slot, embed_text))
                 sections[chunk.heading] = section_id
                 section_slots[chunk.heading] = sec_slot
 
@@ -165,8 +182,6 @@ class IngestHandlers:
             entity_model_dir = getattr(self, '_entity_model_dir', None)
             entity_score_threshold = getattr(self, '_entity_score_threshold', 0.6)
             entity_max_length = getattr(self, '_entity_max_length', 256)
-            all_entities: dict[str, str] = {}
-
             sentences = split_sentences(chunk.text)
             for si, sent_text in enumerate(sentences):
                 sent_id = f"{chunk_id}:s{si}"
@@ -185,31 +200,29 @@ class IngestHandlers:
                         score_threshold=entity_score_threshold,
                         max_length=entity_max_length,
                     )
-                    # Apply co-reference
+                    sentence_entities: dict[str, str] = {}
                     resolved = resolver.resolve(sent_text)
                     for name in resolved:
                         s = _ent_slug(name)
-                        if s and s not in all_entities:
-                            all_entities[s] = name
+                        if s:
+                            sentence_entities[s] = name
                     for ent in ents:
                         s = _ent_slug(ent.text)
-                        if s and s not in all_entities:
-                            all_entities[s] = ent.text
+                        if s:
+                            sentence_entities[s] = ent.text
                             if ent.label == "PER":
                                 resolver.update_context(ent.text)
 
-            # Create entity nodes and mention edges
-            for ent_slug_val, ent_display in all_entities.items():
-                ent_id = f"ent:{ent_slug_val}"
-                try:
-                    self.store.put_node(ent_id, "entity", {"name": ent_display})
-                except Exception:
-                    pass
-                # Mention edge from chunk to entity
-                try:
-                    self.store.put_edge(chunk_id, ent_id, "mentions")
-                except Exception:
-                    pass
+                    for ent_slug_val, ent_display in sentence_entities.items():
+                        ent_id = f"ent:{ent_slug_val}"
+                        try:
+                            self.store.put_node(ent_id, "entity", {"name": ent_display})
+                        except Exception:
+                            pass
+                        try:
+                            self.store.put_edge(sent_id, ent_id, "mentions")
+                        except Exception:
+                            pass
 
         if ds:
             ds._conn.commit()
