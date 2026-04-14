@@ -7,7 +7,7 @@ name = "graphstore"
 version = "0.3.0"
 description = "Agentic brain DB - the cognitive layer for AI agents"
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0"
 requires-python = ">=3.10"
 authors = [
     { name = "Kailash Mahavarkar", email = "kailashmahavarkar5@gmail.com" },
