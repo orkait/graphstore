@@ -88,13 +88,24 @@ class GraphStore:
                  nucleus_expansion=_UNSET,
                  nucleus_hops=_UNSET,
                  nucleus_max_neighbors=_UNSET,
+                 nucleus_neighbors_per_hop=_UNSET,
+                 nucleus_min_text_length=_UNSET,
+                 nucleus_allowed_kinds=_UNSET,
                  recency_mode=_UNSET,
                  sentence_query_expansion=_UNSET,
+                 graph_signal_enabled=_UNSET,
+                 entity_extractor=_UNSET,
+                 entity_model_dir=_UNSET,
+                 entity_score_threshold=_UNSET,
+                 entity_max_length=_UNSET,
+                 reranker=_UNSET,
+                 reranker_model_dir=_UNSET,
+                 reranker_projector_path=_UNSET,
+                 reranker_max_length=_UNSET,
+                 reranker_gpu_layers=_UNSET,
+                 rerank_oversample=_UNSET,
                  use_compression=_UNSET,
                  initial_capacity=_UNSET,
-                 reranker=_UNSET,
-                 reranker_model=_UNSET,
-                 rerank_oversample=_UNSET,
                  ):
         # Load config: explicit object > explicit path > env var > db dir > defaults
         if config is not None:
@@ -163,20 +174,42 @@ class GraphStore:
             overrides["nucleus_hops"] = nucleus_hops
         if nucleus_max_neighbors is not self._UNSET:
             overrides["nucleus_max_neighbors"] = nucleus_max_neighbors
+        if nucleus_neighbors_per_hop is not self._UNSET:
+            overrides["nucleus_neighbors_per_hop"] = nucleus_neighbors_per_hop
+        if nucleus_min_text_length is not self._UNSET:
+            overrides["nucleus_min_text_length"] = nucleus_min_text_length
+        if nucleus_allowed_kinds is not self._UNSET:
+            overrides["nucleus_allowed_kinds"] = nucleus_allowed_kinds
         if recency_mode is not self._UNSET:
             overrides["recency_mode"] = recency_mode
         if sentence_query_expansion is not self._UNSET:
             overrides["sentence_query_expansion"] = sentence_query_expansion
+        if graph_signal_enabled is not self._UNSET:
+            overrides["graph_signal_enabled"] = graph_signal_enabled
+        if entity_extractor is not self._UNSET:
+            overrides["entity_extractor"] = entity_extractor
+        if entity_model_dir is not self._UNSET:
+            overrides["entity_model_dir"] = entity_model_dir
+        if entity_score_threshold is not self._UNSET:
+            overrides["entity_score_threshold"] = entity_score_threshold
+        if entity_max_length is not self._UNSET:
+            overrides["entity_max_length"] = entity_max_length
+        if reranker is not self._UNSET:
+            overrides["reranker"] = reranker
+        if reranker_model_dir is not self._UNSET:
+            overrides["reranker_model_dir"] = reranker_model_dir
+        if reranker_projector_path is not self._UNSET:
+            overrides["reranker_projector_path"] = reranker_projector_path
+        if reranker_max_length is not self._UNSET:
+            overrides["reranker_max_length"] = reranker_max_length
+        if reranker_gpu_layers is not self._UNSET:
+            overrides["reranker_gpu_layers"] = reranker_gpu_layers
+        if rerank_oversample is not self._UNSET:
+            overrides["rerank_oversample"] = rerank_oversample
         if use_compression is not self._UNSET:
             overrides["use_compression"] = use_compression
         if initial_capacity is not self._UNSET:
             overrides["initial_capacity"] = initial_capacity
-        if reranker is not self._UNSET:
-            overrides["reranker"] = reranker
-        if reranker_model is not self._UNSET:
-            overrides["reranker_model"] = reranker_model
-        if rerank_oversample is not self._UNSET:
-            overrides["rerank_oversample"] = rerank_oversample
         if overrides:
             self._config = merge_kwargs(self._config, **overrides)
         cfg = self._config
@@ -364,7 +397,16 @@ class GraphStore:
         self._executor._nucleus_expansion = cfg.dsl.nucleus_expansion
         self._executor._nucleus_hops = cfg.dsl.nucleus_hops
         self._executor._nucleus_max_neighbors = cfg.dsl.nucleus_max_neighbors
+        self._executor._nucleus_neighbors_per_hop = cfg.dsl.nucleus_neighbors_per_hop
+        self._executor._nucleus_min_text_length = cfg.dsl.nucleus_min_text_length
+        self._executor._nucleus_allowed_kinds = cfg.dsl.nucleus_allowed_kinds
         self._executor._sentence_query_expansion = cfg.dsl.sentence_query_expansion
+        self._executor._graph_signal_enabled = cfg.dsl.graph_signal_enabled
+        self._executor._entity_model_dir = cfg.dsl.entity_model_dir
+        self._executor._entity_score_threshold = cfg.dsl.entity_score_threshold
+        self._executor._entity_max_length = cfg.dsl.entity_max_length
+        self._executor._reranker = self._build_reranker(cfg)
+        self._executor._rerank_oversample = cfg.dsl.rerank_oversample
         self._executor._chunk_max_size = cfg.document.chunk_max_size
         self._executor._summary_max_length = cfg.document.summary_max_length
         self._executor._chunk_overlap = cfg.document.chunk_overlap
@@ -468,6 +510,29 @@ class GraphStore:
         if self._queue is not None:
             return self._queue.submit(query)
         return self._execute_internal(query)
+
+    def _build_reranker(self, cfg):
+        """Build reranker from config. Returns None if not configured."""
+        backend = (cfg.dsl.reranker or "").lower()
+        if not backend:
+            return None
+        if backend == "gguf":
+            from graphstore.embedding.reranker import GGUFReranker
+            return GGUFReranker(
+                model_path=cfg.dsl.reranker_model_dir or "",
+                projector_path=cfg.dsl.reranker_projector_path,
+                n_gpu_layers=cfg.dsl.reranker_gpu_layers,
+            )
+        if backend == "flashrank":
+            from graphstore.embedding.reranker import FlashRankReranker
+            return FlashRankReranker(max_length=cfg.dsl.reranker_max_length)
+        if backend == "onnx":
+            from graphstore.embedding.reranker import OnnxReranker
+            return OnnxReranker(
+                model_dir=cfg.dsl.reranker_model_dir or "",
+                max_length=cfg.dsl.reranker_max_length,
+            )
+        return None
 
     def _execute_internal(self, query: str) -> Result:
         """Execute a DSL query directly (no queue). Internal use only."""
