@@ -509,19 +509,30 @@ class DSLTransformer(Transformer):
         return args[0]
 
     def or_expr(self, args):
+        # LALR left-recursive rule creates binary tree:
+        #   or_expr(or_expr(a, b), c) for "a OR b OR c"
+        # Transformer receives 2 args per reduction: [left, right]
         if len(args) == 1:
             return args[0]
-        # Right-recursive: left_operand, right (which may itself be OrExpr)
         left, right = args[0], args[1]
-        # Flatten nested OrExpr on the right
+        if isinstance(left, OrExpr) and isinstance(right, OrExpr):
+            return OrExpr(operands=left.operands + right.operands)
+        if isinstance(left, OrExpr):
+            return OrExpr(operands=left.operands + [right])
         if isinstance(right, OrExpr):
             return OrExpr(operands=[left] + right.operands)
         return OrExpr(operands=[left, right])
 
     def and_expr(self, args):
+        # LALR left-recursive rule creates binary tree:
+        #   and_expr(and_expr(a, b), c) for "a AND b AND c"
         if len(args) == 1:
             return args[0]
         left, right = args[0], args[1]
+        if isinstance(left, AndExpr) and isinstance(right, AndExpr):
+            return AndExpr(operands=left.operands + right.operands)
+        if isinstance(left, AndExpr):
+            return AndExpr(operands=left.operands + [right])
         if isinstance(right, AndExpr):
             return AndExpr(operands=[left] + right.operands)
         return AndExpr(operands=[left, right])
