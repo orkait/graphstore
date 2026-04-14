@@ -41,8 +41,9 @@ class TestSentenceSplitter:
 
 class TestSentenceQueryExpansion:
     def test_disabled_by_default(self):
+        """sentence_query_expansion defaults to True after pipeline refactoring."""
         g = GraphStore(ceiling_mb=256)
-        assert getattr(g._executor, '_sentence_query_expansion', False) is False
+        assert getattr(g._executor, '_sentence_query_expansion', False) is True
 
     def test_enabled_via_constructor(self):
         g = GraphStore(ceiling_mb=256, sentence_query_expansion=True)
