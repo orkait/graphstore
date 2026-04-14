@@ -19,7 +19,7 @@ from graphstore.persistence.database import SCHEMA_VERSION
 from graphstore.core.errors import VersionMismatch
 
 
-def load(conn) -> tuple[CoreStore, SchemaRegistry]:
+def load(conn, use_compression: bool = False) -> tuple[CoreStore, SchemaRegistry]:
     """Load graph from sqlite. Returns (store, schema).
 
     Raises VersionMismatch if schema_version doesn't match.
@@ -29,7 +29,7 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     row = conn.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()
     if row is None:
         # Fresh database, return empty store
-        return CoreStore(), SchemaRegistry()
+        return CoreStore(use_compression=use_compression), SchemaRegistry()
 
     if int(row[0]) != SCHEMA_VERSION:
         raise VersionMismatch(found=row[0], expected=SCHEMA_VERSION)
@@ -37,7 +37,7 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     # Load string table
     strings_row = conn.execute("SELECT data FROM blobs WHERE key='strings'").fetchone()
     if strings_row is None:
-        return CoreStore(), SchemaRegistry()
+        return CoreStore(use_compression=use_compression), SchemaRegistry()
 
     string_table = StringTable.from_list(mjson.decode(strings_row[0]))
 
@@ -46,7 +46,7 @@ def load(conn) -> tuple[CoreStore, SchemaRegistry]:
     meta = mjson.decode(meta_row[0])
 
     # Create store and set its internals
-    store = CoreStore()
+    store = CoreStore(use_compression=use_compression)
     store.string_table = string_table
     store.columns._string_table = string_table
     store._next_slot = meta["next_slot"]

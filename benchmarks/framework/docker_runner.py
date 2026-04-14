@@ -80,8 +80,12 @@ def main() -> int:
                    help="path to reranker model (ONNX dir or GGUF file)")
     p.add_argument("--reranker-projector-path", default=None,
                    help="path to projector.safetensors (for GGUF reranker)")
+    p.add_argument("--reranker-gpu-layers", type=int, default=-1,
+                   help="n_gpu_layers for GGUF reranker (-1 = all)")
     p.add_argument("--reranker-onnx-file", default="onnx/model_int8.onnx",
                    help="ONNX file within reranker model dir")
+    p.add_argument("--retrieval-strategy", default=None,
+                   help="adapter retrieval strategy: remember_rerank, full_rerank, remember_lexical, full, etc.")
 
     # Adapter query strategy (how the adapter calls REMEMBER/RECALL)
     p.add_argument("--retrieval-depth", type=int, default=None,
@@ -207,6 +211,7 @@ def main() -> int:
         ("similarity_threshold", "similarity_threshold"),
         ("fusion_method", "fusion_method"),
         ("rrf_k", "rrf_k"),
+        ("retrieval_strategy", "retrieval_strategy"),
     ]:
         val = getattr(args, attr, None)
         if val is not None:

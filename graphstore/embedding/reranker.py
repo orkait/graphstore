@@ -116,7 +116,7 @@ class GGUFReranker:
     """
 
     def __init__(self, model_path: str, projector_path: str | None = None,
-                 n_ctx: int = 2048, n_gpu_layers: int = -1):
+                 n_ctx: int | None = None, n_gpu_layers: int = -1):
         try:
             from llama_cpp import Llama
         except ImportError as e:
@@ -125,39 +125,83 @@ class GGUFReranker:
                 "Install with: pip install llama-cpp-python"
             ) from e
 
+        # 1. Metadata-only pass to extract native n_ctx
+        temp_model = Llama(model_path=model_path, n_ctx=1, n_gpu_layers=0, verbose=False)
+        native_ctx = int(temp_model.metadata.get("llama.context_length", 2048))
+        del temp_model
+
+        # 2. Cap n_ctx to prevent massive VRAM allocation for KV cache
+        actual_ctx = n_ctx if n_ctx is not None else min(native_ctx, 16384)
+
+        # n_batch controls compute buffer size. Cap at 2048 since we embed
+        # one document at a time.
+        actual_batch = min(actual_ctx, 2048)
+
         self._model = Llama(
             model_path=model_path,
             embedding=True,
-            n_ctx=n_ctx,
+            n_ctx=actual_ctx,
+            n_batch=actual_batch,
             n_gpu_layers=n_gpu_layers,
             verbose=False,
         )
 
-        self._projector = None
+        self._proj_w1 = None
+        self._proj_w2 = None
         if projector_path:
             from safetensors import safe_open
             with safe_open(projector_path, framework="numpy") as f:
                 self._proj_w1 = f.get_tensor("projector.0.weight")
                 self._proj_w2 = f.get_tensor("projector.2.weight")
 
-    def _embed_and_project(self, text: str) -> np.ndarray:
-        emb = np.array(self._model.embed(text), dtype=np.float32)
-        if emb.ndim == 2:
-            emb = emb.mean(axis=0)
-        if self._proj_w1 is not None:
-            emb = emb @ self._proj_w1.T
-            emb = np.maximum(emb, 0)  # ReLU
-            emb = emb @ self._proj_w2.T
-        norm = np.linalg.norm(emb)
-        return emb / norm if norm > 0 else emb
+    def _embed_and_project(self, texts: str | list[str]) -> list[np.ndarray]:
+        if isinstance(texts, str):
+            texts = [texts]
+        
+        # We loop over texts to get raw token embeddings [seq_len, dims]
+        results = []
+        for t in texts:
+            # llama-cpp-python returns list of token embeddings if embedding=True
+            # and potentially 2D if multiple sequences (but we pass one at a time)
+            e = self._model.embed(t)
+            emb = np.array(e, dtype=np.float32)
+            
+            # Ensure it's 2D [seq_len, dims]
+            if emb.ndim == 1:
+                emb = emb[np.newaxis, :]
+            elif emb.ndim == 3:
+                emb = emb[0] # Take first sequence if 3D
+                
+            # Project tokens if MLP weights provided
+            if self._proj_w1 is not None:
+                emb = emb @ self._proj_w1.T
+                emb = np.maximum(emb, 0)
+                emb = emb @ self._proj_w2.T
+                
+            # Unit-normalize each token embedding for cosine similarity
+            norms = np.linalg.norm(emb, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            results.append(emb / norms)
+            
+        return results
 
     def score(self, query: str, documents: list[str]) -> np.ndarray:
         if not documents:
             return np.empty(0, dtype=np.float64)
 
-        q_emb = self._embed_and_project(query)
+        # q_emb: [Q_len, dims]
+        q_emb = self._embed_and_project(query)[0]
+        # d_embs: list of [D_i_len, dims]
+        d_embs = self._embed_and_project(documents)
+        
         scores = np.zeros(len(documents), dtype=np.float64)
-        for i, doc in enumerate(documents):
-            d_emb = self._embed_and_project(doc)
-            scores[i] = float(np.dot(q_emb, d_emb))
+        for i, d_emb in enumerate(d_embs):
+            # MaxSim Operator: sum(max(cosine_sim(q_tokens, d_tokens)))
+            # 1. Compute similarity matrix [Q_len, D_len]
+            sim_matrix = q_emb @ d_emb.T
+            # 2. Max across document tokens for each query token
+            max_sims = np.max(sim_matrix, axis=1)
+            # 3. Sum of max similarities
+            scores[i] = float(np.sum(max_sims))
+            
         return scores

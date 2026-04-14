@@ -11,8 +11,8 @@ def test_retrieval_plan_has_no_mode_field():
         use_graph_expansion=False,
         use_observations=False,
         use_nucleus=False,
-        fusion_method="weighted",
-        type_weight_override=None,
+        use_reranker=False,
+        fusion_method="weighted",        type_weight_override=None,
         fallback_chain=["lexical_dense"],
         notes=[],
     )
@@ -31,8 +31,8 @@ def test_retrieval_context_carries_range_and_anchor():
         has_graph_edges=False,
         has_fts=True,
         has_vectors=True,
-        limit=5,
-        token_budget=None,
+        has_reranker=False,
+        rerank_oversample=10,        limit=5,        token_budget=None,
     )
     assert ctx.query_anchor_ms == 1
     assert ctx.query_time_range == (0, 1)
@@ -53,7 +53,8 @@ def test_temporal_query_enables_temporal_filter():
         has_graph_edges=True,
         has_fts=True,
         has_vectors=True,
-    )
+        has_reranker=False,
+        rerank_oversample=10,    )
     plan = planner.plan(ctx, explicit_overrides={})
     assert plan.use_temporal_filter is True
 
@@ -73,7 +74,8 @@ def test_entity_query_enables_graph_expansion():
         has_graph_edges=True,
         has_fts=True,
         has_vectors=True,
-    )
+        has_reranker=False,
+        rerank_oversample=10,    )
     plan = planner.plan(ctx, explicit_overrides={})
     assert plan.use_graph_expansion is True
 
@@ -93,7 +95,8 @@ def test_explicit_override_beats_policy():
         has_graph_edges=False,
         has_fts=True,
         has_vectors=True,
-    )
+        has_reranker=False,
+        rerank_oversample=10,    )
     plan = planner.plan(ctx, explicit_overrides={"use_temporal_filter": False, "fusion_method": "rrf"})
     assert plan.use_temporal_filter is False
     assert plan.fusion_method == "rrf"
@@ -148,6 +151,7 @@ def test_planner_can_increase_candidate_k():
         has_graph_edges=False,
         has_fts=True,
         has_vectors=True,
-    )
+        has_reranker=False,
+        rerank_oversample=10,    )
     plan = planner.plan(ctx, explicit_overrides={})
     assert plan.candidate_k >= 15

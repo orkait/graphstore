@@ -15,6 +15,8 @@ class RetrievalContext:
     has_graph_edges: bool
     has_fts: bool
     has_vectors: bool
+    has_reranker: bool
+    rerank_oversample: int
     limit: int
     token_budget: int | None
 
@@ -26,6 +28,7 @@ class RetrievalPlan:
     use_graph_expansion: bool
     use_observations: bool
     use_nucleus: bool
+    use_reranker: bool
     fusion_method: str
     type_weight_override: dict | None
     fallback_chain: list[str] = field(default_factory=list)
@@ -48,6 +51,8 @@ class RetrievalPlanner:
         has_graph_edges: bool,
         has_fts: bool,
         has_vectors: bool,
+        has_reranker: bool,
+        rerank_oversample: int,
     ) -> RetrievalContext:
         return RetrievalContext(
             query=query,
@@ -60,6 +65,8 @@ class RetrievalPlanner:
             has_graph_edges=has_graph_edges,
             has_fts=has_fts,
             has_vectors=has_vectors,
+            has_reranker=has_reranker,
+            rerank_oversample=rerank_oversample,
             limit=limit,
             token_budget=token_budget,
         )
@@ -81,13 +88,15 @@ class RetrievalPlanner:
         )
         use_observations = bool(prefish and ctx.has_observations)
         use_nucleus = bool((not use_observations) and ctx.has_graph_edges)
+        use_reranker = ctx.has_reranker
 
         plan = RetrievalPlan(
-            candidate_k=max(ctx.limit * 3, ctx.limit),
+            candidate_k=max(ctx.limit * (ctx.rerank_oversample if use_reranker else 3), ctx.limit),
             use_temporal_filter=use_temporal,
             use_graph_expansion=use_graph,
             use_observations=use_observations,
             use_nucleus=use_nucleus,
+            use_reranker=use_reranker,
             fusion_method="weighted",
             type_weight_override=None,
             fallback_chain=["lexical_dense"],
@@ -101,6 +110,7 @@ class RetrievalPlanner:
                 "use_graph_expansion",
                 "use_observations",
                 "use_nucleus",
+                "use_reranker",
                 "fusion_method",
                 "type_weight_override",
                 "fallback_chain",
