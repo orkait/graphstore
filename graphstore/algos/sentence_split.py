@@ -11,15 +11,15 @@ import re
 __all__ = ["split_sentences"]
 
 _ABBREV_RE = re.compile(
-    r"\b(?:mr|mrs|ms|dr|prof|sr|jr|st|ave|blvd|dept|vol|vs|etc|"
+    r"(\b(?:mr|mrs|ms|dr|prof|sr|jr|st|ave|blvd|dept|vol|vs|etc|"
     r"inc|ltd|co|corp|gov|gen|col|sgt|capt|maj|lt|pvt|"
     r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
     r"mon|tue|wed|thu|fri|sat|sun|"
-    r"e\.g\.|i\.e\.|e\.g|i\.e|cf|al|approx|no|fig|eq|ref|sec|chap|app)\.",
+    r"e\.g|i\.e|cf|al|approx|no|fig|eq|ref|sec|chap|app))\.",
     re.IGNORECASE,
 )
 
-_INITIALS_RE = re.compile(r"(?:^|\s)([A-Z]\.)\s+(?=[A-Z]\.)")
+_INITIALS_RE = re.compile(r"(?:^|\s)([A-Z])\.(?=\s+[A-Z]\.)")
 
 _BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(\[])")
 
@@ -50,8 +50,11 @@ def split_sentences(text: str) -> list[str]:
 
 
 def _split(text: str) -> list[str]:
-    protected = _ABBREV_RE.sub(_PLACEHOLDER_ABB, text)
-    protected = _INITIALS_RE.sub(lambda m: m.group(1).replace(".", _PLACEHOLDER_INIT) + " ", protected)
+    # Replace only the trailing period of abbreviations, preserving the word
+    protected = _ABBREV_RE.sub(r"\1" + _PLACEHOLDER_ABB, text)
+
+    # Replace periods between initials, preserving the letter
+    protected = _INITIALS_RE.sub(lambda m: m.group(1) + _PLACEHOLDER_INIT + " ", protected)
 
     parts = _BOUNDARY_RE.split(protected)
 
