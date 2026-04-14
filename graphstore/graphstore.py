@@ -281,6 +281,7 @@ class GraphStore:
                 model_path=cfg.vector.reranker_model_dir or "",
                 projector_path=cfg.vector.reranker_projector_path,
                 n_gpu_layers=cfg.vector.reranker_gpu_layers,
+                n_ctx=cfg.vector.reranker_max_length,
             )
         else:
             _reranker = None

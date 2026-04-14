@@ -660,6 +660,8 @@ class IntelligenceHandlers:
 
         use_reranker = plan.use_reranker if plan is not None else False
         if use_reranker and getattr(self, "_reranker", None) and len(order) > 0:
+            import logging
+            logger = logging.getLogger(__name__)
             oversample_multiplier = getattr(self, "_rerank_oversample", 10)
             rerank_k = min(len(order), target_k * oversample_multiplier)
             top_slots = order[:rerank_k]
@@ -677,6 +679,7 @@ class IntelligenceHandlers:
                 valid_top.append(slot)
             if texts:
                 try:
+                    logger.info("Reranking %d candidates for query: %s", len(texts), q.query[:50])
                     rerank_scores = self._reranker.score(q.query, texts)
                     ranked = sorted(zip(rerank_scores, valid_top), reverse=True)
                     reranked_slots = np.array([s for _, s in ranked], dtype=np.int64)
@@ -685,8 +688,7 @@ class IntelligenceHandlers:
                     for score, slot in ranked:
                         final_scores[slot] = score
                 except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning("Reranking failed: %s", e)
+                    logger.warning("Reranking failed: %s", e)
 
         results = []
         retrieved_slots = []

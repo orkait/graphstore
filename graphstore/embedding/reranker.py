@@ -144,15 +144,19 @@ class GGUFReranker:
         if isinstance(texts, str):
             texts = [texts]
         
-        # llama-cpp-python embed() accepts list[str] natively if built correctly
-        embs_out = self._model.embed(texts)
-        # It may return list of lists or similar
-        emb = np.array(embs_out, dtype=np.float32)
-        
-        # if the result is 3D (batch, seq, dims), mean pool it
-        if emb.ndim == 3:
-            emb = emb.mean(axis=1)
-        elif emb.ndim == 1:
+        # llama-cpp-python embed() usually expects a single string.
+        # We loop here but keep the heavy projection math vectorized below.
+        embs_list = []
+        for t in texts:
+            e = self._model.embed(t)
+            # handle cases where it returns a list or a list-of-lists
+            e_arr = np.array(e, dtype=np.float32)
+            if e_arr.ndim == 2:
+                e_arr = e_arr.mean(axis=0)
+            embs_list.append(e_arr)
+            
+        emb = np.array(embs_list, dtype=np.float32)
+        if emb.ndim == 1:
             emb = emb[np.newaxis, :]
             
         if self._proj_w1 is not None:
@@ -161,7 +165,6 @@ class GGUFReranker:
             emb = emb @ self._proj_w2.T
             
         norms = np.linalg.norm(emb, axis=1, keepdims=True)
-        # Avoid division by zero
         norms[norms == 0] = 1.0
         return emb / norms
 
