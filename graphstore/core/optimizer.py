@@ -401,7 +401,8 @@ def compact_tombstones_safe(
     if document_store is not None and not document_store._temp:
         # Flush any pending transactions in DocumentStore before attaching
         document_store._conn.commit()
-        conn.execute(f"ATTACH DATABASE '{document_store._path}' AS docs")
+        safe_doc_path = document_store._path.replace("'", "''")
+        conn.execute(f"ATTACH DATABASE '{safe_doc_path}' AS docs")
         attached = True
 
     try:

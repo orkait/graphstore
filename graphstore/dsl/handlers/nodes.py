@@ -24,7 +24,7 @@ class NodeHandlers:
                     if doc:
                         content, ctype = doc
                         if ctype.startswith("text"):
-                            data["_document"] = content.decode("utf-8")
+                            data["_document"] = content.decode("utf-8", errors="replace")
                         else:
                             data["_document"] = content
                         data["_document_type"] = ctype

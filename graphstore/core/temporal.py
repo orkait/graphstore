@@ -73,7 +73,7 @@ _PAT_ISO = re.compile(r'\b(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))
 _PAT_ISO_MONTH = re.compile(r'\b(\d{4})-(\d{2})\b')
 
 # Bare year "2023"
-_PAT_YEAR = re.compile(r'\b(20\d{2})\b')
+_PAT_YEAR = re.compile(r'\b((?:19|20)\d{2})\b')
 
 # Time prefix from LoCoMo: "1:56 pm on 8 May, 2023"
 _PAT_LOCOMO = re.compile(
