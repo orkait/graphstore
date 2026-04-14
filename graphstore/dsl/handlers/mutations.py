@@ -184,14 +184,89 @@ class MutationHandlers:
             str_id = self.store.string_table.intern(node_id)
             slot = self.store.id_to_slot[str_id]
             self.store.columns.set_reserved(slot, "__context__", self.store._active_context)
+
+        # ── Sentence splitting + entity extraction ──────────────
+        from graphstore.algos.sentence_split import split_sentences
+        from graphstore.ingest.entity_extract import (
+            extract_entities, CoReferenceResolver, slug as _ent_slug,
+        )
+
+        resolver = CoReferenceResolver()
+        entity_model_dir = getattr(self, '_entity_model_dir', None)
+        entity_score_threshold = getattr(self, '_entity_score_threshold', 0.6)
+        entity_max_length = getattr(self, '_entity_max_length', 256)
+        all_entities: dict[str, str] = {}
+
+        # Get text to split from embed field or content
+        kind_def = self.schema.describe_node_kind(kind)
+        embed_field = kind_def.get("embed_field") if kind_def else None
+        text_to_split = data.get(embed_field) if embed_field else data.get("content", "")
+
+        # Only split sentences if there are multiple sentences or entity extraction is enabled.
+        # Single-sentence messages don't benefit from sentence-level splitting.
+        sentences = []
+        if text_to_split and isinstance(text_to_split, str):
+            sentences = split_sentences(text_to_split) if len(text_to_split) > 60 else [text_to_split]
+
+        need_sentence_nodes = len(sentences) > 1 or entity_model_dir
+        if need_sentence_nodes and len(sentences) >= 1:
+            for i, sent_text in enumerate(sentences):
+                sent_id = f"{node_id}:s{i}"
+                sent_slot = self.store.put_node(sent_id, "sentence", {
+                    "text": sent_text,
+                    "parent_node": node_id,
+                })
+                self.store.columns.set_reserved(sent_slot, "__blob_state__", "warm")
+                self.store.put_edge(node_id, sent_id, "has_sentence")
+
+                # Embed sentence (respect deferred mode)
+                if self._embedder:
+                    if getattr(self, '_defer_embeddings', False):
+                        self._pending_embeddings.append((sent_slot, sent_text))
+                        if len(self._pending_embeddings) >= self._embed_batch_size:
+                            self.flush_pending_embeddings()
+                    else:
+                        vec = self._embedder.encode_documents([sent_text])[0]
+                        if self._vector_store:
+                            self._vector_store.add(sent_slot, vec)
+
+                # Entity extraction
+                if entity_model_dir:
+                    ents = extract_entities(
+                        sent_text, model_dir=entity_model_dir,
+                        score_threshold=entity_score_threshold,
+                        max_length=entity_max_length,
+                    )
+                    resolved = resolver.resolve(sent_text)
+                    for name in resolved:
+                        s = _ent_slug(name)
+                        if s and s not in all_entities:
+                            all_entities[s] = name
+                    for ent in ents:
+                        s = _ent_slug(ent.text)
+                        if s and s not in all_entities:
+                            all_entities[s] = ent.text
+                            if ent.label == "PER":
+                                resolver.update_context(ent.text)
+
+            # Create entity nodes and mention edges
+            for ent_slug_val, ent_display in all_entities.items():
+                ent_id = f"ent:{ent_slug_val}"
+                try:
+                    self.store.put_node(ent_id, "entity", {"name": ent_display})
+                except Exception:
+                    pass
+                try:
+                    self.store.put_edge(node_id, ent_id, "mentions")
+                except Exception:
+                    pass
+
+        # ── Standard embedding / document handling ──────────────
         str_id = self.store.string_table.intern(node_id)
         slot = self.store.id_to_slot[str_id]
         embedded = self._handle_vector(slot, kind, data, q.vector)
         if q.document and self._document_store:
             self._document_store.put_document(slot, q.document.encode("utf-8"), "text/plain")
-            # Fallback: embed the document text only if nothing was embedded yet
-            # (no explicit VECTOR, no schema EMBED field). Avoids double-embedding
-            # when both schema EMBED and DOCUMENT point to the same text.
             if not embedded and q.vector is None and self._embedder:
                 self._embed_and_store(slot, q.document)
         node = self.store.get_node(node_id)
