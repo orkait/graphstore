@@ -172,9 +172,7 @@ class VectorStore:
         """Serialize index to path (for mmap) or return bytes."""
         target = path or self._path
         if target:
-            # Detach mmap view before writing to avoid corruption
-            if self._readonly:
-                self._ensure_writable()
+            self._ensure_writable()
             self._index.save(str(target))
             return None
         return bytes(self._index.save(None))
