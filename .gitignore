@@ -41,3 +41,4 @@ benchmarks/kaggle/kernel-metadata.json
 
 # pytest tmpdir cache
 pytest-of-*/
+/models/

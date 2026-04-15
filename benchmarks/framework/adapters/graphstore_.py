@@ -79,7 +79,7 @@ def _build_embedder(config: dict[str, Any]):
 
         return FastEmbedEmbedder(
             model_name=config.get("embedder_model", "BAAI/bge-small-en-v1.5"),
-            cache_dir=config.get("cache_dir"),
+            cache_dir=config.get("cache_dir") or config.get("model_cache_dir"),
             threads=config.get("embedder_threads"),
         )
     if name == "onnx":

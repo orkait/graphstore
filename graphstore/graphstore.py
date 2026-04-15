@@ -248,7 +248,10 @@ class GraphStore:
         elif emb_cfg in ("default", "model2vec"):
             try:
                 from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
-                _embedder = Model2VecEmbedder(model_name=cfg.vector.model2vec_model)
+                _embedder = Model2VecEmbedder(
+                    model_name=cfg.vector.model2vec_model,
+                    cache_dir=cfg.vector.model_cache_dir
+                )
             except ImportError:
                 _embedder = None
             except Exception as e:
