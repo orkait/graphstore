@@ -504,6 +504,17 @@ def _resolve_embedder(name: str | None):
         print("[embedder] loading harrier-oss-v1-0.6b (1024d, last-token pooling)", flush=True)
         return load_installed_embedder("harrier-oss-v1-0.6b", dims=1024)
 
+    if name in ("jina-v5-nano", "jina-v5-nano-retrieval"):
+        from graphstore.registry.installer import load_installed_embedder, install_embedder, is_installed
+        if not is_installed("jina-v5-nano-retrieval"):
+            print("[embedder] jina-v5-nano-retrieval not installed", flush=True)
+            install_embedder("jina-v5-nano-retrieval")
+        import os
+        gpu_flag = os.environ.get("GRAPHSTORE_GPU") == "1"
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if gpu_flag else None
+        print(f"[embedder] loading jina-v5-nano-retrieval (768d, {'GPU' if gpu_flag else 'CPU'})", flush=True)
+        return load_installed_embedder("jina-v5-nano-retrieval", dims=768, providers=providers)
+
     if name.startswith("installed:"):
         model_id = name[len("installed:"):]
         from graphstore.registry.installer import load_installed_embedder, is_installed, install_embedder

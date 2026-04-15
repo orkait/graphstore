@@ -483,28 +483,64 @@ class IntelligenceHandlers:
                 u_scores = _algo_recency_decay(u_ts, u_pres_at, u_ref, half_life_days=half_life)
                 recency_signal[no_event_cands] = u_scores
 
-        # Graph signal (opt-in)
+        # Graph signal: entity-aware scoring.
+        # Chunks connected to high-degree entities (mentioned across many sessions)
+        # get boosted. This rewards topical relevance over structural noise.
         graph_enabled = getattr(self, '_graph_signal_enabled', False)
         graph_signal = np.zeros(n, dtype=np.float64)
         if graph_enabled:
-            combined_mat = self.store.edge_matrices.get(None)
-            if combined_mat is not None:
-                mat_n = combined_mat.shape[0]
-                out_deg = np.diff(combined_mat.indptr).astype(np.float64)
-                max_deg = max(1.0, float(out_deg.max()))
-                valid = slot_arr[slot_arr < mat_n]
-                graph_signal[valid] = out_deg[valid] / max_deg
+            # Cache entity degrees: entity_slot -> number of chunks mentioning it
+            entity_degrees: dict[int, int] = {}
+
+            def _entity_degree(ent_slot: int) -> int:
+                if ent_slot not in entity_degrees:
+                    ent_in = self.store.edge_matrices.neighbors_in(ent_slot, "mentions")
+                    entity_degrees[ent_slot] = len(ent_in)
+                return entity_degrees[ent_slot]
+
+            for slot in slot_arr:
+                slot_int = int(slot)
+                # Get entities this chunk mentions
+                ent_slots = self.store.edge_matrices.neighbors_out(slot_int, "mentions")
+                if len(ent_slots) == 0:
+                    continue
+                # Score = sum of log1p(entity_degree)
+                score = 0.0
+                for es in ent_slots:
+                    es_int = int(es)
+                    if es_int < n:  # only valid slots
+                        score += np.log1p(_entity_degree(es_int))
+                graph_signal[slot_int] = score
+
+            # Normalize against max in candidate set
+            cand_scores = graph_signal[slot_arr]
+            max_gs = float(cand_scores.max())
+            if max_gs > 0:
+                graph_signal /= max_gs
 
         # Fusion
         fusion_method = getattr(self, '_fusion_method', 'weighted')
         if fusion_method == 'weighted':
             w = weights if len(weights) >= 3 else [0.55, 0.25, 0.20]
-            third_signal = graph_signal if graph_enabled else recency_signal
-            base_final = w[0] * vec_signal + w[1] * bm25_signal + w[2] * third_signal
+            base_final = w[0] * vec_signal + w[1] * bm25_signal + w[2] * recency_signal
+            if graph_enabled and len(weights) >= 4:
+                base_final += weights[3] * graph_signal
         else:
-            signals = [vec_signal, bm25_signal, graph_signal if graph_enabled else recency_signal]
+            signals = [vec_signal, bm25_signal, recency_signal]
+            if graph_enabled:
+                signals.append(graph_signal)
             base_final = _algo_rrf_fusion(*signals, candidate_slots=slot_arr,
                                            k_rrf=max(getattr(self, '_rrf_k', 60.0), 1.0))
+
+        # Recall frequency boost: frequently recalled memories are implicitly important.
+        # Log-scaled with w=0.05 to nudge without dominating: count 1→0.03, 10→0.12, 100→0.23
+        recall_count_col = self.store.columns.get_column("__recall_count__", n)
+        if recall_count_col is not None:
+            rc_data, rc_pres, _ = recall_count_col
+            rc_counts = rc_data[slot_arr].astype(np.float64)
+            rc_valid = rc_pres[slot_arr]
+            recall_boost = 0.05 * np.log1p(np.where(rc_valid, rc_counts, 0.0))
+            base_final[slot_arr] += recall_boost
 
         base_final += co_bonus
 
@@ -632,12 +668,12 @@ class IntelligenceHandlers:
             if slot is None:
                 continue
             try:
-                if self.store.columns.has_column("__recall_count__"):
-                    if self.store.columns._presence["__recall_count__"][slot]:
-                        current = int(self.store.columns._columns["__recall_count__"][slot])
-                        self.store.columns.set_reserved(slot, "__recall_count__", current + 1)
-                    else:
-                        self.store.columns.set_reserved(slot, "__recall_count__", 1)
+                if not self.store.columns.has_column("__recall_count__"):
+                    self.store.columns._ensure_column("__recall_count__", "int64")
+                pres_col = self.store.columns._presence.get("__recall_count__")
+                if pres_col is not None and pres_col[slot]:
+                    current = int(self.store.columns._columns["__recall_count__"][slot])
+                    self.store.columns.set_reserved(slot, "__recall_count__", current + 1)
                 else:
                     self.store.columns.set_reserved(slot, "__recall_count__", 1)
                 self.store.columns.set_reserved(slot, "__last_recalled_at__", int(time.time() * 1000))

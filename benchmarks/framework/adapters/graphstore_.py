@@ -109,6 +109,16 @@ def _build_embedder(config: dict[str, Any]):
             dims=config.get("embedder_output_dims"),
             providers=providers,
         )
+    if name in ("jina-v5-nano", "jina-v5-nano-retrieval"):
+        from graphstore.registry.installer import load_installed_embedder, set_cache_dir
+        cache = config.get("embedder_cache_dir")
+        if cache:
+            set_cache_dir(cache)
+        return load_installed_embedder(
+            "jina-v5-nano-retrieval",
+            dims=768,
+            providers=providers,
+        )
     if name == "gguf":
         from graphstore.embedding.llamacpp_embedder import LlamaCppEmbedder
         gguf_path = config.get("embedder_gguf_path")
