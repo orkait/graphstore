@@ -25,6 +25,9 @@ snapshot_download("jinaai/jina-embeddings-v5-text-small-retrieval",
 print("Downloading LongMemEval-S...")
 snapshot_download("xiaowu0162/longmemeval-cleaned",
     repo_type="dataset", local_dir="/kaggle/working/longmemeval-data")
+print("Downloading TinyBERT NER...")
+snapshot_download("onnx-community/TinyBERT-finetuned-NER-ONNX",
+    local_dir="/kaggle/working/models/tinybert-ner")
 print("Cloning graphstore (refactor/simplify-retrieval-pipeline)...")
 subprocess.check_call(["git", "clone", "--depth", "1",
     "--branch", "refactor/simplify-retrieval-pipeline",
@@ -44,6 +47,7 @@ sys.argv = ["bench",
     "--embedder-pooling", "last_token",
     "--embedder-max-length", "2048",
     "--embedder-output-dims", "1024",
+    "--entity-model-dir", "/kaggle/working/models/tinybert-ner",
     "--gpu",
     "--gpu-mem-limit-gb", "12",
     "--embed-batch-size", "256",
