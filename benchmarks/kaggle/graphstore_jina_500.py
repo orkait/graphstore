@@ -21,8 +21,7 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
 from huggingface_hub import snapshot_download
 print("Downloading Jina v5 Small ONNX...")
 snapshot_download("jinaai/jina-embeddings-v5-text-small-retrieval",
-    local_dir="/kaggle/working/jina-small",
-    allow_patterns=["onnx/*.onnx*", "tokenizer*", "config*"])
+    local_dir="/kaggle/working/jina-small")
 print("Downloading LongMemEval-S...")
 snapshot_download("xiaowu0162/longmemeval-cleaned",
     repo_type="dataset", local_dir="/kaggle/working/longmemeval-data")
