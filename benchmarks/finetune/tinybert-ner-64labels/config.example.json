@@ -1,0 +1,38 @@
+{
+  "active_provider": "local_ollama",
+  "active_model": "gemma4:31b-cloud",
+  "provider_fallback_order": ["local_ollama", "openrouter"],
+  "providers": {
+    "local_ollama": {
+      "base_url": "http://localhost:11434",
+      "api_key": "REPLACE_WITH_OLLAMA_KEY_OR_LEAVE_EMPTY",
+      "is_local": true,
+      "litellm_prefix": "ollama_chat",
+      "models": {
+        "gemma4:31b-cloud": { "notes": "Primary teacher model for synthetic NER generation." },
+        "qwen3-coder-next:cloud": { "notes": "Backup coder model if Gemma is unavailable." },
+        "minimax-m2.7:cloud": { "notes": "Fallback for teacher generation." }
+      },
+      "model_fallback_order": [
+        "gemma4:31b-cloud",
+        "qwen3-coder-next:cloud",
+        "minimax-m2.7:cloud"
+      ]
+    },
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": "REPLACE_WITH_OPENROUTER_KEY_sk-or-v1-...",
+      "is_local": false,
+      "litellm_prefix": "openrouter",
+      "models": {
+        "google/gemma-4-31b-it": { "notes": "Gemma fallback through OpenRouter." },
+        "minimax/minimax-m2.7:nitro": { "notes": "Secondary fallback." }
+      },
+      "model_fallback_order": [
+        "google/gemma-4-31b-it",
+        "minimax/minimax-m2.7:nitro"
+      ]
+    }
+  },
+  "notes": "Copy to config.json in this folder and fill in API keys. The teacher script reads this config first, then falls back to autoresearch/config.json. Keep the local_ollama.api_key literal exactly the same as the autoresearch reference: REPLACE_WITH_OLLAMA_KEY_OR_LEAVE_EMPTY."
+}

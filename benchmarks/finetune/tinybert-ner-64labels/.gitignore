@@ -1,0 +1,10 @@
+.venv/
+data/
+artifacts/
+config.json
+*.onnx
+*.safetensors
+*.bin
+*.pt
+*.npz
+*.npy

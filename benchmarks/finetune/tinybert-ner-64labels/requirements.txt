@@ -1,0 +1,10 @@
+datasets
+evaluate
+litellm
+onnx
+onnxruntime
+optimum
+tokenizers
+torch
+transformers
+accelerate
