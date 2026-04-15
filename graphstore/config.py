@@ -23,10 +23,10 @@ _log = logging.getLogger(__name__)
 
 
 def _coerce_remember_weights(weights) -> list[float]:
-    """Accept exactly 3 weights. No backward compat."""
+    """Accept 3 or 4 weights. 4th weight is for graph signal (additive)."""
     parsed = [float(w) for w in weights]
-    if len(parsed) != 3:
-        raise ValueError(f"remember_weights must have length 3, got {len(parsed)}")
+    if len(parsed) not in (3, 4):
+        raise ValueError(f"remember_weights must have length 3 or 4, got {len(parsed)}")
     return parsed
 
 
@@ -71,7 +71,7 @@ class DslConfig(msgspec.Struct, frozen=True):
     auto_optimize: bool = False
     optimize_interval: int = 500
     recall_decay: float = 0.5912428069710964
-    remember_weights: list[float] = msgspec.field(default_factory=lambda: [0.55, 0.25, 0.20])
+    remember_weights: list[float] = msgspec.field(default_factory=lambda: [0.52, 0.25, 0.15, 0.08])
     fusion_method: str = "weighted"  # "rrf" or "weighted"
     rrf_k: float = 60.0
     retrieval_strategy: str = "full"
@@ -99,7 +99,7 @@ class DslConfig(msgspec.Struct, frozen=True):
     nucleus_min_text_length: int = 20
     nucleus_allowed_kinds: list[str] = msgspec.field(default_factory=lambda: ["message", "chunk", "section"])
     sentence_query_expansion: bool = True
-    graph_signal_enabled: bool = False
+    graph_signal_enabled: bool = True
     entity_extractor: str = "tinybert_onnx"
     entity_model_dir: str | None = "./models/tinybert-ner"
     entity_score_threshold: float = 0.6

@@ -68,9 +68,16 @@ class IngestHandlers:
         else:
             result = ingest_file(safe_path, using=q.using)
 
+        logger.info("[ingest] %s → %s (%d chars, parser=%s, %.1fs)",
+                     resolved.name, safe_path, len(result.markdown),
+                     result.parser_used, result.elapsed if hasattr(result, 'elapsed') else 0)
+
         chunk_size = getattr(self, '_chunk_max_size', 2000)
         summary_len = getattr(self, '_summary_max_length', 200)
         chunk_overlap = getattr(self, '_chunk_overlap', 50)
+
+        logger.info("[ingest] chunking %d chars (size=%d, overlap=%d) ...",
+                     len(result.markdown), chunk_size, chunk_overlap)
 
         if self._chunker is not None:
             chunks = self._chunker.chunk(
@@ -147,7 +154,17 @@ class IngestHandlers:
 
         chunk_ids = []
         ds = self._document_store
-        for chunk in chunks:
+        embed_batch: list[tuple[int, str]] = []
+        logger.info("[ingest] creating %d chunks for %s ...", len(chunks), parent_id)
+
+        # Entity extraction config
+        entity_model_dir = getattr(self, '_entity_model_dir', None)
+        entity_score_threshold = getattr(self, '_entity_score_threshold', 0.6)
+        entity_max_length = getattr(self, '_entity_max_length', 256)
+
+        t0 = time.monotonic()
+        entity_seen: dict[str, str] = {}  # slug -> display_name
+        for i, chunk in enumerate(chunks):
             chunk_id = f"{parent_id}:chunk:{chunk.index}"
             chunk_fields = {"summary": chunk.summary}
             if chunk.heading:
@@ -177,6 +194,29 @@ class IngestHandlers:
                 self.store.put_edge(sections[chunk.heading], chunk_id, "has_chunk")
             else:
                 self.store.put_edge(parent_id, chunk_id, "has_chunk")
+
+            # Entity extraction + linking (use full chunk text, not summary)
+            if entity_model_dir:
+                from graphstore.ingest.entity_extract import extract_entities, slug as _ent_slug
+                ents = extract_entities(
+                    chunk.text, model_dir=entity_model_dir,
+                    score_threshold=entity_score_threshold, max_length=entity_max_length,
+                )
+                for ent in ents:
+                    s = _ent_slug(ent.text)
+                    if not s:
+                        continue
+                    if s not in entity_seen:
+                        entity_seen[s] = ent.text
+                    ent_id = f"ent:{s}"
+                    try:
+                        self.store.put_node(ent_id, "entity", {"name": ent.text})
+                    except Exception:
+                        pass
+                    try:
+                        self.store.put_edge(chunk_id, ent_id, "mentions")
+                    except Exception:
+                        pass
 
             # Embed chunk text for vector retrieval
             embed_batch.append((chunk_slot, embed_text))
@@ -225,6 +265,9 @@ class IngestHandlers:
             image_count += 1
 
         self._batch_embed_and_store(embed_batch)
+
+        logger.info("[ingest] %s done: %d sections, %d chunks, %d images",
+                     parent_id, len(sections), len(chunks), image_count)
 
         return Result(kind="ok", data={
             "doc_id": parent_id,
