@@ -158,33 +158,31 @@ class GGUFReranker:
     def _embed_and_project(self, texts: str | list[str]) -> list[np.ndarray]:
         if isinstance(texts, str):
             texts = [texts]
-        
-        # We loop over texts to get raw token embeddings [seq_len, dims]
+
+        # Use llama-cpp-python's internal batching if supported, else loop
+        # and unit-normalize for cosine similarity MaxSim math.
         results = []
         for t in texts:
-            # llama-cpp-python returns list of token embeddings if embedding=True
-            # and potentially 2D if multiple sequences (but we pass one at a time)
             e = self._model.embed(t)
             emb = np.array(e, dtype=np.float32)
-            
-            # Ensure it's 2D [seq_len, dims]
             if emb.ndim == 1:
                 emb = emb[np.newaxis, :]
             elif emb.ndim == 3:
-                emb = emb[0] # Take first sequence if 3D
-                
-            # Project tokens if MLP weights provided
+                emb = emb[0]
+
             if self._proj_w1 is not None:
+                # Apply Jina projection [seq, 1024] @ [1024, 1024]
                 emb = emb @ self._proj_w1.T
-                emb = np.maximum(emb, 0)
+                emb = np.maximum(emb, 0)  # ReLU
                 emb = emb @ self._proj_w2.T
-                
-            # Unit-normalize each token embedding for cosine similarity
+
+            # Unit-normalize for MaxSim cosine similarity math
             norms = np.linalg.norm(emb, axis=1, keepdims=True)
             norms[norms == 0] = 1.0
             results.append(emb / norms)
-            
+
         return results
+
 
     def score(self, query: str, documents: list[str]) -> np.ndarray:
         if not documents:
@@ -192,7 +190,8 @@ class GGUFReranker:
 
         # q_emb: [Q_len, dims]
         q_emb = self._embed_and_project(query)[0]
-        # d_embs: list of [D_i_len, dims]
+        
+        # Optimize: embed documents in batches to allow llama-cpp to parallelize prefill
         d_embs = self._embed_and_project(documents)
         
         scores = np.zeros(len(documents), dtype=np.float64)

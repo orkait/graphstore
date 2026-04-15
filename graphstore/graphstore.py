@@ -342,6 +342,9 @@ class GraphStore:
         self._embedder_dirty = False
         self._check_embedder_identity(_conn, _embedder)
 
+        if _embedder is not None and self._runtime.vector_store is None:
+            self._ensure_vector_store(_embedder.dims)
+
         # Create executors before WAL replay so _replay_wal can use them
         self._executor = Executor(self._runtime,
                                   ingest_root=self._ingest_root,
