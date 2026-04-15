@@ -32,24 +32,22 @@ class IntelligenceHandlers:
     _NUCLEUS_STRUCTURAL_EDGES = ("next", "prev", "has_section", "has_chunk")
 
     def _resolve_remember_parent_slot(self, slot: int, n: int) -> int:
-        """Collapse sentence hits back to their parent message/chunk slot."""
+        """Collapse sub-nodes (sentence, chunk, section) back to their logical parent."""
         if slot < 0 or slot >= n:
             return slot
 
-        kind = self.store.string_table.lookup(int(self.store.node_kinds[slot]))
-        if kind != "sentence":
-            return slot
-
-        for field in ("parent_chunk", "parent_node"):
+        # Check for common parent fields across any kind
+        for field in ("parent_chunk", "parent_node", "parent_id"):
             col_info = self.store.columns.get_column(field, n)
             if col_info is None:
                 continue
             col_data, col_pres, _ = col_info
-            if not col_pres[slot]:
-                continue
-            parent_slot = self.store.id_to_slot.get(int(col_data[slot]))
-            if parent_slot is not None:
-                return int(parent_slot)
+            if col_pres[slot]:
+                parent_id_val = col_data[slot]
+                if parent_id_val:
+                    parent_slot = self.store.id_to_slot.get(int(parent_id_val))
+                    if parent_slot is not None:
+                        return int(parent_slot)
         return slot
 
     def _nucleus_neighbors(self, slot: int) -> np.ndarray:
@@ -372,7 +370,8 @@ class IntelligenceHandlers:
                 if len(slots) > 0:
                     s_sims = np.maximum(1.0 - np.asarray(dists, dtype=np.float64), 0.0)
                     for j, slot in enumerate(slots):
-                        slot_int = self._resolve_remember_parent_slot(int(slot), n)
+                        original_slot = int(slot)
+                        slot_int = self._resolve_remember_parent_slot(original_slot, n)
                         sim = float(s_sims[j])
                         if slot_int not in _vec_max_sim or sim > _vec_max_sim[slot_int]:
                             _vec_max_sim[slot_int] = sim
@@ -410,6 +409,7 @@ class IntelligenceHandlers:
                         bm25_scores_np = np.array(list(bm25_max.values()), dtype=np.float64)
 
         if len(vec_slots_np) == 0 and len(bm25_slots_np) == 0:
+            print(f"DEBUG: Stage 1 empty! Query: {q.query} embedder: {self._embedder} vs: {self._vector_store} ds: {self._document_store}")
             return Result(kind="nodes", data=[], count=0)
 
         # Adaptive oversample cap
@@ -426,8 +426,8 @@ class IntelligenceHandlers:
                 if m > 0:
                     bm25_norm /= m
                 combined_scores += bm25_norm
-            top_indices = np.argsort(-combined_scores)[:max_candidates]
-            slot_arr = top_indices
+            top_indices = np.argsort(-combined_scores[slot_arr])[:max_candidates]
+            slot_arr = slot_arr[top_indices]
 
         # ── Stage 2: Signal Fusion ───────────────────────────────────
         weights = getattr(self, '_remember_weights', [0.55, 0.25, 0.20])
@@ -530,11 +530,11 @@ class IntelligenceHandlers:
         base_final *= live_mask
 
         # ── Stage 4: Top-N Selection + Materialization ───────────────
-        valid_slots = np.where(base_final > 0)[0]
-        if len(valid_slots) == 0:
+        if len(slot_arr) == 0:
             return Result(kind="nodes", data=[], count=0)
 
-        order = valid_slots[np.argsort(-base_final[valid_slots])]
+        # Sort all candidates by their final fused score
+        order = slot_arr[np.argsort(-base_final[slot_arr])]
 
         # Materialize candidates for reranker
         results = []

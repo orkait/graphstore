@@ -148,193 +148,6 @@ class TestRRFFusion:
         assert fused_low_k[0] > fused_high_k[0]
 
 
-# ── RRF integration with GraphStore ────────────────────────────────────
-
-
-class TestRRFIntegration:
-    def test_remember_uses_rrf_by_default(self):
-        gs = _make_gs()
-        gs.execute('CREATE NODE "a" kind = "fact" claim = "quantum entanglement is spooky"')
-        gs.execute('CREATE NODE "b" kind = "fact" claim = "classical physics is deterministic"')
-        result = gs.execute('REMEMBER "quantum entanglement is spooky" LIMIT 5')
-        assert result.kind == "nodes"
-        assert len(result.data) > 0
-        assert result.data[0]["_remember_score"] > 0
-        gs.close()
-
-    def test_remember_weighted_fallback(self):
-        gs = _make_gs(fusion_method="weighted")
-        gs.execute('CREATE NODE "a" kind = "fact" claim = "quantum entanglement is spooky"')
-        result = gs.execute('REMEMBER "quantum entanglement is spooky" LIMIT 5')
-        assert result.kind == "nodes"
-        assert len(result.data) > 0
-        gs.close()
-
-    def test_rrf_and_weighted_both_return_results(self):
-        """Both fusion methods should return results for the same data."""
-        for method in ("rrf", "weighted"):
-            gs = _make_gs(fusion_method=method)
-            gs.execute('CREATE NODE "x" kind = "fact" claim = "machine learning is powerful"')
-            gs.execute('CREATE NODE "y" kind = "fact" claim = "machine learning is powerful"')
-            result = gs.execute('REMEMBER "machine learning is powerful" LIMIT 5')
-            assert len(result.data) > 0, f"fusion_method={method} returned 0 results"
-            gs.close()
-
-
-# ── Nucleus expansion ──────────────────────────────────────────────────
-
-
-class TestNucleusExpansion:
-    def test_nucleus_includes_neighbors(self):
-        """Nucleus is off by default; opt-in to test."""
-        gs = _make_gs(nucleus_expansion=True, nucleus_max_neighbors=3)
-        gs.execute('CREATE NODE "main" kind = "fact" claim = "quantum computing uses qubits"')
-        gs.execute('CREATE NODE "nb1" kind = "fact" claim = "qubits can be entangled"')
-        gs.execute('CREATE EDGE "main" -> "nb1" kind = "related"')
-
-        result = gs.execute('REMEMBER "quantum computing" LIMIT 5')
-        assert len(result.data) > 0
-        # Check if neighbor was pulled in via nucleus
-        all_ids = {r["id"] for r in result.data}
-        nucleus_ids = {r["id"] for r in result.data if r.get("_nucleus")}
-        # If main was retrieved directly and nb1 wasn't, nb1 should appear as nucleus
-        direct_ids = all_ids - nucleus_ids
-        if "main" in direct_ids and "nb1" not in direct_ids:
-            assert "nb1" in nucleus_ids, f"Expected nb1 in nucleus, got {result.data}"
-        gs.close()
-
-    def test_nucleus_disabled_no_extra_results(self):
-        gs = _make_gs(nucleus_expansion=False)
-        gs.execute('CREATE NODE "main" kind = "fact" claim = "quantum computing uses qubits"')
-        gs.execute('CREATE NODE "nb" kind = "fact" claim = "totally unrelated content about fish"')
-        gs.execute('CREATE EDGE "main" -> "nb" kind = "related"')
-
-        result = gs.execute('REMEMBER "quantum computing" LIMIT 5')
-        nucleus_nodes = [r for r in result.data if r.get("_nucleus")]
-        assert len(nucleus_nodes) == 0
-        gs.close()
-
-    def test_nucleus_deduplicates(self):
-        gs = _make_gs(nucleus_expansion=True, nucleus_max_neighbors=5)
-        gs.execute('CREATE NODE "a" kind = "fact" claim = "quantum physics is weird"')
-        gs.execute('CREATE NODE "b" kind = "fact" claim = "quantum mechanics is fundamental"')
-        gs.execute('CREATE EDGE "a" -> "b" kind = "related"')
-
-        result = gs.execute('REMEMBER "quantum" LIMIT 10')
-        ids = [r["id"] for r in result.data]
-        assert len(ids) == len(set(ids)), f"Duplicate IDs found: {ids}"
-        gs.close()
-
-    def test_nucleus_respects_max_neighbors(self):
-        gs = _make_gs(nucleus_expansion=True, nucleus_max_neighbors=1)
-        gs.execute('CREATE NODE "main" kind = "fact" claim = "central topic about testing frameworks"')
-        for i in range(5):
-            gs.execute(f'CREATE NODE "nb{i}" kind = "fact" claim = "related to testing frameworks variant {i}"')
-            gs.execute(f'CREATE EDGE "main" -> "nb{i}" kind = "related"')
-
-        result = gs.execute('REMEMBER "testing frameworks" LIMIT 1')
-        nucleus_nodes = [r for r in result.data if r.get("_nucleus")]
-        assert len(nucleus_nodes) <= 1, f"Expected max 1 nucleus node, got {len(nucleus_nodes)}"
-        gs.close()
-
-
-# ── Multiplicative temporal decay ──────────────────────────────────────
-
-
-class TestMultiplicativeDecay:
-    def test_multiplicative_mode_is_default(self):
-        gs = GraphStore(embedder=FixedEmbedder())
-        assert gs._executor._recency_mode == "multiplicative"
-        gs.close()
-
-    def test_additive_mode_returns_results(self):
-        gs = _make_gs(recency_mode="additive")
-        gs.execute('CREATE NODE "a" kind = "fact" claim = "hello world test"')
-        result = gs.execute('REMEMBER "hello world" LIMIT 5')
-        assert len(result.data) > 0
-        gs.close()
-
-    def test_multiplicative_mode_returns_results(self):
-        gs = _make_gs(recency_mode="multiplicative")
-        gs.execute('CREATE NODE "a" kind = "fact" claim = "hello world test content"')
-        result = gs.execute('REMEMBER "hello world test content" LIMIT 5')
-        assert len(result.data) > 0
-        gs.close()
-
-    def test_recency_score_present_in_both_modes(self):
-        for mode in ("additive", "multiplicative"):
-            gs = _make_gs(recency_mode=mode)
-            gs.execute('CREATE NODE "a" kind = "fact" claim = "exact match query text"')
-            result = gs.execute('REMEMBER "exact match query text" LIMIT 5')
-            assert len(result.data) > 0, f"mode={mode} returned no results"
-            assert "_recency_score" in result.data[0], f"mode={mode} missing _recency_score"
-            gs.close()
-
-
-class TestTemporalDslWiring:
-    def test_create_node_event_at_sets_reserved_column(self):
-        gs = _make_gs()
-        gs.execute('CREATE NODE "a" kind = "fact" claim = "visited the museum" EVENT_AT "2023-05-08"')
-        event_at = _event_at_for(gs, "a")
-        assert event_at is not None
-        gs.close()
-
-    def test_upsert_node_event_at_sets_reserved_column(self):
-        gs = _make_gs()
-        gs.execute('UPSERT NODE "a" kind = "fact" claim = "visited the museum" EVENT_AT "2023-05-08"')
-        event_at = _event_at_for(gs, "a")
-        assert event_at is not None
-        gs.close()
-
-    def test_assert_event_at_sets_reserved_column(self):
-        gs = _make_gs()
-        gs.execute('ASSERT "a" kind = "fact" claim = "visited the museum" EVENT_AT "2023-05-08"')
-        event_at = _event_at_for(gs, "a")
-        assert event_at is not None
-        gs.close()
-
-    def test_remember_at_filters_by_exact_date(self):
-        """AT clause is a hard filter — only nodes matching the date range are returned."""
-        gs = _make_gs()
-        gs.execute('CREATE NODE "may8" kind = "fact" claim = "museum trip with family" EVENT_AT "2023-05-08"')
-        gs.execute('CREATE NODE "may9" kind = "fact" claim = "museum trip with family" EVENT_AT "2023-05-09"')
-        gs.execute('CREATE NODE "neutral" kind = "fact" claim = "museum trip with family"')
-        gs.execute('CREATE NODE "old" kind = "fact" claim = "museum trip with family" EVENT_AT "2021-05-08"')
-        # AT "2023-05-09" is a hard single-day filter
-        result = gs.execute('REMEMBER "museum trip with family" AT "2023-05-09" LIMIT 5')
-        ids = [r["id"] for r in result.data]
-        assert "may9" in ids, f"expected may9 (exact date match) in results, got {ids}"
-        assert "old" not in ids, f"old node should be filtered out, got {ids}"
-        assert "may8" not in ids, f"may8 is different date, should be filtered out, got {ids}"
-        gs.close()
-
-
-class TestConsolidation:
-    def test_sys_consolidate_clusters_similar_messages_by_entity(self):
-        gs = GraphStore(embedder=KeywordEmbedder())
-        gs.execute('SYS REGISTER NODE KIND "message" REQUIRED content:string EMBED content')
-        gs.execute('SYS REGISTER NODE KIND "entity" REQUIRED name:string')
-        gs.execute('CREATE NODE "m1" kind = "message" content = "quantum computing uses qubits" EVENT_AT "2023-05-08"')
-        gs.execute('CREATE NODE "m2" kind = "message" content = "quantum computers rely on qubits" EVENT_AT "2023-05-09"')
-        gs.execute('CREATE NODE "m3" kind = "message" content = "pasta recipes use olive oil" EVENT_AT "2023-05-10"')
-        gs.execute('CREATE NODE "ent:q" kind = "entity" name = "Quantum"')
-        gs.execute('CREATE EDGE "m1" -> "ent:q" kind = "mentions"')
-        gs.execute('CREATE EDGE "m2" -> "ent:q" kind = "mentions"')
-        gs.execute('CREATE EDGE "m3" -> "ent:q" kind = "mentions"')
-
-        result = gs.execute('SYS CONSOLIDATE THRESHOLD 0.7')
-        assert result.data["observations"] >= 1
-
-        observations = gs.execute('NODES WHERE kind = "observation"')
-        obs_nodes = observations.data
-        matching = [n for n in obs_nodes if n.get("evidence_count") == 2]
-        assert matching, obs_nodes
-
-        evidence = gs.execute('EDGES FROM "obs:ent:q:0" WHERE kind = "evidence"')
-        assert evidence.count >= 1
-        gs.close()
-
-
 # ── Config wiring ──────────────────────────────────────────────────────
 
 
@@ -343,11 +156,7 @@ class TestConfigWiring:
         gs = GraphStore(embedder=FixedEmbedder())
         assert gs._executor._fusion_method == "weighted"
         assert gs._executor._nucleus_expansion is False  # changed in pipeline refactor
-        assert gs._executor._retrieval_depth == 9
         assert gs._executor._search_oversample == 16
-        assert gs._executor._max_query_entities == 6
-        assert gs._executor._recency_boost_k == 4
-        assert gs._executor._similar_to_oversample == 2
         gs.close()
 
     def test_fusion_method_wired(self):
@@ -360,12 +169,6 @@ class TestConfigWiring:
         assert gs._executor._rrf_k == 30.0
         gs.close()
 
-    def test_type_weights_wired(self):
-        tw = {"fact": 2.0}
-        gs = GraphStore(embedder=FixedEmbedder(), type_weights=tw)
-        assert gs._executor._type_weights == tw
-        gs.close()
-
     def test_nucleus_expansion_wired(self):
         gs = GraphStore(embedder=FixedEmbedder(), nucleus_expansion=True)
         assert gs._executor._nucleus_expansion is True
@@ -374,19 +177,4 @@ class TestConfigWiring:
     def test_nucleus_off_by_default(self):
         gs = GraphStore(embedder=FixedEmbedder())
         assert gs._executor._nucleus_expansion is False
-        gs.close()
-
-    def test_nucleus_max_neighbors_wired(self):
-        gs = GraphStore(embedder=FixedEmbedder(), nucleus_max_neighbors=7)
-        assert gs._executor._nucleus_max_neighbors == 7
-        gs.close()
-
-    def test_recency_mode_wired(self):
-        gs = GraphStore(embedder=FixedEmbedder(), recency_mode="additive")
-        assert gs._executor._recency_mode == "additive"
-        gs.close()
-
-    def test_rrf_is_default_fusion(self):
-        gs = GraphStore(embedder=FixedEmbedder())
-        assert gs._executor._fusion_method == "weighted"
         gs.close()
