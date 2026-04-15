@@ -86,6 +86,10 @@ def main() -> int:
                    help="ONNX file within reranker model dir")
     p.add_argument("--retrieval-strategy", default=None,
                    help="adapter retrieval strategy: remember_rerank, full_rerank, remember_lexical, full, etc.")
+    p.add_argument("--entity-extractor", default=None,
+                   help="dsl.entity_extractor - tinybert_onnx, regex, or None")
+    p.add_argument("--entity-model-dir", default=None,
+                   help="dsl.entity_model_dir - local dir for ONNX entity extractor")
 
     # Adapter query strategy (how the adapter calls REMEMBER/RECALL)
     p.add_argument("--retrieval-depth", type=int, default=None,
@@ -212,6 +216,8 @@ def main() -> int:
         ("fusion_method", "fusion_method"),
         ("rrf_k", "rrf_k"),
         ("retrieval_strategy", "retrieval_strategy"),
+        ("entity_extractor", "entity_extractor"),
+        ("entity_model_dir", "entity_model_dir"),
     ]:
         val = getattr(args, attr, None)
         if val is not None:
