@@ -112,7 +112,7 @@ SUPPORTED_MODELS = {
             "q4f16": {"files": ["onnx/model_q4f16.onnx", "onnx/model_q4f16.onnx_data"]},
             "int8": {"files": ["onnx/model_quantized.onnx", "onnx/model_quantized.onnx_data"]},
         },
-        "default_variant": "q4",
+        "default_variant": "fp16",
     },
     "jina-v5-small-retrieval": {
         "family": "hf_onnx",

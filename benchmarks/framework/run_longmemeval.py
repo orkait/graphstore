@@ -338,7 +338,13 @@ def run_benchmark(
     results_log = []
     started_at = time.time()
 
-    for entry in entries:
+    try:
+        from tqdm import tqdm
+        entries_iter = tqdm(entries, desc=f"Evaluating {mode}")
+    except ImportError:
+        entries_iter = entries
+
+    for entry in entries_iter:
         items = build_corpus(entry, granularity=granularity)
         item_by_id = {item.corpus_id: item for item in items}
 
