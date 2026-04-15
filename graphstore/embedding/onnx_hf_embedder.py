@@ -431,37 +431,38 @@ class OnnxHFEmbedder(Embedder):
         prefixed = [f"{self._query_prefix}{t}" for t in texts]
         return self._encode(prefixed)
 
-    def _encode(self, texts: list[str], max_batch_size: int = 4) -> np.ndarray:
+    def _encode(self, texts: list[str]) -> np.ndarray:
         all_pooled = []
-        for i in range(0, len(texts), max_batch_size):
-            batch_texts = texts[i:i + max_batch_size]
-            encoded = self._tokenizer.encode_batch(batch_texts)
-            input_ids = np.array([e.ids for e in encoded], dtype=np.int64)
-            attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
+        # Process in a single batch to maximize GPU/CPU utilization.
+        # Higher-level GraphStore layer already handles outer batching via 
+        # deferred_embeddings(batch_size=...).
+        encoded = self._tokenizer.encode_batch(texts)
+        input_ids = np.array([e.ids for e in encoded], dtype=np.int64)
+        attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
 
-            embeddings = self._encode_feed_dict(input_ids, attention_mask)
+        embeddings = self._encode_feed_dict(input_ids, attention_mask)
 
-            # Some ONNX exports (e.g. Harrier fp16) bake the SentenceTransformer
-            # pooling head into the graph and return (batch, hidden_dim) directly.
-            # Others return raw (batch, seq_len, hidden_dim) and expect the caller
-            # to pool. Handle both.
-            if embeddings.ndim == 2:
-                pooled = embeddings
-            elif self._pooling_mode == "last_token":
-                last_idx = attention_mask.sum(axis=1) - 1
-                batch_idx = np.arange(embeddings.shape[0])
-                pooled = embeddings[batch_idx, last_idx]
-            else:
-                mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
-                pooled = (embeddings * mask_expanded).sum(axis=1) / mask_expanded.sum(axis=1)
+        # Some ONNX exports (e.g. Harrier fp16) bake the SentenceTransformer
+        # pooling head into the graph and return (batch, hidden_dim) directly.
+        # Others return raw (batch, seq_len, hidden_dim) and expect the caller
+        # to pool. Handle both.
+        if embeddings.ndim == 2:
+            pooled = embeddings
+        elif self._pooling_mode == "last_token":
+            last_idx = attention_mask.sum(axis=1) - 1
+            batch_idx = np.arange(embeddings.shape[0])
+            pooled = embeddings[batch_idx, last_idx]
+        else:
+            mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
+            pooled = (embeddings * mask_expanded).sum(axis=1) / mask_expanded.sum(axis=1)
 
-            # Matryoshka truncation + renormalize
-            if self._output_dims < pooled.shape[1]:
-                pooled = truncate_dims(pooled, self._output_dims)
-            else:
-                pooled = l2_normalize(pooled)
+        # Matryoshka truncation + renormalize
+        if self._output_dims < pooled.shape[1]:
+            pooled = truncate_dims(pooled, self._output_dims)
+        else:
+            pooled = l2_normalize(pooled)
 
-            all_pooled.append(pooled.astype(np.float32))
+        all_pooled.append(pooled.astype(np.float32))
 
         return np.vstack(all_pooled) if all_pooled else np.empty((0, self._output_dims), dtype=np.float32)
 
