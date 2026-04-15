@@ -46,6 +46,7 @@ class VectorConfig(msgspec.Struct, frozen=True):
     embedder_dims: int | None = None
     embedder_max_length: int = 512
     gpu_layers: int = 0
+    quantize_binary: bool = False
     similarity_threshold: float = 0.85
     duplicate_threshold: float = 0.95
     search_oversample: int = 16
@@ -218,6 +219,7 @@ _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "reranker_max_length":  ("dsl", "reranker_max_length"),
     "reranker_gpu_layers":  ("dsl", "reranker_gpu_layers"),
     "rerank_oversample":    ("dsl", "rerank_oversample"),
+    "quantize_binary":      ("vector", "quantize_binary"),
     "search_oversample":    ("vector", "search_oversample"),
     "similarity_threshold": ("vector", "similarity_threshold"),
     "duplicate_threshold":  ("vector", "duplicate_threshold"),

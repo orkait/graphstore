@@ -104,6 +104,7 @@ class GraphStore:
                  reranker_max_length=_UNSET,
                  reranker_gpu_layers=_UNSET,
                  rerank_oversample=_UNSET,
+                 quantize_binary=_UNSET,
                  use_compression=_UNSET,
                  initial_capacity=_UNSET,
                  ):
@@ -206,6 +207,8 @@ class GraphStore:
             overrides["reranker_gpu_layers"] = reranker_gpu_layers
         if rerank_oversample is not self._UNSET:
             overrides["rerank_oversample"] = rerank_oversample
+        if quantize_binary is not self._UNSET:
+            overrides["quantize_binary"] = quantize_binary
         if use_compression is not self._UNSET:
             overrides["use_compression"] = use_compression
         if initial_capacity is not self._UNSET:
@@ -718,6 +721,7 @@ class GraphStore:
             self._runtime.vector_store = VectorStore(
                 dims=self._runtime.vector_store.dims,
                 capacity=self._config.core.initial_capacity,
+                quantize_binary=self._config.vector.quantize_binary
             )
 
         import collections
@@ -914,7 +918,11 @@ class GraphStore:
         vs = self._runtime.vector_store
         if vs is None:
             from graphstore.vector.store import VectorStore
-            vs = VectorStore(dims=dims, capacity=self._runtime.store._capacity)
+            vs = VectorStore(
+                dims=dims, 
+                capacity=self._runtime.store._capacity,
+                quantize_binary=self._config.vector.quantize_binary
+            )
             self._runtime.vector_store = vs
             self._record_embedder_identity(dims)
         elif vs.dims != dims:
