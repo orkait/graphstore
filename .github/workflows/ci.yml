@@ -40,7 +40,7 @@ jobs:
             hf-model2vec-${{ runner.os }}-
 
       - name: Install dependencies
-        run: pip install -e ".[dev,playground,ingest-pro]"
+        run: pip install -e ".[dev,playground,ingest-pro,embed-default]"
 
       - name: Run tests
         run: pytest --tb=short -q --ignore=tests/test_server.py
