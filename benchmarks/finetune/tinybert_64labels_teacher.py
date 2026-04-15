@@ -13,6 +13,7 @@ from benchmarks.finetune.tinybert_ner_64labels.labels import build_label_maps
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _WORKSPACE_DIR = _ROOT / "benchmarks" / "finetune" / "tinybert-ner-64labels"
 _CONFIG_PATHS = (
+    _WORKSPACE_DIR / "config.sample.json",
     _WORKSPACE_DIR / "config.json",
     _ROOT / "autoresearch" / "config.json",
 )

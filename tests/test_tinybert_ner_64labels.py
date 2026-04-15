@@ -79,6 +79,6 @@ def test_finetune_config_uses_same_ollama_key_literal():
     from pathlib import Path
 
     config = json.loads(
-        Path("benchmarks/finetune/tinybert-ner-64labels/config.example.json").read_text()
+        Path("benchmarks/finetune/tinybert-ner-64labels/config.sample.json").read_text()
     )
     assert config["providers"]["local_ollama"]["api_key"] == "REPLACE_WITH_OLLAMA_KEY_OR_LEAVE_EMPTY"

@@ -21,10 +21,10 @@ uv pip install -r requirements.txt
 
 ## LLM config
 
-Copy the local example and fill in the provider keys:
+Copy the local sample and fill in the provider keys:
 
 ```bash
-cp benchmarks/finetune/tinybert-ner-64labels/config.example.json \
+cp benchmarks/finetune/tinybert-ner-64labels/config.sample.json \
    benchmarks/finetune/tinybert-ner-64labels/config.json
 ```
 
