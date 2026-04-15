@@ -83,11 +83,21 @@ def checkpoint(store: CoreStore, schema: SchemaRegistry, conn, force: bool = Fal
         conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
                      ("schema", mjson.encode(schema.to_dict()), "json"))
 
-        # Vector index (check if vector store is present)
+        # Vector index (2-tier: file-based with path ref, or inline blob for in-memory)
         vectors = getattr(store, 'vectors', None)
         if vectors is not None and vectors.count() > 0:
-            conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
-                         ("vector_index", vectors.save(), "usearch"))
+            vector_path = getattr(vectors, '_path', None)
+            if vector_path:
+                # Save to file, store marker in blobs
+                vectors.save(vector_path)
+                conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                             ("vector_index", b"FILE_BASED", "marker"))
+            else:
+                # In-memory mode: store as blob
+                v_data = vectors.save()
+                conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
+                             ("vector_index", v_data, "usearch"))
+
             pres = vectors._has_vector[:store._next_slot]
             conn.execute("INSERT OR REPLACE INTO blobs VALUES (?, ?, ?)",
                          ("vector_presence", pres.tobytes(), str(pres.dtype)))

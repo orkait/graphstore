@@ -86,12 +86,16 @@ class TestVectorClause:
         assert g._vector_store.has_vector(0)
 
     def test_explicit_vector_overrides_auto_embed(self):
-        g = GraphStore()
-        g.execute('SYS REGISTER NODE KIND "memory" REQUIRED content:string EMBED content')
+        """Explicit VECTOR clause should be used instead of auto-embedding."""
+        g = GraphStore(embedder=None)
+        g._ensure_vector_store(4)
+        g.execute('SYS REGISTER NODE KIND "memory" REQUIRED content:string')
         g.execute('CREATE NODE "m1" kind = "memory" content = "hello" VECTOR [1.0, 0.0, 0.0, 0.0]')
         # Should use explicit vector, not auto-embedded
         vec = g._vector_store.get_vector(0)
-        assert len(vec) == 4  # explicit 4d, not model2vec dims
+        assert len(vec) == 4
+        assert np.allclose(vec, [1.0, 0.0, 0.0, 0.0])
+        g.close()
 
 
 class TestEmbedClause:

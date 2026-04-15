@@ -44,7 +44,7 @@ class IntelligenceHandlers:
             col_data, col_pres, _ = col_info
             if col_pres[slot]:
                 parent_id_val = col_data[slot]
-                if parent_id_val:
+                if parent_id_val is not None:
                     parent_slot = self.store.id_to_slot.get(int(parent_id_val))
                     if parent_slot is not None:
                         return int(parent_slot)
@@ -409,7 +409,6 @@ class IntelligenceHandlers:
                         bm25_scores_np = np.array(list(bm25_max.values()), dtype=np.float64)
 
         if len(vec_slots_np) == 0 and len(bm25_slots_np) == 0:
-            print(f"DEBUG: Stage 1 empty! Query: {q.query} embedder: {self._embedder} vs: {self._vector_store} ds: {self._document_store}")
             return Result(kind="nodes", data=[], count=0)
 
         # Adaptive oversample cap

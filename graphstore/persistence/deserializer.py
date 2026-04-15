@@ -5,11 +5,12 @@ reconstructing the in-memory CoreStore with arrays, edge matrices,
 secondary indices, and tombstones.
 """
 
+import os
 import json
+from pathlib import Path
 from urllib.parse import unquote
 
 import msgspec.json as mjson
-
 import numpy as np
 
 from graphstore.core.store import CoreStore
@@ -19,7 +20,7 @@ from graphstore.persistence.database import SCHEMA_VERSION
 from graphstore.core.errors import VersionMismatch
 
 
-def load(conn, use_compression: bool = False) -> tuple[CoreStore, SchemaRegistry]:
+def load(conn, use_compression: bool = False, db_path: str | Path | None = None) -> tuple[CoreStore, SchemaRegistry]:
     """Load graph from sqlite. Returns (store, schema).
 
     Raises VersionMismatch if schema_version doesn't match.
@@ -146,11 +147,21 @@ def load(conn, use_compression: bool = False) -> tuple[CoreStore, SchemaRegistry
     if dims_row:
         from graphstore.vector.store import VectorStore
         dims = int(dims_row[0])
-        store.vectors = VectorStore(dims=dims, capacity=capacity)
+        
+        vector_path = None
+        if db_path:
+            vector_path = os.path.join(str(db_path), "vectors.usearch")
+            
+        store.vectors = VectorStore(dims=dims, capacity=capacity, path=vector_path)
 
-        index_row = conn.execute("SELECT data FROM blobs WHERE key='vector_index'").fetchone()
+        index_row = conn.execute("SELECT data, dtype FROM blobs WHERE key='vector_index'").fetchone()
         if index_row:
-            store.vectors.load(index_row[0])
+            data, dtype = index_row
+            if dtype == "marker" and data == b"FILE_BASED":
+                # Handled by __init__(path=...) above
+                pass
+            else:
+                store.vectors.load(data)
 
         pres_row = conn.execute("SELECT data, dtype FROM blobs WHERE key='vector_presence'").fetchone()
         if pres_row:
