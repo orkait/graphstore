@@ -186,6 +186,9 @@ class MutationHandlers:
             self.store.columns.set_reserved(slot, "__context__", self.store._active_context)
 
         # ── Sentence splitting + entity extraction ──────────────
+        # Only split if this is a primary node, not a sentence/entity already
+        is_sub_node = kind in ("sentence", "entity")
+        
         from graphstore.algos.sentence_split import split_sentences
         from graphstore.ingest.entity_extract import (
             extract_entities, CoReferenceResolver, slug as _ent_slug,
@@ -202,11 +205,11 @@ class MutationHandlers:
         text_to_split = data.get(embed_field) if embed_field else data.get("content", "")
 
         sentences = []
-        if text_to_split and isinstance(text_to_split, str):
+        if not is_sub_node and text_to_split and isinstance(text_to_split, str):
             sentences = split_sentences(text_to_split)
 
-        need_sentence_nodes = len(sentences) >= 1
-        if need_sentence_nodes and len(sentences) >= 1:
+        need_sentence_nodes = not is_sub_node and len(sentences) >= 1
+        if need_sentence_nodes:
             # Parse parent's EVENT_AT for inheritance by sentence nodes
             parent_event_ms = self._parse_event_at(getattr(q, 'event_at', None))
             for i, sent_text in enumerate(sentences):

@@ -178,58 +178,10 @@ class IngestHandlers:
             else:
                 self.store.put_edge(parent_id, chunk_id, "has_chunk")
 
-            # Sentence splitting + entity extraction
-            from graphstore.algos.sentence_split import split_sentences
-            from graphstore.ingest.entity_extract import (
-                extract_entities, CoReferenceResolver, slug as _ent_slug,
-            )
-
-            resolver = CoReferenceResolver()
-            entity_model_dir = getattr(self, '_entity_model_dir', None)
-            entity_score_threshold = getattr(self, '_entity_score_threshold', 0.6)
-            entity_max_length = getattr(self, '_entity_max_length', 256)
-            sentences = split_sentences(chunk.text)
-            for si, sent_text in enumerate(sentences):
-                sent_id = f"{chunk_id}:s{si}"
-                sent_slot = self.store.put_node(sent_id, "sentence", {
-                    "text": sent_text,
-                    "parent_chunk": chunk_id,
-                })
-                set_reserved(sent_slot, "__blob_state__", "warm")
-                embed_batch.append((sent_slot, sent_text))
-                self.store.put_edge(chunk_id, sent_id, "has_sentence")
-
-                # Entity extraction
-                if entity_model_dir:
-                    ents = extract_entities(
-                        sent_text, model_dir=entity_model_dir,
-                        score_threshold=entity_score_threshold,
-                        max_length=entity_max_length,
-                    )
-                    sentence_entities: dict[str, str] = {}
-                    resolved = resolver.resolve(sent_text)
-                    for name in resolved:
-                        s = _ent_slug(name)
-                        if s:
-                            sentence_entities[s] = name
-                    for ent in ents:
-                        s = _ent_slug(ent.text)
-                        if s:
-                            sentence_entities[s] = ent.text
-                            if ent.label == "PER":
-                                resolver.update_context(ent.text)
-
-                    for ent_slug_val, ent_display in sentence_entities.items():
-                        ent_id = f"ent:{ent_slug_val}"
-                        try:
-                            self.store.put_node(ent_id, "entity", {"name": ent_display})
-                        except Exception:
-                            pass
-                        try:
-                            self.store.put_edge(sent_id, ent_id, "mentions")
-                        except Exception:
-                            pass
-
+            # Note: sentence splitting and entity extraction are now handled
+            # automatically by the store during put_node() if kinds allow.
+            # We don't need to manually split here anymore.
+            
         if ds:
             ds._conn.commit()
 
