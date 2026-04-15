@@ -98,8 +98,8 @@ def run(label: str = "test", k: int = 10, max_conversations: int | None = None) 
     config = {
         "embedder": "installed",
         "embedder_model": "jina-v5-small-retrieval",
-        "embedder_cache_dir": "/tmp/gs_models",
-        "embedder_gpu": True,
+        "embedder_cache_dir": "./models",
+        "embedder_gpu": False,
         "ceiling_mb": 512,
     }
 

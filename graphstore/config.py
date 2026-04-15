@@ -49,7 +49,7 @@ class VectorConfig(msgspec.Struct, frozen=True):
     duplicate_threshold: float = 0.95
     search_oversample: int = 16
     model2vec_model: str = "minishlab/M2V_base_output"
-    model_cache_dir: str | None = None
+    model_cache_dir: str | None = "./models"
 
 
 class DocumentConfig(msgspec.Struct, frozen=True):
@@ -99,12 +99,12 @@ class DslConfig(msgspec.Struct, frozen=True):
     sentence_query_expansion: bool = True
     graph_signal_enabled: bool = False
     entity_extractor: str = "tinybert_onnx"
-    entity_model_dir: str | None = None
+    entity_model_dir: str | None = "./models/tinybert-ner"
     entity_score_threshold: float = 0.6
     entity_max_length: int = 256
     reranker: str | None = None
-    reranker_model_dir: str | None = None
-    reranker_projector_path: str | None = None
+    reranker_model_dir: str | None = "./models/jina-reranker-v3/jina-reranker-v3-Q8_0.gguf"
+    reranker_projector_path: str | None = "./models/jina-reranker-v3/projector.safetensors"
     reranker_max_length: int = 2048
     reranker_gpu_layers: int = -1
     rerank_oversample: int = 10

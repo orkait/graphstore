@@ -4,7 +4,10 @@ from graphstore.ingest.entity_extract import (
     extract_entities, CoReferenceResolver, Entity, _get_extractor
 )
 
-MODEL_DIR = "/tmp/gs_models/tinybert-ner"
+import os
+from pathlib import Path
+
+MODEL_DIR = Path(__file__).parent.parent / "models" / "tinybert-ner"
 
 
 class TestEntityExtractor:

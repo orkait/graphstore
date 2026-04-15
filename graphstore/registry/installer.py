@@ -129,6 +129,7 @@ def load_installed_embedder(
     dims: int | None = None,
     providers: list[str] | str | None = None,
     n_gpu_layers: int = 0,
+    gpu_mem_limit: int | None = None,
 ):
     """Load an installed embedder (ONNX or GGUF).
 
@@ -168,6 +169,7 @@ def load_installed_embedder(
         pooling_mode=manifest.get("pooling", "mean"),
         onnx_file=manifest.get("onnx_file"),
         providers=providers,
+        gpu_mem_limit=gpu_mem_limit,
     )
 
 
