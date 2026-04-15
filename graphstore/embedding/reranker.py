@@ -143,6 +143,7 @@ class GGUFReranker:
             n_ctx=actual_ctx,
             n_batch=actual_batch,
             n_gpu_layers=n_gpu_layers,
+            flash_attn=True,
             verbose=False,
         )
 
