@@ -99,7 +99,7 @@ def main() -> int:
 
     # GraphStore engine config (mirrors graphstore.json, overrides config chain)
     p.add_argument("--remember-weights", default=None,
-                   help="dsl.remember_weights - 5 comma-separated fusion weights")
+                   help="dsl.remember_weights - 3 or 4 comma-separated fusion weights (vec,bm25,recency[,graph])")
     p.add_argument("--search-oversample", type=int, default=None,
                    help="vector.search_oversample - usearch ANN oversample factor")
     p.add_argument("--recall-decay", type=float, default=None,
