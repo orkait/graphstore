@@ -1,4 +1,4 @@
-"""Kaggle: GraphStore + Jina v5 Nano on LongMemEval-S (500 records)
+"""Kaggle: GraphStore + Jina v5 Small on LongMemEval-S (500 records)
 
 Tuning config: benchmarks/graphstore.json (loaded via GRAPHSTORE_CONFIG env var)
 Environment config: inlined below (Kaggle-specific paths, deps, GPU settings)
@@ -19,15 +19,16 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
     "--no-deps", "--force-reinstall", "onnxruntime-gpu>=1.23"])
 
 from huggingface_hub import snapshot_download
-print("Downloading Jina v5 Nano FP16...")
-snapshot_download("jinaai/jina-embeddings-v5-text-nano-retrieval",
-    local_dir="/kaggle/working/jina-nano",
+print("Downloading Jina v5 Small FP16...")
+snapshot_download("jinaai/jina-embeddings-v5-text-small-retrieval",
+    local_dir="/kaggle/working/jina-small",
     allow_patterns=["onnx/model_fp16.onnx*", "tokenizer*", "config*"])
 print("Downloading LongMemEval-S...")
 snapshot_download("xiaowu0162/longmemeval-cleaned",
     repo_type="dataset", local_dir="/kaggle/working/longmemeval-data")
-print("Cloning graphstore...")
+print("Cloning graphstore (refactor/simplify-retrieval-pipeline)...")
 subprocess.check_call(["git", "clone", "--depth", "1",
+    "--branch", "refactor/simplify-retrieval-pipeline",
     "https://github.com/orkait/graphstore.git", "/kaggle/working/graphstore"])
 
 # Point GraphStore at the benchmark config (single source of truth for tuning)
@@ -40,15 +41,15 @@ sys.argv = ["bench",
     "--data-path", "/kaggle/working/longmemeval-data",
     "--variant", "s",
     "--embedder", "onnx",
-    "--embedder-model-dir", "/kaggle/working/jina-nano",
-    "--embedder-pooling", "mean",
+    "--embedder-model-dir", "/kaggle/working/jina-small",
+    "--embedder-pooling", "last_token",
     "--embedder-max-length", "2048",
-    "--embedder-output-dims", "768",
+    "--embedder-output-dims", "1024",
     "--gpu",
     "--gpu-mem-limit-gb", "12",
     "--embed-batch-size", "256",
     "--out-dir", "/kaggle/working/results",
-    "--run-tag", "graphstore-jina-500",
+    "--run-tag", "graphstore-jina-v5-small",
 ]
 from benchmarks.framework.docker_runner import main
 sys.exit(main())
