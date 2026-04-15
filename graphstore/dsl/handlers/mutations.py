@@ -266,11 +266,17 @@ class MutationHandlers:
                             pass
 
         # ── Standard embedding / document handling ──────────────
-        # Parent nodes retain their vector for SIMILAR TO NODE and system ops.
         # Sentence vectors supplement the parent for fine-grained retrieval.
+        # We skip auto-embedding the massive parent node if we extracted sentences
+        # to save GPU memory and avoid "blurry" semantic averages.
         str_id = self.store.string_table.intern(node_id)
         slot = self.store.id_to_slot[str_id]
-        embedded = self._handle_vector(slot, kind, data, q.vector)
+        
+        if need_sentence_nodes and q.vector is None:
+            embedded = False
+        else:
+            embedded = self._handle_vector(slot, kind, data, q.vector)
+            
         if q.document and self._document_store:
             self._document_store.put_document(slot, q.document.encode("utf-8"), "text/plain")
             # Only fallback-embed parent if no sentence nodes and no explicit vector

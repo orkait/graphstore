@@ -304,7 +304,7 @@ class OnnxHFEmbedder(Embedder):
         if not tok_path.exists():
             raise FileNotFoundError(f"tokenizer.json not found in {model_dir}")
         self._tokenizer = Tokenizer.from_file(str(tok_path))
-        self._max_length = min(max_length, 2048)
+        self._max_length = min(max_length, 512)
         self._tokenizer.enable_padding(pad_id=0, pad_to_multiple_of=128)
         self._tokenizer.enable_truncation(max_length=self._max_length)
 
@@ -342,6 +342,11 @@ class OnnxHFEmbedder(Embedder):
 
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        
+        # Disable MatMulNBits on CUDA - it has a known 1.2GB pre-allocation bug
+        # that triggers OOM on 12-16GB cards during prefill.
+        if uses_gpu:
+            sess_options.add_session_config_entry("session.disable_matmul_nbits", "1")
 
         sess_kwargs: dict = {
             "sess_options": sess_options,
@@ -426,34 +431,39 @@ class OnnxHFEmbedder(Embedder):
         prefixed = [f"{self._query_prefix}{t}" for t in texts]
         return self._encode(prefixed)
 
-    def _encode(self, texts: list[str]) -> np.ndarray:
-        encoded = self._tokenizer.encode_batch(texts)
-        input_ids = np.array([e.ids for e in encoded], dtype=np.int64)
-        attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
+    def _encode(self, texts: list[str], max_batch_size: int = 4) -> np.ndarray:
+        all_pooled = []
+        for i in range(0, len(texts), max_batch_size):
+            batch_texts = texts[i:i + max_batch_size]
+            encoded = self._tokenizer.encode_batch(batch_texts)
+            input_ids = np.array([e.ids for e in encoded], dtype=np.int64)
+            attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
 
-        embeddings = self._encode_feed_dict(input_ids, attention_mask)
+            embeddings = self._encode_feed_dict(input_ids, attention_mask)
 
-        # Some ONNX exports (e.g. Harrier fp16) bake the SentenceTransformer
-        # pooling head into the graph and return (batch, hidden_dim) directly.
-        # Others return raw (batch, seq_len, hidden_dim) and expect the caller
-        # to pool. Handle both.
-        if embeddings.ndim == 2:
-            pooled = embeddings
-        elif self._pooling_mode == "last_token":
-            last_idx = attention_mask.sum(axis=1) - 1
-            batch_idx = np.arange(embeddings.shape[0])
-            pooled = embeddings[batch_idx, last_idx]
-        else:
-            mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
-            pooled = (embeddings * mask_expanded).sum(axis=1) / mask_expanded.sum(axis=1)
+            # Some ONNX exports (e.g. Harrier fp16) bake the SentenceTransformer
+            # pooling head into the graph and return (batch, hidden_dim) directly.
+            # Others return raw (batch, seq_len, hidden_dim) and expect the caller
+            # to pool. Handle both.
+            if embeddings.ndim == 2:
+                pooled = embeddings
+            elif self._pooling_mode == "last_token":
+                last_idx = attention_mask.sum(axis=1) - 1
+                batch_idx = np.arange(embeddings.shape[0])
+                pooled = embeddings[batch_idx, last_idx]
+            else:
+                mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
+                pooled = (embeddings * mask_expanded).sum(axis=1) / mask_expanded.sum(axis=1)
 
-        # Matryoshka truncation + renormalize
-        if self._output_dims < pooled.shape[1]:
-            pooled = truncate_dims(pooled, self._output_dims)
-        else:
-            pooled = l2_normalize(pooled)
+            # Matryoshka truncation + renormalize
+            if self._output_dims < pooled.shape[1]:
+                pooled = truncate_dims(pooled, self._output_dims)
+            else:
+                pooled = l2_normalize(pooled)
 
-        return pooled.astype(np.float32)
+            all_pooled.append(pooled.astype(np.float32))
+
+        return np.vstack(all_pooled) if all_pooled else np.empty((0, self._output_dims), dtype=np.float32)
 
     def _encode_feed_dict(self, input_ids: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
         feed = {
