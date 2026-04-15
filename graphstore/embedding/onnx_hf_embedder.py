@@ -304,8 +304,9 @@ class OnnxHFEmbedder(Embedder):
         if not tok_path.exists():
             raise FileNotFoundError(f"tokenizer.json not found in {model_dir}")
         self._tokenizer = Tokenizer.from_file(str(tok_path))
+        self._max_length = min(max_length, 2048)
         self._tokenizer.enable_padding(pad_id=0, pad_to_multiple_of=128)
-        self._tokenizer.enable_truncation(max_length=max_length)
+        self._tokenizer.enable_truncation(max_length=self._max_length)
 
         # Load ONNX model - prefer explicit file from manifest if provided.
         if onnx_file:
@@ -331,8 +332,10 @@ class OnnxHFEmbedder(Embedder):
 
         provider_options = None
         if gpu_mem_limit and uses_gpu:
+            # Treat gpu_mem_limit as GB and convert to bytes for onnxruntime
+            limit_bytes = int(gpu_mem_limit) * 1024 * 1024 * 1024
             provider_options = [
-                {"gpu_mem_limit": str(gpu_mem_limit)}
+                {"gpu_mem_limit": str(limit_bytes)}
                 if p == "CUDAExecutionProvider" else {}
                 for p in self._providers
             ]
