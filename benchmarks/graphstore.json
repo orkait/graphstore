@@ -1,6 +1,6 @@
 {
   "dsl": {
-    "remember_weights": [0.50, 0.20, 0.10, 0.15, 0.05],
+    "remember_weights": [0.52, 0.25, 0.15, 0.08],
     "hybridrag_weight": 0.15,
     "recency_half_life_days": 365.0
   }
