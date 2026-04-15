@@ -178,9 +178,8 @@ class IngestHandlers:
             else:
                 self.store.put_edge(parent_id, chunk_id, "has_chunk")
 
-            # Note: sentence splitting and entity extraction are now handled
-            # automatically by the store during put_node() if kinds allow.
-            # We don't need to manually split here anymore.
+            # Embed chunk text for vector retrieval
+            embed_batch.append((chunk_slot, embed_text))
             
         if ds:
             ds._conn.commit()

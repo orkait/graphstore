@@ -1,21 +1,53 @@
 """VectorStore: HNSW vector index for semantic similarity search."""
 
+from pathlib import Path
 import numpy as np
 from usearch.index import Index
 
 
 class VectorStore:
-    """HNSW vector index backed by usearch."""
+    """HNSW vector index backed by usearch.
+    
+    Supports:
+    - Binary Quantization (1-bit) for 32x RAM reduction.
+    - Memory-Mapped (mmap) views for zero-RAM search on large datasets.
+    """
 
-    def __init__(self, dims: int, capacity: int = 1024, quantize_binary: bool = False):
+    def __init__(self, dims: int, capacity: int = 1024, quantize_binary: bool = False, path: str | None = None):
         self._dims = dims
         self._quantize_binary = quantize_binary
+        self._path = path
+        self._readonly = False
+
         if quantize_binary:
             self._index = Index(ndim=dims, metric="hamming", dtype="b1")
         else:
             self._index = Index(ndim=dims, metric="cos", dtype="f32")
+
+        if path and Path(path).exists():
+            # Memory-mapped view for zero-RAM search. On first write,
+            # we switch to an in-memory copy.
+            self._index.view(str(path))
+            self._readonly = True
+
         self._has_vector = np.zeros(capacity, dtype=bool)
         self._capacity = capacity
+
+    def _ensure_writable(self) -> None:
+        """Switch from mmap view to in-memory copy if a write is about to happen."""
+        if not self._readonly or not self._path:
+            return
+        if not Path(self._path).exists():
+            self._readonly = False
+            return
+        # Load from file into memory, preserving current state
+        if self._quantize_binary:
+            new_index = Index(ndim=self._dims, metric="hamming", dtype="b1")
+        else:
+            new_index = Index(ndim=self._dims, metric="cos", dtype="f32")
+        new_index.load(self._path)
+        self._index = new_index
+        self._readonly = False
 
     @property
     def dims(self) -> int:
@@ -23,6 +55,7 @@ class VectorStore:
 
     def add(self, slot: int, vector: np.ndarray) -> None:
         """Add or replace vector for a slot."""
+        self._ensure_writable()
         if slot >= self._capacity:
             self.grow(max(slot + 1, self._capacity * 2))
             
@@ -46,6 +79,7 @@ class VectorStore:
 
     def remove(self, slot: int) -> None:
         """Remove vector for a slot."""
+        self._ensure_writable()
         if slot < self._capacity and self._has_vector[slot]:
             self._index.remove(slot)
             self._has_vector[slot] = False
@@ -134,19 +168,37 @@ class VectorStore:
         else:
             return n * (self._dims * 4 + 64) + self._has_vector.nbytes
 
-    def save(self) -> bytes:
-        """Serialize index to bytes."""
+    def save(self, path: str | None = None) -> bytes | None:
+        """Serialize index to path (for mmap) or return bytes."""
+        target = path or self._path
+        if target:
+            # Detach mmap view before writing to avoid corruption
+            if self._readonly:
+                self._ensure_writable()
+            self._index.save(str(target))
+            return None
         return bytes(self._index.save(None))
 
-    def load(self, data: bytes) -> None:
-        """Deserialize index from bytes."""
-        if self._quantize_binary:
-            new_index = Index(ndim=self._dims, metric="hamming", dtype="b1")
+    def load(self, data: bytes | str | Path) -> None:
+        """Deserialize index from bytes or file path."""
+        if isinstance(data, (str, Path)):
+            self._path = str(data)
+            # Memory-mapped view for zero-RAM search. Writable on demand via _ensure_writable().
+            if self._quantize_binary:
+                self._index = Index(ndim=self._dims, metric="hamming", dtype="b1")
+            else:
+                self._index = Index(ndim=self._dims, metric="cos", dtype="f32")
+            self._index.view(str(data))
+            self._readonly = True
         else:
-            new_index = Index(ndim=self._dims, metric="cos", dtype="f32")
-        new_index.load(data)
-        self._index = new_index
-        keys = list(new_index.keys)
+            if self._quantize_binary:
+                new_index = Index(ndim=self._dims, metric="hamming", dtype="b1")
+            else:
+                new_index = Index(ndim=self._dims, metric="cos", dtype="f32")
+            new_index.load(data)
+            self._index = new_index
+
+        keys = list(self._index.keys)
         if keys:
             max_key = int(max(keys))
             new_capacity = max(self._capacity, max_key + 1)

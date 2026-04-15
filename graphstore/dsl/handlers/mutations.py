@@ -230,9 +230,7 @@ class MutationHandlers:
                         if len(self._pending_embeddings) >= self._embed_batch_size:
                             self.flush_pending_embeddings()
                     else:
-                        vec = self._embedder.encode_documents([sent_text])[0]
-                        if self._vector_store:
-                            self._vector_store.add(sent_slot, vec)
+                        self._embed_and_store(sent_slot, sent_text)
 
                 # Entity extraction
                 if entity_model_dir:
@@ -266,16 +264,12 @@ class MutationHandlers:
                             pass
 
         # ── Standard embedding / document handling ──────────────
-        # Sentence vectors supplement the parent for fine-grained retrieval.
-        # We skip auto-embedding the massive parent node if we extracted sentences
-        # to save GPU memory and avoid "blurry" semantic averages.
+        # Sentences supplement the parent for fine-grained retrieval.
+        # Parent is still embedded for direct retrieval and update-re-embed.
         str_id = self.store.string_table.intern(node_id)
         slot = self.store.id_to_slot[str_id]
-        
-        if need_sentence_nodes and q.vector is None:
-            embedded = False
-        else:
-            embedded = self._handle_vector(slot, kind, data, q.vector)
+
+        embedded = self._handle_vector(slot, kind, data, q.vector)
             
         if q.document and self._document_store:
             self._document_store.put_document(slot, q.document.encode("utf-8"), "text/plain")
@@ -291,7 +285,7 @@ class MutationHandlers:
         self.store.update_node(q.id, data)
 
         # Auto re-embed if an embed field was updated
-        if self._embedder and self._vector_store is not None:
+        if self._embedder:
             str_id = self.store.string_table.intern(q.id)
             slot = self.store.id_to_slot.get(str_id)
             if slot is not None:
@@ -304,8 +298,7 @@ class MutationHandlers:
                         if embed_field in data:
                             text = data[embed_field]
                             if text and isinstance(text, str):
-                                vec = self._embedder.encode_documents([text])[0]
-                                self._vector_store.add(slot, vec)
+                                self._embed_and_store(slot, text)
 
         node = self.store.get_node(q.id)
         return Result(kind="node", data=node, count=1)

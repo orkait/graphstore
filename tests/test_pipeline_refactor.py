@@ -14,14 +14,19 @@ class TestSentenceLevelIngest:
         assert len(sentences.data) >= 2
         g.close()
 
-    def test_message_has_no_direct_vector(self):
-        """Message nodes themselves don't have vectors, sentences do."""
+    def test_message_has_vector_alongside_sentences(self):
+        """Message nodes get vectors AND sentence child nodes are created."""
         g = GraphStore(ceiling_mb=256)
         g.execute('SYS REGISTER NODE KIND "message" REQUIRED content:string EMBED content')
         g.execute('CREATE NODE "msg0" kind = "message" content = "Hello world. Goodbye world."')
 
         msg = g.execute('NODE "msg0"')
         assert msg.data is not None
+        assert g._vector_store is not None
+        slot = g._store.id_to_slot[g._store.string_table.intern("msg0")]
+        assert g._vector_store.has_vector(slot)
+        sentences = g.execute('NODES WHERE kind = "sentence"')
+        assert len(sentences.data) >= 2
         g.close()
 
 

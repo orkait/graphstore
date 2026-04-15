@@ -308,10 +308,11 @@ class GraphStore:
             p.mkdir(parents=True, exist_ok=True)
             db_file = p / "graphstore.db"
             _conn = open_database(db_file, busy_timeout_ms=cfg.persistence.busy_timeout_ms)
-            _store, _schema = _load_fn(_conn, use_compression=cfg.core.use_compression)
+            _store, _schema = _load_fn(_conn, use_compression=cfg.core.use_compression, db_path=p)
             _store._ceiling_bytes = self._ceiling_bytes
             if hasattr(_store, 'vectors') and _store.vectors is not None:
                 _vector_store = _store.vectors
+                _vector_store._path = str(p / "vectors.usearch")
         else:
             _conn = None
             _store = CoreStore(ceiling_bytes=self._ceiling_bytes,
@@ -341,9 +342,6 @@ class GraphStore:
 
         self._embedder_dirty = False
         self._check_embedder_identity(_conn, _embedder)
-
-        if _embedder is not None and self._runtime.vector_store is None:
-            self._ensure_vector_store(_embedder.dims)
 
         # Create executors before WAL replay so _replay_wal can use them
         self._executor = Executor(self._runtime,
@@ -721,10 +719,12 @@ class GraphStore:
         self._runtime.schema = SchemaRegistry()
         if self._runtime.vector_store is not None:
             from graphstore.vector.store import VectorStore
+            vector_path = os.path.join(str(self._path), "vectors.usearch") if self._path else None
             self._runtime.vector_store = VectorStore(
                 dims=self._runtime.vector_store.dims,
                 capacity=self._config.core.initial_capacity,
-                quantize_binary=self._config.vector.quantize_binary
+                quantize_binary=self._config.vector.quantize_binary,
+                path=vector_path
             )
 
         import collections
@@ -921,10 +921,12 @@ class GraphStore:
         vs = self._runtime.vector_store
         if vs is None:
             from graphstore.vector.store import VectorStore
+            vector_path = os.path.join(str(self._path), "vectors.usearch") if self._path else None
             vs = VectorStore(
                 dims=dims, 
                 capacity=self._runtime.store._capacity,
-                quantize_binary=self._config.vector.quantize_binary
+                quantize_binary=self._config.vector.quantize_binary,
+                path=vector_path
             )
             self._runtime.vector_store = vs
             self._record_embedder_identity(dims)
