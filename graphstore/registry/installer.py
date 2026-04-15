@@ -130,6 +130,7 @@ def load_installed_embedder(
     providers: list[str] | str | None = None,
     n_gpu_layers: int = 0,
     gpu_mem_limit: int | None = None,
+    max_length: int | None = None,
 ):
     """Load an installed embedder (ONNX or GGUF).
 
@@ -152,7 +153,7 @@ def load_installed_embedder(
         model_path = str(model_dir / gguf_file)
         return LlamaCppEmbedder(
             model_path=model_path,
-            n_ctx=manifest.get("max_length", 2048),
+            n_ctx=max_length or manifest.get("max_length", 2048),
             n_gpu_layers=n_gpu_layers,
             output_dims=dims or manifest["default_dims"],
             query_prefix=manifest.get("query_prefix", ""),
@@ -165,7 +166,7 @@ def load_installed_embedder(
         output_dims=dims or manifest["default_dims"],
         query_prefix=manifest.get("query_prefix", ""),
         doc_prefix_template=manifest.get("doc_prefix_template", ""),
-        max_length=manifest.get("max_length", 512),
+        max_length=max_length or manifest.get("max_length", 512),
         pooling_mode=manifest.get("pooling", "mean"),
         onnx_file=manifest.get("onnx_file"),
         providers=providers,

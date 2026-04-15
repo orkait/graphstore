@@ -270,6 +270,7 @@ class GraphStore:
                 model_name,
                 dims=cfg.vector.embedder_dims,
                 n_gpu_layers=cfg.vector.gpu_layers,
+                max_length=cfg.vector.embedder_max_length,
             )
         else:
             _embedder = None
