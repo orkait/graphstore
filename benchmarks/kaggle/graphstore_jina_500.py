@@ -5,33 +5,32 @@ Environment config: inlined below (Kaggle-specific paths, deps, GPU settings)
 """
 import subprocess, sys, os
 
-# Use Kaggle secrets for authenticated HF Hub access (avoids rate limits)
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
-try:
-    from kaggle_secrets import UserSecretsClient
-    user_secrets = UserSecretsClient()
-    for secret_name in ["HF_TOKEN", "huggingface_token", "HF_HUB_TOKEN"]:
-        try:
-            HF_TOKEN = user_secrets.get_secret(secret_name)
-            if HF_TOKEN: break
-        except Exception:
-            continue
-except Exception:
-    pass
+# 1. Try reading from private dataset (Primary CLI-driven method)
+HF_TOKEN = ""
+token_file = "/kaggle/input/hf-token-private/hf_token.txt"
+if os.path.exists(token_file):
+    with open(token_file, "r") as f:
+        HF_TOKEN = f.read().strip()
 
-# Hardcoded fallback (obfuscated to bypass git push protection)
+# 2. Fallback to Kaggle Secrets (Standard UI method)
 if not HF_TOKEN:
-    # This matches the token found in graphstore_pipeline_refactored.py
-    p1 = "hf_rnpokoJR"
-    p2 = "lhqPGRytKNoL"
-    p3 = "vCNEzTqqGrVQir"
-    HF_TOKEN = p1 + p2 + p3
+    try:
+        from kaggle_secrets import UserSecretsClient
+        user_secrets = UserSecretsClient()
+        for secret_name in ["HF_TOKEN", "huggingface_token", "HF_HUB_TOKEN"]:
+            try:
+                HF_TOKEN = user_secrets.get_secret(secret_name)
+                if HF_TOKEN: break
+            except Exception:
+                continue
+    except Exception:
+        pass
 
 if HF_TOKEN:
     os.environ["HF_TOKEN"] = HF_TOKEN
     print(f"HF Token active (starts with {HF_TOKEN[:4]}...)")
 else:
-    print("WARNING: No HF_TOKEN found!")
+    print("WARNING: No HF_TOKEN found! Rate limits may apply.")
 
 subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
     "numpy>=1.24", "scipy>=1.10", "lark>=1.1", "usearch>=2.0",
