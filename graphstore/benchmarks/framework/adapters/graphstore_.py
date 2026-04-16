@@ -244,68 +244,76 @@ class GraphStoreAdapter:
         sid = _escape(session.session_id)
 
         with TimedOperation() as t:
-            with self._gs.deferred_embeddings(batch_size=self._embed_batch_size):
-                sess_node_id = f"sess:{session.session_id}"
-                self._gs.execute(
-                    f'CREATE NODE "{sess_node_id}" kind = "session" '
-                    f'session_id = "{sid}" '
-                    f'position = {int(session.metadata.get("position", 0))} '
-                    f'msg_count = {n}'
+            # 1. Batch extract entities for all messages in the session
+            msg_contents = [msg.content for msg in session.messages]
+            all_entities = []
+            if self._entity_extraction:
+                all_entities = self._entity_extractor.extract_batch(msg_contents)
+
+            # 2. Build a single transaction block for the entire session
+            dsl = ["BEGIN"]
+            
+            sess_node_id = f"sess:{session.session_id}"
+            dsl.append(
+                f'CREATE NODE "{sess_node_id}" kind = "session" '
+                f'session_id = "{sid}" '
+                f'position = {int(session.metadata.get("position", 0))} '
+                f'msg_count = {n}'
+            )
+
+            # Parse session date for EVENT_AT clause
+            sess_date_str = session.metadata.get("date", "")
+            sess_event_ms = None
+            if sess_date_str:
+                from graphstore.core.temporal import parse_date
+                sess_event_ms = parse_date(sess_date_str)
+
+            event_at_clause = f" EVENT_AT {sess_event_ms}" if sess_event_ms else ""
+
+            entity_seen: set[str] = set()
+            for i, (msg, entities) in enumerate(zip(session.messages, all_entities if all_entities else [[]]*n)):
+                msg_id = f"{session.session_id}:msg{i}"
+                content_raw = msg.content
+                content = _escape(content_raw)
+                role = _escape(msg.role)
+                
+                dsl.append(
+                    f'CREATE NODE "{msg_id}" kind = "message" '
+                    f'session = "{sid}" role = "{role}" '
+                    f'content = "{content}" '
+                    f'position = {i}{event_at_clause}'
                 )
+                
+                if self._populate_fts:
+                    self._gs.index_text(msg_id, content_raw)
+                
+                dsl.append(f'CREATE EDGE "{sess_node_id}" -> "{msg_id}" kind = "has_message"')
 
-                # Parse session date for EVENT_AT clause
-                sess_date_str = session.metadata.get("date", "")
-                sess_event_ms = None
-                if sess_date_str:
-                    from graphstore.core.temporal import parse_date
-                    sess_event_ms = parse_date(sess_date_str)
+                if self._entity_extraction:
+                    for ent_name in entities:
+                        ent_slug = _slug(ent_name)
+                        if not ent_slug:
+                            continue
+                        ent_id = f"ent:{ent_slug}"
+                        if ent_id not in entity_seen:
+                            dsl.append(
+                                f'UPSERT NODE "{ent_id}" kind = "entity" '
+                                f'name = "{_escape(ent_name)}"'
+                            )
+                            entity_seen.add(ent_id)
+                        
+                        dsl.append(f'CREATE EDGE "{msg_id}" -> "{ent_id}" kind = "mentions"')
 
-                event_at_clause = f" EVENT_AT {sess_event_ms}" if sess_event_ms else ""
+            for i in range(n - 1):
+                a = f"{session.session_id}:msg{i}"
+                b = f"{session.session_id}:msg{i + 1}"
+                dsl.append(f'CREATE EDGE "{a}" -> "{b}" kind = "next"')
 
-                entity_seen: set[str] = set()
-                for i, msg in enumerate(session.messages):
-                    msg_id = f"{session.session_id}:msg{i}"
-                    content_raw = msg.content
-                    content = _escape(content_raw)
-                    role = _escape(msg.role)
-                    self._gs.execute(
-                        f'CREATE NODE "{msg_id}" kind = "message" '
-                        f'session = "{sid}" role = "{role}" '
-                        f'content = "{content}" '
-                        f'position = {i}{event_at_clause}'
-                    )
-                    if self._populate_fts:
-                        self._gs.index_text(msg_id, content_raw)
-                    self._gs.execute(
-                        f'CREATE EDGE "{sess_node_id}" -> "{msg_id}" kind = "has_message"'
-                    )
+            dsl.append("COMMIT")
 
-                    if self._entity_extraction:
-                        for ent_name in self._entity_extractor.extract(content_raw):
-                            ent_slug = _slug(ent_name)
-                            if not ent_slug:
-                                continue
-                            ent_id = f"ent:{ent_slug}"
-                            if ent_id not in entity_seen:
-                                try:
-                                    self._gs.execute(
-                                        f'CREATE NODE "{ent_id}" kind = "entity" '
-                                        f'name = "{_escape(ent_name)}"'
-                                    )
-                                except NodeExists:
-                                    pass
-                                entity_seen.add(ent_id)
-                            try:
-                                self._gs.execute(
-                                    f'CREATE EDGE "{msg_id}" -> "{ent_id}" kind = "mentions"'
-                                )
-                            except Exception:
-                                pass
-
-                for i in range(n - 1):
-                    a = f"{session.session_id}:msg{i}"
-                    b = f"{session.session_id}:msg{i + 1}"
-                    self._gs.execute(f'CREATE EDGE "{a}" -> "{b}" kind = "next"')
+            # 3. Execute the single batch transaction
+            with self._gs.deferred_embeddings(batch_size=self._embed_batch_size):
+                self._gs.execute("\n".join(dsl))
 
         return t.elapsed_ms / 1000.0
 
