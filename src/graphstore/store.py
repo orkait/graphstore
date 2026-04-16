@@ -992,9 +992,10 @@ class GraphStore:
             )
         return vs
 
-    @staticmethod
-    def _check_embedder_identity(conn, embedder):
-        """On open, verify current embedder matches what the database was built with."""
+    def _check_embedder_identity(self, conn, embedder):
+        """On open, verify current embedder matches what the database was built
+        with. Sets self._embedder_dirty on mismatch; SIMILAR/REMEMBER will refuse
+        until SYS REEMBED is run."""
         if conn is None or embedder is None:
             return
         from graphstore.persistence.database import get_metadata
@@ -1007,9 +1008,11 @@ class GraphStore:
             import logging
             logging.getLogger(__name__).warning(
                 "embedder mismatch: database was built with '%s' (%s dims), "
-                "current embedder is '%s'. Run SYS REEMBED to re-encode.",
+                "current embedder is '%s'. Run SYS REEMBED to re-encode; "
+                "until then SIMILAR and REMEMBER will raise.",
                 stored, stored_dims, current,
             )
+            self._embedder_dirty = True
 
     def _record_embedder_identity(self, dims: int):
         """Store embedder name + dims in database metadata on first vector write."""

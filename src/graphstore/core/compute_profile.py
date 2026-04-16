@@ -4,12 +4,12 @@ Detects cores, RAM, and GPU availability (cgroup/containerization aware on
 Linux) and exposes a single profile object that the ONNX session builders
 and ingest paths consult.
 
-Selection order:
-  1. env ``GRAPHSTORE_PROFILE`` in {auto,tiny,laptop,desktop,gpu} (auto wins default)
-  2. explicit ``GRAPHSTORE_<kind>_THREADS`` env vars override individual fields
-  3. detected profile fields otherwise
+Selection order (highest priority first):
+  1. ``configure(...)`` config overrides - hard limits, skip dynamic scaling
+  2. env ``GRAPHSTORE_PROFILE`` / ``GRAPHSTORE_<kind>_THREADS`` vars
+  3. dynamic tier + battery + load scaling
 
-Detection is stdlib-only: no psutil dependency. Computed once per process.
+Computed once per process (cache invalidated when configure() is called).
 """
 from __future__ import annotations
 
@@ -26,6 +26,57 @@ _GPU_PROVIDERS = (
     "DmlExecutionProvider",
     "CoreMLExecutionProvider",
 )
+
+
+_overrides: dict = {
+    "profile": None,
+    "ner_threads": None,
+    "embed_threads": None,
+    "rerank_threads": None,
+    "embed_batch_size": None,
+    "disable_load_scaling": False,
+    "disable_battery_scaling": False,
+}
+
+
+_ENV_KEYS = (
+    "GRAPHSTORE_PROFILE", "GRAPHSTORE_NER_THREADS",
+    "GRAPHSTORE_EMBED_THREADS", "GRAPHSTORE_RERANK_THREADS",
+    "GRAPHSTORE_EMBED_BATCH", "GRAPHSTORE_GPU",
+)
+_last_env_fingerprint: tuple | None = None
+
+
+def _env_fingerprint() -> tuple:
+    return tuple(os.environ.get(k) for k in _ENV_KEYS)
+
+
+def configure(
+    *,
+    profile: str | None = None,
+    ner_threads: int | None = None,
+    embed_threads: int | None = None,
+    rerank_threads: int | None = None,
+    embed_batch_size: int | None = None,
+    disable_load_scaling: bool = False,
+    disable_battery_scaling: bool = False,
+) -> None:
+    """Install config-level overrides. Any explicitly-set value becomes a hard
+    limit that is NOT adjusted by battery or load scaling. Safe to call
+    multiple times; each call invalidates the cached profile.
+    """
+    global _overrides, _last_env_fingerprint
+    _overrides = {
+        "profile": profile,
+        "ner_threads": ner_threads,
+        "embed_threads": embed_threads,
+        "rerank_threads": rerank_threads,
+        "embed_batch_size": embed_batch_size,
+        "disable_load_scaling": disable_load_scaling,
+        "disable_battery_scaling": disable_battery_scaling,
+    }
+    _last_env_fingerprint = None
+    _compute_profile.cache_clear()
 
 
 @dataclass(frozen=True)
@@ -158,8 +209,9 @@ def _detect_load_pct() -> float:
 
 
 @lru_cache(maxsize=1)
-def get_profile() -> ComputeProfile:
-    requested = os.environ.get("GRAPHSTORE_PROFILE", "auto").strip().lower()
+def _compute_profile() -> ComputeProfile:
+    ov = _overrides
+    requested = (ov["profile"] or os.environ.get("GRAPHSTORE_PROFILE", "auto")).strip().lower()
     physical, logical = _detect_cores()
     ram_gb = _detect_ram_gb()
     has_gpu, gpu_provider = _detect_gpu()
@@ -172,17 +224,33 @@ def get_profile() -> ComputeProfile:
 
     ner_t, embed_t, rerank_t, batch, defer = _base_profile(name, physical)
 
-    # Battery degrades threads one notch to preserve power/thermals even if profile stays the same.
-    if on_battery and name != "tiny":
-        embed_t = max(1, embed_t - 1)
-        rerank_t = max(1, rerank_t - 1)
+    # Hard-limit path: explicit config override wins. Skip dynamic scaling for
+    # those fields so benchmarks get reproducible thread counts across runs.
+    ner_locked = ov["ner_threads"] is not None
+    embed_locked = ov["embed_threads"] is not None
+    rerank_locked = ov["rerank_threads"] is not None
 
-    # Load-aware scaling: if host is already busy (user compiling, running other
-    # apps), halve our share so graphstore does not contend for cores.
+    # Battery degrades threads one notch - skip for locked fields or when
+    # user explicitly disabled battery scaling.
+    if on_battery and name != "tiny" and not ov["disable_battery_scaling"]:
+        if not embed_locked:
+            embed_t = max(1, embed_t - 1)
+        if not rerank_locked:
+            rerank_t = max(1, rerank_t - 1)
+
+    # Load-aware halving - same treatment.
     load_pct = _detect_load_pct()
-    if load_pct > 40.0 and name != "tiny":
-        embed_t = max(1, embed_t // 2)
-        rerank_t = max(1, rerank_t // 2)
+    if load_pct > 40.0 and name != "tiny" and not ov["disable_load_scaling"]:
+        if not embed_locked:
+            embed_t = max(1, embed_t // 2)
+        if not rerank_locked:
+            rerank_t = max(1, rerank_t // 2)
+
+    # Override precedence: config > env > scaled base.
+    final_ner = ov["ner_threads"] if ner_locked else _env_int("GRAPHSTORE_NER_THREADS", ner_t)
+    final_embed = ov["embed_threads"] if embed_locked else _env_int("GRAPHSTORE_EMBED_THREADS", embed_t)
+    final_rerank = ov["rerank_threads"] if rerank_locked else _env_int("GRAPHSTORE_RERANK_THREADS", rerank_t)
+    final_batch = ov["embed_batch_size"] if ov["embed_batch_size"] is not None else _env_int("GRAPHSTORE_EMBED_BATCH", batch)
 
     return ComputeProfile(
         name=name,
@@ -193,12 +261,25 @@ def get_profile() -> ComputeProfile:
         gpu_provider=gpu_provider,
         on_battery=on_battery,
         load_pct=load_pct,
-        ner_threads=_env_int("GRAPHSTORE_NER_THREADS", ner_t),
-        embed_threads=_env_int("GRAPHSTORE_EMBED_THREADS", embed_t),
-        rerank_threads=_env_int("GRAPHSTORE_RERANK_THREADS", rerank_t),
-        embed_batch_size=_env_int("GRAPHSTORE_EMBED_BATCH", batch),
+        ner_threads=max(1, final_ner),
+        embed_threads=max(1, final_embed),
+        rerank_threads=max(1, final_rerank),
+        embed_batch_size=max(1, final_batch),
         defer_embeddings=defer,
     )
+
+
+def get_profile() -> ComputeProfile:
+    global _last_env_fingerprint
+    fp = _env_fingerprint()
+    if fp != _last_env_fingerprint:
+        _compute_profile.cache_clear()
+        _last_env_fingerprint = fp
+    return _compute_profile()
+
+
+# Backwards-compatible attribute: some tests call get_profile.cache_clear()
+get_profile.cache_clear = _compute_profile.cache_clear  # type: ignore[attr-defined]
 
 
 def describe_profile() -> str:
@@ -216,4 +297,6 @@ def describe_profile() -> str:
 
 def reset_profile_cache() -> None:
     """For tests that mutate env and want a fresh detection."""
-    get_profile.cache_clear()
+    global _last_env_fingerprint
+    _last_env_fingerprint = None
+    _compute_profile.cache_clear()

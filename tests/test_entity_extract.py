@@ -79,3 +79,18 @@ class TestCoReferenceResolver:
         resolver.update_context("The Smiths")
         result = resolver.resolve("They moved to Sweden.")
         assert result == ["The Smiths"]
+
+
+def test_slug_no_collision_on_truncation():
+    from graphstore.ingest.entity_extract import slug
+    a = slug("Barack Hussein Obama II the Second of That Name")
+    b = slug("Barack Hussein Obama Jr the Son of the First")
+    assert a != b, f"slugs collided: {a!r} == {b!r}"
+    assert len(a) <= 40
+    assert len(b) <= 40
+
+
+def test_slug_short_unchanged():
+    from graphstore.ingest.entity_extract import slug
+    assert slug("Alice") == "alice"
+    assert slug("Bob Smith") == "bob_smith"

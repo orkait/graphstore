@@ -56,7 +56,13 @@ class Executor(
                 raise GraphStoreError("Vault not configured. Use GraphStore(vault='./notes')")
             return self._vault_executor.dispatch(ast)
 
-        handler = DISPATCH.get(type(ast))
+        t = type(ast)
+        handler = DISPATCH.get(t)
         if handler is None:
-            raise GraphStoreError(f"Unknown AST node type: {type(ast).__name__}")
+            for base in t.__mro__[1:]:
+                handler = DISPATCH.get(base)
+                if handler is not None:
+                    break
+        if handler is None:
+            raise GraphStoreError(f"Unknown AST node type: {t.__name__}")
         return handler(self, ast)
