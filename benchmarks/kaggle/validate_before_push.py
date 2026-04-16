@@ -80,10 +80,14 @@ def validate_models():
     def check_jina(d):
         d = Path(d)
         assert d.exists(), f"dir missing: {d}"
-        tok = d / "tokenizer.json"
-        assert tok.exists(), f"tokenizer.json missing"
         onnx_files = list((d / "onnx").glob("*.onnx")) if (d / "onnx").exists() else []
         assert onnx_files, f"no .onnx files in {d}/onnx/"
+        # tokenizer.json at root (ONNX format from Kaggle) OR safetensors (local full model)
+        has_tok = (d / "tokenizer.json").exists()
+        has_sf = bool(list(d.glob("*.safetensors")))
+        assert has_tok or has_sf, "neither tokenizer.json nor *.safetensors found"
+        if not has_tok:
+            print(f"    NOTE: local jina-small is safetensors (not ONNX). Kaggle downloads ONNX.")
 
     def check_ner(d):
         d = Path(d)
