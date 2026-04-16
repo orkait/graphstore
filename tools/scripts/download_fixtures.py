@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Download test fixtures for graphstore mock testing.
 
-Run once:  python scripts/download_fixtures.py
+Run once:  python tools/scripts/download_fixtures.py
 Total: ~100MB, gitignored under tests/fixtures/
 """
 
@@ -12,7 +12,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 FIXTURES = ROOT / "tests" / "fixtures"
 
 # Relaxed SSL for old certs on some mirrors

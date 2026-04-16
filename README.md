@@ -77,7 +77,7 @@ REMEMBER "European architecture" LIMIT 10
   └─────────────────────────────────────────────────────────┘
 ```
 
-Weights are configurable. The pipeline is 10 stages - see [summary.md](summary.md) for the full breakdown.
+Weights are configurable. The pipeline is 10 stages.
 
 ---
 
@@ -336,7 +336,7 @@ Retrieval recall (keyword in top-K passages, no LLM):
 
 **BEAM** support is included via `benchmarks/framework/run_beam.py` - generates BEAM-compatible answer JSON for external evaluation.
 
-Full methodology, reproduction instructions, and comparison details: see [BENCHMARKS.md](BENCHMARKS.md).
+Full methodology, reproduction instructions, and comparison details: see [docs/benchmarks.md](docs/benchmarks.md).
 
 All three benchmarks run from one CLI:
 ```bash

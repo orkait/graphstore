@@ -1,6 +1,6 @@
 """GraphStore adapter, skill-compliant.
 
-Implements every rule from skills/graphstore-ingestion/SKILL.md:
+Implements every rule from tools/skills/graphstore-ingestion/SKILL.md:
     - Schema first (SYS REGISTER NODE KIND) with EMBED on message only
     - deferred_embeddings() per session
     - put_summary() per message so REMEMBER's BM25 leg actually works (G2)

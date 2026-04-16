@@ -4,8 +4,8 @@ Optimizes retrieval config knobs on LongMemEval using model2vec (CPU, fast).
 Finds the best config that maximizes recall_any@5.
 
 Usage:
-    python -m autoresearch.tune_config --trials 100
-    python -m autoresearch.tune_config --trials 50 --per-category 5
+    python -m tools.autoresearch.tune_config --trials 100
+    python -m tools.autoresearch.tune_config --trials 50 --per-category 5
 """
 
 from __future__ import annotations

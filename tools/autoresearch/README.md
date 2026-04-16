@@ -216,7 +216,7 @@ cp autoresearch/config.example.json autoresearch/config.json
 # edit autoresearch/config.json and add real api_key values
 
 # Run a single loop
-python -m autoresearch.run_loop --algo spreading --iterations 18
+python -m tools.autoresearch.run_loop --algo spreading --iterations 18
 ```
 
 ### CLI flags
@@ -235,10 +235,10 @@ free. Each loop has its own checkpoint + candidate directory, no file
 collisions. Run different algos with different models:
 
 ```bash
-python -m autoresearch.run_loop --algo graph     --iterations 18 --model qwen/qwen3-coder-next:nitro &
-python -m autoresearch.run_loop --algo fusion    --iterations 18 --model minimax/minimax-m2.7:nitro &
-python -m autoresearch.run_loop --algo spreading --iterations 18 --model qwen3-coder-next:cloud &
-python -m autoresearch.run_loop --algo compact   --iterations 18 --model z-ai/glm-5.1:nitro &
+python -m tools.autoresearch.run_loop --algo graph     --iterations 18 --model qwen/qwen3-coder-next:nitro &
+python -m tools.autoresearch.run_loop --algo fusion    --iterations 18 --model minimax/minimax-m2.7:nitro &
+python -m tools.autoresearch.run_loop --algo spreading --iterations 18 --model qwen3-coder-next:cloud &
+python -m tools.autoresearch.run_loop --algo compact   --iterations 18 --model z-ai/glm-5.1:nitro &
 ```
 
 ### Mid-run config edits
@@ -258,7 +258,7 @@ the candidate against git HEAD independently:
 
 ```python
 import subprocess, json, math
-from autoresearch.correctness import check_correctness
+from tools.autoresearch.correctness import check_correctness
 
 original = subprocess.check_output(['git', 'show', f'HEAD:graphstore/algos/{algo}.py'], text=True)
 winner = open(f'graphstore/algos/{algo}.py').read()
@@ -306,7 +306,7 @@ change), and **target-function-only AST comparison** for the others.
 4. Add an input generator in `autoresearch/correctness.py::_DISPATCH` for
    the algo - follow the pattern of the existing entries, using small
    deterministic inputs that exercise the public functions
-5. Run `python -m autoresearch.run_loop --algo <name> --iterations 18 --model <model>`
+5. Run `python -m tools.autoresearch.run_loop --algo <name> --iterations 18 --model <model>`
 
 ### Add a new hypothesis
 
@@ -320,7 +320,7 @@ change), and **target-function-only AST comparison** for the others.
 1. Add an entry under `providers.<provider>.models` in `config.json`
 2. Optionally add it to `model_fallback_order` (remove it later if it's
    slow or produces poor candidates)
-3. Test it: `python -m autoresearch.run_loop --algo X --iterations 1 --model <model>`
+3. Test it: `python -m tools.autoresearch.run_loop --algo X --iterations 1 --model <model>`
 
 If the model is on a new provider (e.g., anthropic), add a new top-level
 provider entry with its `base_url`, `api_key`, and `litellm_prefix`.

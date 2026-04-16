@@ -4,9 +4,9 @@ Embedders use the registry installer.  NER, reranker and model2vec default
 are downloaded manually because they are not registered as embedders.
 
 Usage:
-    python -m scripts.download_models
+    python -m tools.scripts.download_models
     # or from project root:
-    uv run python3 scripts/download_models.py
+    uv run python3 tools/scripts/download_models.py
 """
 
 from pathlib import Path
@@ -14,7 +14,7 @@ from huggingface_hub import hf_hub_download
 
 from graphstore.registry.installer import install_embedder, set_cache_dir, is_installed
 
-MODELS_DIR = Path(__file__).parent.parent / "models"
+MODELS_DIR = Path(__file__).parent.parent.parent / "models"
 MODELS_DIR.mkdir(exist_ok=True)
 
 

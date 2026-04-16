@@ -10,9 +10,9 @@ Design principles:
   - Full checkpoint: restart continues exactly where it left off
 
 Usage:
-    python -m autoresearch.run_loop
-    python -m autoresearch.run_loop --algo compact
-    python -m autoresearch.run_loop --algo graph --iterations 30
+    python -m tools.autoresearch.run_loop
+    python -m tools.autoresearch.run_loop --algo compact
+    python -m tools.autoresearch.run_loop --algo graph --iterations 30
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ from datetime import datetime
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-ALGO_DIR = REPO_ROOT / "graphstore" / "algos"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+ALGO_DIR = REPO_ROOT / "src" / "graphstore" / "algos"
 VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 CONFIG_FILE = Path(__file__).resolve().parent / "config.json"
 PROGRAM_FILE = Path(__file__).resolve().parent / "program.md"
@@ -869,7 +869,7 @@ def run_loop(
 
             # Correctness gate - candidate must produce the same output as
             # baseline on deterministic test inputs. Drift = attempt failure.
-            from autoresearch.correctness import check_correctness
+            from tools.autoresearch.correctness import check_correctness
             correctness_err = check_correctness(candidate, baseline_code, algo)
             if correctness_err:
                 _bump_attempt()

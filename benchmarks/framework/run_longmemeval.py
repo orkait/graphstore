@@ -14,12 +14,11 @@ from graphstore import GraphStore
 
 # --- Download models if missing ---
 try:
-    from scripts.download_models import download_all
+    from tools.scripts.download_models import download_all
     download_all()
 except ImportError:
-    # If scripts/ isn't in path, try manual find or skip
     import sys
-    scripts_path = Path(__file__).parent.parent.parent / "scripts"
+    scripts_path = Path(__file__).parent.parent.parent / "tools" / "scripts"
     if scripts_path.exists():
         sys.path.append(str(scripts_path))
         try:
