@@ -202,6 +202,8 @@ _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "nucleus_min_text_length": ("dsl", "nucleus_min_text_length"),
     "nucleus_allowed_kinds":   ("dsl", "nucleus_allowed_kinds"),
     "sentence_query_expansion": ("dsl", "sentence_query_expansion"),
+    "enable_sentence_nodes":    ("dsl", "enable_sentence_nodes"),
+    "enable_rollback":          ("dsl", "enable_rollback"),
     "graph_signal_enabled": ("dsl", "graph_signal_enabled"),
     "entity_extractor":     ("dsl", "entity_extractor"),
     "entity_model_dir":     ("dsl", "entity_model_dir"),
