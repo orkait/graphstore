@@ -1,6 +1,7 @@
 """Entity extraction with ONNX TinyBERT NER + co-reference resolution."""
 from __future__ import annotations
 
+import hashlib
 import re
 import json
 from dataclasses import dataclass
@@ -13,8 +14,14 @@ _SLUG_RE = re.compile(r"[^a-zA-Z0-9_]+")
 
 
 def slug(text: str) -> str:
-    """Create a URL-safe slug from text."""
-    return _SLUG_RE.sub("_", text.lower()).strip("_")[:40]
+    """Create a URL-safe slug. Appends a short hash suffix when truncated
+    so distinct long names don't silently collide.
+    """
+    base = _SLUG_RE.sub("_", text.lower()).strip("_")
+    if len(base) <= 40:
+        return base
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:6]
+    return base[:33].rstrip("_") + "_" + digest
 
 
 _PRONOUN_MAP = {

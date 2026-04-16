@@ -70,3 +70,38 @@ def test_update_without_schema_does_not_crash():
     node = gs.execute('NODE "plain"')
     assert node.data["name"] == "updated"
     gs.close()
+
+
+def test_embedder_mismatch_blocks_remember(tmp_path):
+    import pytest
+    from graphstore import GraphStore
+    from graphstore.core.errors import GraphStoreError
+
+    class StubEmb:
+        name = "stub-A"
+        dims = 4
+        def encode_documents(self, texts, titles=None):
+            import numpy as np
+            return np.zeros((len(texts), 4), dtype=np.float32)
+        def encode_queries(self, texts):
+            import numpy as np
+            return np.zeros((len(texts), 4), dtype=np.float32)
+
+    class StubEmbB(StubEmb):
+        name = "stub-B"
+
+    path = tmp_path / "gs"
+    gs = GraphStore(path=str(path), embedder=StubEmb())
+    try:
+        gs.execute('SYS REGISTER NODE KIND "doc" REQUIRED text:string EMBED text')
+        gs.execute('CREATE NODE "a" kind = "doc" text = "hi"')
+        gs.checkpoint()
+    finally:
+        gs.close()
+
+    gs2 = GraphStore(path=str(path), embedder=StubEmbB())
+    try:
+        with pytest.raises(GraphStoreError, match="SYS REEMBED"):
+            gs2.execute('REMEMBER "hi" LIMIT 5')
+    finally:
+        gs2.close()

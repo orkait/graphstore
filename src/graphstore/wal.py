@@ -6,10 +6,9 @@ import logging
 logger = logging.getLogger(__name__)
 _event_logger = logging.getLogger("graphstore.events")
 
-from graphstore.core.errors import GraphStoreError
+from graphstore.core.errors import GraphStoreError, NodeExists
 from graphstore.core.runtime import RuntimeState
 from graphstore.dsl.parser import parse
-from graphstore.dsl import ast_nodes
 from graphstore.persistence.serializer import checkpoint as _checkpoint_fn
 
 
@@ -26,6 +25,7 @@ class WALManager:
         self._log_retention_days = log_retention_days
         self._strict_recovery = strict_recovery
         self._replay_errors: list[dict] = []
+        self._query_log_max_rows = 200_000
 
     @property
     def _conn(self):
@@ -85,9 +85,9 @@ class WALManager:
         for seq, statement in rows:
             try:
                 ast = parse(statement)
-                if isinstance(ast, ast_nodes.CreateNode):
-                    ast = ast_nodes.UpsertNode(id=ast.id, fields=ast.fields)
                 self._executor.execute(ast)
+            except NodeExists:
+                continue
             except Exception as e:
                 if self._strict_recovery:
                     logger.error(f"Fatal error during WAL replay (strict_recovery=True): {e}")
@@ -192,6 +192,15 @@ class WALManager:
         try:
             cutoff = time.time() - self._log_retention_days * 86400
             conn.execute("DELETE FROM query_log WHERE timestamp < ?", (cutoff,))
+            row = conn.execute("SELECT COUNT(*) FROM query_log").fetchone()
+            count = row[0] if row else 0
+            if count > self._query_log_max_rows:
+                conn.execute(
+                    "DELETE FROM query_log WHERE id IN ("
+                    "  SELECT id FROM query_log ORDER BY timestamp ASC LIMIT ?"
+                    ")",
+                    (count - self._query_log_max_rows,),
+                )
             conn.commit()
         except Exception as e:
             logger.debug("query log rotation failed: %s", e, exc_info=True)

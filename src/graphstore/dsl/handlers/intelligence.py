@@ -324,8 +324,12 @@ class IntelligenceHandlers:
     def _remember(self, q: RememberQuery) -> Result:
         """REMEMBER: 3-signal fusion with optional reranker and nucleus.
 
-        Pipeline: gather → 3-signal fusion → top-N → reranker → results
+        Pipeline: gather -> 3-signal fusion -> top-N -> reranker -> results
         """
+        if getattr(self, '_embedder_dirty', False):
+            from graphstore.core.errors import GraphStoreError
+            raise GraphStoreError("Embedder changed. Run SYS REEMBED to update vectors.")
+
         target_k = q.limit.value if q.limit else 10
         oversample_factor = getattr(self, '_search_oversample', 5)
 
@@ -409,7 +413,17 @@ class IntelligenceHandlers:
                         bm25_scores_np = np.array(list(bm25_max.values()), dtype=np.float64)
 
         if len(vec_slots_np) == 0 and len(bm25_slots_np) == 0:
-            return Result(kind="nodes", data=[], count=0)
+            early_meta: dict = {}
+            anchor_ms_e = getattr(q, 'at', None) or getattr(self, '_temporal_anchor_ms', None)
+            at_range_e = getattr(q, 'at_range', None)
+            if at_range_e is not None or anchor_ms_e is not None:
+                if self.store.columns.get_column("__event_at__", n) is None:
+                    early_meta["warnings"] = [
+                        "AT clause ignored: no '__event_at__' column in store. "
+                        "Use ASSERT ... EVENT_AT ... or CREATE NODE ... EVENT_AT ... "
+                        "to populate it."
+                    ]
+            return Result(kind="nodes", data=[], count=0, meta=early_meta)
 
         # Adaptive oversample cap
         max_candidates = min(num_sentences * oversample_factor * target_k, 200)
@@ -545,10 +559,15 @@ class IntelligenceHandlers:
         base_final += co_bonus
 
         # ── Stage 3: Temporal Filter ─────────────────────────────────
+        warnings: list[str] = []
         if at_range is not None or anchor_ms is not None:
             t_event_col = self.store.columns.get_column("__event_at__", n)
             if t_event_col is None:
-                base_final *= 0.0
+                warnings.append(
+                    "AT clause ignored: no '__event_at__' column in store. "
+                    "Use ASSERT ... EVENT_AT ... or CREATE NODE ... EVENT_AT ... "
+                    "to populate it."
+                )
             else:
                 col_data, col_pres, _ = t_event_col
                 if at_range is not None:
@@ -604,6 +623,9 @@ class IntelligenceHandlers:
                     break
 
         # Reranker stage
+        meta: dict = {}
+        if warnings:
+            meta.setdefault("warnings", []).extend(warnings)
         reranker = getattr(self, '_reranker', None)
         if reranker is not None and len(texts_for_rerank) > target_k:
             try:
@@ -615,7 +637,13 @@ class IntelligenceHandlers:
                 # Update scores with reranker scores
                 for score, node, slot in ranked[:target_k]:
                     node["_remember_score"] = round(float(score), 4)
-            except Exception:
+            except Exception as rerank_err:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "reranker failed; falling back to fusion top-K: %s",
+                    rerank_err,
+                )
+                meta["reranker_error"] = f"{type(rerank_err).__name__}: {rerank_err}"
                 results = results[:target_k]
                 retrieved_slots = retrieved_slots[:target_k]
         else:
@@ -624,21 +652,29 @@ class IntelligenceHandlers:
 
         # ── Optional: Nucleus Expansion ──────────────────────────────
         nucleus_on = getattr(self, '_nucleus_expansion', False)
-        meta = {}
         if nucleus_on and results and self.store.edge_matrices.total_edges > 0:
             max_nb = getattr(self, '_nucleus_neighbors_per_hop', 3)
             n_hops = getattr(self, '_nucleus_hops', 1)
             min_text = getattr(self, '_nucleus_min_text_length', 20)
+            total_budget = max(max_nb * n_hops * target_k, 100)
             allowed_kinds = set(getattr(self, '_nucleus_allowed_kinds',
                                         ["message", "chunk", "section"]))
             seen_slots = set(retrieved_slots)
             frontier = list(retrieved_slots)
-            nucleus_results = []
+            nucleus_results: list = []
+            visits = 0
             for _hop in range(n_hops):
-                next_frontier = []
+                if visits >= total_budget:
+                    break
+                next_frontier: list = []
                 for seed_slot in frontier:
+                    if visits >= total_budget:
+                        break
                     nb_slots = self._nucleus_neighbors(seed_slot)
                     for nb in nb_slots:
+                        if visits >= total_budget:
+                            break
+                        visits += 1
                         nb = int(nb)
                         if nb in seen_slots or not live_mask[nb]:
                             continue
@@ -662,6 +698,7 @@ class IntelligenceHandlers:
                             break
                 frontier = next_frontier
             meta["nucleus"] = nucleus_results
+            meta["nucleus_visits"] = visits
 
         # ── Retrieval Feedback ───────────────────────────────────────
         for slot in retrieved_slots:
