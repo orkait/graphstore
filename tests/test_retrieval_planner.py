@@ -109,36 +109,6 @@ def test_graphstore_exposes_retrieval_planner():
     gs.close()
 
 
-@pytest.mark.skip("Retrieval planner removed in pipeline refactor")
-def test_planner_temporal_filter_is_reflected_in_result_meta():
-    from tests.test_retrieval_improvements import _make_gs
-
-    gs = _make_gs()
-    gs.execute('CREATE NODE "a" kind = "fact" claim = "museum trip" EVENT_AT "2023-05-08"')
-    result = gs.execute('REMEMBER "museum trip" AT "2023-05-08" LIMIT 5')
-    assert "planner" in result.meta
-    assert result.meta["planner"]["use_temporal_filter"] is True
-    gs.close()
-
-
-@pytest.mark.skip("Retrieval planner removed in pipeline refactor")
-def test_planner_observation_mode_surfaces_in_result_meta():
-    """Planner sets use_observations=True when 'prefer' keyword triggers prefish
-    and observation nodes exist. Uses identical text for query and doc to
-    guarantee high vector similarity regardless of hash seed."""
-    from tests.test_retrieval_improvements import FixedEmbedder
-
-    gs = GraphStore(embedder=FixedEmbedder())
-    gs.execute('SYS REGISTER NODE KIND "fact" REQUIRED claim:string EMBED claim')
-    gs.execute('SYS REGISTER NODE KIND "observation" REQUIRED claim:string EMBED claim')
-    gs.execute('CREATE NODE "msg1" kind = "fact" claim = "I prefer premiere pro"')
-    gs.execute('CREATE NODE "obs1" kind = "observation" claim = "I prefer premiere pro"')
-    result = gs.execute('REMEMBER "I prefer premiere pro" LIMIT 5')
-    assert "planner" in result.meta
-    assert result.meta["planner"]["use_observations"] is True
-    gs.close()
-
-
 def test_planner_can_increase_candidate_k():
     planner = RetrievalPlanner()
     ctx = planner.build_context(
