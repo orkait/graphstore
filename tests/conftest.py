@@ -1,24 +1,50 @@
 """Pytest hooks for the graphstore test suite.
 
-Auto-skip tests that need an optional extra that isn't installed.
+THREAD CAP: This module runs before every test collection. BLAS (numpy /
+scipy), OpenMP, MKL, and Rust/Rayon (HuggingFace tokenizers) read their
+thread-count env vars on first use. Set them *before* any numpy import so
+the thread pools initialise small. Combined with the early
+``threadpool_limits`` call this survives xdist worker forks.
 
-Two levels:
-
-  1. Test files that import a feature module at module level (and would
-     therefore crash during pytest collection) are listed in
-     ``_FILES_REQUIRING`` - this conftest tells pytest to ``collect_ignore``
-     them when their extra is missing.
-
-  2. Test files that boot cleanly without the extra but whose test bodies
-     hit the feature path use ``pytestmark = pytest.mark.needs_<extra>``
-     (or a class-level ``@pytest.mark.needs_<extra>``). This conftest
-     translates those markers into dynamic skips at collection time.
-
-Either way, an individual test file never has to call ``importorskip``.
+Skip-if-extra-missing:
+  1. ``collect_ignore`` for test files that import a feature at module
+     level (these crash at collection time when the extra is missing).
+  2. ``pytest.mark.needs_<extra>`` for files that boot cleanly but whose
+     test bodies hit the feature path. Translated into dynamic skips.
 """
 
 from __future__ import annotations
 
+# ---- Hard BLAS / OpenMP cap. Must run BEFORE any numpy/scipy import. ----
+import os as _os
+
+_THREAD_CAP = _os.environ.get("GRAPHSTORE_TEST_BLAS_THREADS", "1")
+for _var in (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "SCIPY_OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "BLIS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "RAYON_NUM_THREADS",
+):
+    _os.environ.setdefault(_var, _THREAD_CAP)
+_os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+# onnxruntime session thread pools honour this too when queried early.
+_os.environ.setdefault("GRAPHSTORE_NER_THREADS", _THREAD_CAP)
+_os.environ.setdefault("GRAPHSTORE_EMBED_THREADS", _THREAD_CAP)
+_os.environ.setdefault("GRAPHSTORE_RERANK_THREADS", _THREAD_CAP)
+
+# ---- Runtime cap (for already-loaded libraries). ----
+try:
+    from threadpoolctl import threadpool_limits as _threadpool_limits
+    _BLAS_LIMIT_CTX = _threadpool_limits(limits=int(_THREAD_CAP))
+except Exception:
+    _BLAS_LIMIT_CTX = None
+
+
+# ---- Normal conftest starts here. ----
 import importlib.util
 import os
 
@@ -36,9 +62,6 @@ _EXTRA_TO_DEP: dict[str, tuple[str, ...]] = {
     "needs_voice": ("sounddevice",),
 }
 
-# Files that crash at collection time when the listed extra is missing
-# because they import the feature module at the top. For these we use
-# pytest's collect_ignore mechanism instead of per-item skip markers.
 _FILES_REQUIRING: dict[str, str] = {
     "test_vault.py": "needs_vault",
     "test_server.py": "needs_playground",
@@ -92,16 +115,10 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _cap_blas_threads():
-    """Cap BLAS/OpenMP thread pools for the test session.
-
-    ComputeProfile caps ONNX session threads but numpy/scipy use a separate
-    BLAS pool (scipy_openblas64, OpenBLAS, MKL) that ignores ONNX options.
-    Without this cap, every GraphStore test fires uncapped BLAS threads and
-    saturates all cores. Cap to 2 unless the caller already set a lower limit
-    via env vars.
-    """
-    cap = int(os.environ.get("GRAPHSTORE_TEST_BLAS_THREADS", "2"))
+def _blas_cap_session_guard():
+    """Belt-and-braces: reapply threadpool cap inside every test session in
+    case a test or fixture tears the module-level limit down."""
+    cap = int(_THREAD_CAP)
     try:
         from threadpoolctl import threadpool_limits
         with threadpool_limits(limits=cap):

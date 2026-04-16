@@ -2,6 +2,11 @@
 
 __version__ = "0.3.0"
 
+# Import compute_profile first so its module-level _apply_blas_env_cap()
+# runs before numpy / scipy initialise their BLAS thread pools. Protects
+# the host from a graphstore install accidentally saturating all cores.
+from .core import compute_profile as _compute_profile_init  # noqa: F401
+
 from .store import GraphStore
 from .core.store import CoreStore
 from .core.schema import SchemaRegistry

@@ -10,6 +10,10 @@ Selection order (highest priority first):
   3. dynamic tier + battery + load scaling
 
 Computed once per process (cache invalidated when configure() is called).
+
+Module import also sets process-wide BLAS/OpenMP env vars so numpy, scipy,
+OpenBLAS, MKL, and Rust/Rayon thread pools cap themselves on first use.
+Users can set ``GRAPHSTORE_BLAS_CAP`` before import to override (lower only).
 """
 from __future__ import annotations
 
@@ -18,6 +22,37 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 import psutil
+
+
+def _apply_blas_env_cap() -> None:
+    """Cap BLAS/OpenMP/Rayon env vars at import time so thread pools are
+    small on first use. Respects user-supplied values (setdefault)."""
+    cap = os.environ.get("GRAPHSTORE_BLAS_CAP")
+    if cap is None:
+        # Heuristic: logical_cores // 4, clamped to [1, 2]. Deliberately
+        # conservative: the default scenario is a user running graphstore
+        # alongside other work. For heavy batch throughput, explicitly
+        # raise with GRAPHSTORE_BLAS_CAP=N.
+        try:
+            n = os.cpu_count() or 2
+        except Exception:
+            n = 2
+        cap = str(max(1, min(2, n // 4)))
+    for var in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "SCIPY_OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "BLIS_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "RAYON_NUM_THREADS",
+    ):
+        os.environ.setdefault(var, cap)
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+
+_apply_blas_env_cap()
 
 
 _GPU_PROVIDERS = (
