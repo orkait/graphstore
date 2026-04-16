@@ -346,13 +346,19 @@ class OnnxHFEmbedder(Embedder):
                 for p in self._providers
             ]
 
+        import os as _os
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        
+
         # Disable MatMulNBits on CUDA - it has a known 1.2GB pre-allocation bug
         # that triggers OOM on 12-16GB cards during prefill.
         if uses_gpu:
             sess_options.add_session_config_entry("session.disable_matmul_nbits", "1")
+        else:
+            cpu_threads = int(_os.environ.get("GRAPHSTORE_EMBED_THREADS", "4"))
+            sess_options.intra_op_num_threads = cpu_threads
+            sess_options.inter_op_num_threads = 1
+            sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 
         sess_kwargs: dict = {
             "sess_options": sess_options,
