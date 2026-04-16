@@ -190,6 +190,7 @@ _SECTION_MAP: dict[str, tuple[type, dict[str, type]]] = {
     "retention": (RetentionConfig, {f: type(getattr(RetentionConfig(), f)) for f in RetentionConfig.__struct_fields__}),
     "server": (ServerConfig, {f: type(getattr(ServerConfig(), f)) for f in ServerConfig.__struct_fields__}),
     "evolution": (EvolutionConfig, {f: type(getattr(EvolutionConfig(), f)) for f in EvolutionConfig.__struct_fields__}),
+    "compute": (ComputeConfig, {f: type(getattr(ComputeConfig(), f)) for f in ComputeConfig.__struct_fields__}),
 }
 
 # Flat kwarg name -> (section, field) for constructor shortcuts

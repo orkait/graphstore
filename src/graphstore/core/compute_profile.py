@@ -252,7 +252,7 @@ def _compute_profile() -> ComputeProfile:
     final_rerank = ov["rerank_threads"] if rerank_locked else _env_int("GRAPHSTORE_RERANK_THREADS", rerank_t)
     final_batch = ov["embed_batch_size"] if ov["embed_batch_size"] is not None else _env_int("GRAPHSTORE_EMBED_BATCH", batch)
 
-    return ComputeProfile(
+    profile = ComputeProfile(
         name=name,
         cores=physical,
         logical_cores=logical,
@@ -267,6 +267,17 @@ def _compute_profile() -> ComputeProfile:
         embed_batch_size=max(1, final_batch),
         defer_embeddings=defer,
     )
+    # Apply BLAS/OpenMP thread cap to match profile. ComputeProfile caps ONNX
+    # session threads but numpy/scipy use a separate BLAS thread pool that
+    # ignores those options. threadpoolctl sets the cap at the library level,
+    # covering scipy_openblas, OpenBLAS, MKL, and Rayon (tokenizers).
+    blas_cap = max(1, max(profile.embed_threads, profile.ner_threads, profile.rerank_threads))
+    try:
+        from threadpoolctl import threadpool_limits
+        threadpool_limits(limits=blas_cap)
+    except Exception:
+        pass
+    return profile
 
 
 def get_profile() -> ComputeProfile:

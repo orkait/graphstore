@@ -20,6 +20,7 @@ Either way, an individual test file never has to call ``importorskip``.
 from __future__ import annotations
 
 import importlib.util
+import os
 
 import pytest
 
@@ -88,3 +89,22 @@ def pytest_collection_modifyitems(
             item.add_marker(
                 pytest.mark.skip(reason=f"requires optional deps: {missing}")
             )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cap_blas_threads():
+    """Cap BLAS/OpenMP thread pools for the test session.
+
+    ComputeProfile caps ONNX session threads but numpy/scipy use a separate
+    BLAS pool (scipy_openblas64, OpenBLAS, MKL) that ignores ONNX options.
+    Without this cap, every GraphStore test fires uncapped BLAS threads and
+    saturates all cores. Cap to 2 unless the caller already set a lower limit
+    via env vars.
+    """
+    cap = int(os.environ.get("GRAPHSTORE_TEST_BLAS_THREADS", "2"))
+    try:
+        from threadpoolctl import threadpool_limits
+        with threadpool_limits(limits=cap):
+            yield
+    except ImportError:
+        yield
