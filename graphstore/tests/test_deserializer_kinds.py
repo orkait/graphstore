@@ -1,0 +1,22 @@
+"""Test that node kinds > 255 survive checkpoint/reload."""
+import tempfile
+from pathlib import Path
+from graphstore import GraphStore
+
+
+def test_kind_ids_above_255_survive_checkpoint():
+    """Register 260 distinct kinds, checkpoint, reload, verify all survive."""
+    with tempfile.TemporaryDirectory() as td:
+        gs = GraphStore(path=td)
+        for i in range(260):
+            gs.execute(f'CREATE NODE "node_{i}" kind = "kind_{i}"')
+        gs.checkpoint()
+        gs.close()
+
+        gs2 = GraphStore(path=td)
+        result = gs2.execute('NODE "node_259"')
+        assert result.data is not None, "Node with kind > 255 not found after reload"
+        assert result.data["kind"] == "kind_259", (
+            f"Kind corrupted: expected 'kind_259', got '{result.data['kind']}'"
+        )
+        gs2.close()

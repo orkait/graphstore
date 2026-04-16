@@ -1,0 +1,70 @@
+[
+  {
+    "file": "dog_01.jpg",
+    "label": "dog"
+  },
+  {
+    "file": "cat_01.jpg",
+    "label": "cat"
+  },
+  {
+    "file": "ant_01.jpg",
+    "label": "ant"
+  },
+  {
+    "file": "parrot_01.jpg",
+    "label": "parrot"
+  },
+  {
+    "file": "elephant_01.jpg",
+    "label": "elephant"
+  },
+  {
+    "file": "bicycle_01.jpg",
+    "label": "bicycle"
+  },
+  {
+    "file": "pizza_01.jpg",
+    "label": "pizza"
+  },
+  {
+    "file": "apple_01.jpg",
+    "label": "apple"
+  },
+  {
+    "file": "banana_01.jpg",
+    "label": "banana"
+  },
+  {
+    "file": "tower_01.jpg",
+    "label": "tower"
+  },
+  {
+    "file": "flower_01.jpg",
+    "label": "flower"
+  },
+  {
+    "file": "stars_01.jpg",
+    "label": "stars"
+  },
+  {
+    "file": "cube_01.jpg",
+    "label": "cube"
+  },
+  {
+    "file": "guitar_01.jpg",
+    "label": "guitar"
+  },
+  {
+    "file": "painting_01.jpg",
+    "label": "painting"
+  },
+  {
+    "file": "penguin_01.png",
+    "label": "penguin"
+  },
+  {
+    "file": "tennis_01.jpg",
+    "label": "tennis"
+  }
+]

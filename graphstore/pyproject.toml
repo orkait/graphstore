@@ -1,0 +1,143 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graphstore"
+version = "0.3.0"
+description = "Agentic brain DB - the cognitive layer for AI agents"
+readme = "README.md"
+license = "AGPL-3.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "Kailash Mahavarkar", email = "kailashmahavarkar5@gmail.com" },
+]
+keywords = ["graph", "database", "in-memory", "dsl", "sparse-matrix"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "usearch>=2.0",
+    "lark>=1.1",
+    "msgspec>=0.18",
+]
+
+[project.urls]
+Homepage = "https://github.com/orkait/graphstore"
+Repository = "https://github.com/orkait/graphstore"
+Issues = "https://github.com/orkait/graphstore/issues"
+
+[project.scripts]
+graphstore = "graphstore.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-benchmark>=4.0",
+    "pytest-cov>=4.0",
+    "httpx>=0.24",
+]
+embed-default = [
+    "model2vec>=0.4",
+]
+embed-fastembed = [
+    "fastembed>=0.8",
+]
+embed-gguf = [
+    "llama-cpp-python>=0.3",
+]
+ingest = [
+    "markitdown>=0.1",
+    "pymupdf4llm>=0.1",
+    "pymupdf>=1.20",
+]
+ingest-pro = [
+    "docling>=2.0",
+    "openai>=1.0",
+]
+scheduler = [
+    "croniter>=6.0",
+]
+vault = [
+    "pyyaml>=6.0",
+]
+playground = [
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "pydantic>=2.0",
+]
+# Lean: onnxruntime-gpu only. Assumes host has CUDA 12 + cuDNN 9
+# findable by the dynamic linker. Saves ~1.6 GB over [gpu].
+gpu-ort = [
+    "onnxruntime-gpu>=1.23; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+# Zero-config: bundles the nvidia-*-cu12 runtime wheels, ctypes-dlopened
+# at first use. Platform markers keep pip install clean on mac/win/arm.
+gpu = [
+    "onnxruntime-gpu>=1.23; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cublas-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cuda-runtime-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cuda-nvrtc-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cudnn-cu12>=9.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-cufft-cu12>=11.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-curand-cu12>=10.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "nvidia-nvjitlink-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+voice = [
+    "sounddevice>=0.4",
+    "moonshine-voice",
+    "piper-tts>=1.4",
+]
+
+[tool.setuptools.packages.find]
+include = ["graphstore*"]
+
+[tool.setuptools.package-data]
+"graphstore.dsl" = ["*.lark"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "needs_embedder: requires graphstore[embed-default]",
+    "needs_fastembed: requires graphstore[embed-fastembed]",
+    "needs_ingest: requires graphstore[ingest]",
+    "needs_vault: requires graphstore[vault]",
+    "needs_scheduler: requires graphstore[scheduler]",
+    "needs_playground: requires graphstore[playground]",
+    "needs_gpu: requires graphstore[gpu]",
+    "needs_voice: requires graphstore[voice]",
+]
+
+[tool.bumpversion]
+current_version = "0.1.0"
+commit = true
+tag = true
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "graphstore/__init__.py"
+search = '__version__ = "{current_version}"'
+replace = '__version__ = "{new_version}"'
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+    "pytest-benchmark>=5.2.3",
+    "pytest-cov>=7.0.0",
+]

@@ -1,0 +1,301 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.970 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.961 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.961 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: oklch(0.577 0.245 27.325);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.870 0 0);
+    --chart-1: oklch(0.809 0.105 251.813);
+    --chart-2: oklch(0.623 0.214 259.815);
+    --chart-3: oklch(0.546 0.245 262.881);
+    --chart-4: oklch(0.488 0.243 264.376);
+    --chart-5: oklch(0.424 0.199 265.638);
+    --radius: 0.625rem;
+
+    /* Graph node kind colors - light (warm pastel, low saturation) */
+    --kind-function-bg: #e8eff7;
+    --kind-function-border: #9ab5d4;
+    --kind-function-text: #4a6f8f;
+    --kind-function-badge: #8aabc8;
+    --kind-class-bg: #e5f2ea;
+    --kind-class-border: #8cc4a0;
+    --kind-class-text: #3d7a55;
+    --kind-class-badge: #7db893;
+    --kind-module-bg: #f0e6f7;
+    --kind-module-border: #b094d4;
+    --kind-module-text: #6a4a8f;
+    --kind-module-badge: #a488c8;
+    --kind-service-bg: #f7ede2;
+    --kind-service-border: #d4a07a;
+    --kind-service-text: #8a5530;
+    --kind-service-badge: #c8946e;
+    --kind-database-bg: #f7e5e5;
+    --kind-database-border: #d49494;
+    --kind-database-text: #8a3d3d;
+    --kind-database-badge: #c88888;
+    --kind-queue-bg: #f7f1e2;
+    --kind-queue-border: #d4b86a;
+    --kind-queue-text: #8a6d20;
+    --kind-queue-badge: #c8ac5e;
+    --kind-default-bg: #e2f2f7;
+    --kind-default-border: #7abcc8;
+    --kind-default-text: #3a7080;
+    --kind-default-badge: #6eb0be;
+    --kind-fallback-0-bg: #f7e2ec;
+    --kind-fallback-0-border: #d488a0;
+    --kind-fallback-0-text: #7a3350;
+    --kind-fallback-0-badge: #c87c94;
+    --kind-fallback-1-bg: #e6e8f7;
+    --kind-fallback-1-border: #9496d4;
+    --kind-fallback-1-text: #4a4c8a;
+    --kind-fallback-1-badge: #8889c8;
+    --kind-fallback-2-bg: #f7efe2;
+    --kind-fallback-2-border: #d4ac6e;
+    --kind-fallback-2-text: #8a6020;
+    --kind-fallback-2-badge: #c8a062;
+
+    /* Panel controls - light */
+    --panel-bg: rgba(255,255,255,0.85);
+    --panel-border: #d8d8de;
+    --panel-text: #5a5a68;
+    --panel-hover: #f0efe8;
+    --panel-label: #7a7a88;
+    --panel-value: #5a5a68;
+
+    /* Button tones - light (warm pastels) */
+    --btn-primary-bg: #e5f0e8;
+    --btn-primary-hover: #d4e8d8;
+    --btn-primary-border: #b8d4be;
+    --btn-primary-text: #3d6e4a;
+    --btn-warn-bg: #f5ede2;
+    --btn-warn-hover: #ede2d4;
+    --btn-warn-border: #dac8a8;
+    --btn-warn-text: #7a5c30;
+    --btn-danger-bg: #f5e5e5;
+    --btn-danger-hover: #edd4d4;
+    --btn-danger-border: #dab8b8;
+    --btn-danger-text: #7a3d3d;
+    --btn-muted-bg: #eaebf0;
+    --btn-muted-hover: #dddee5;
+    --btn-muted-border: #c8c9d4;
+    --btn-muted-text: #555568;
+
+    /* Graph interaction tokens - light */
+    --graph-dimmed-opacity: 0.2;
+    --graph-edge-dimmed-opacity: 0.15;
+    --graph-highlight-border: #5b9bd5;
+    --graph-highlight-shadow: rgba(91,155,213,0.35);
+    --graph-node-dimmed-bg: #f6f6f7;
+    --graph-node-dimmed-border: #e8e8eb;
+    --graph-node-dimmed-text: #b0b0b8;
+    --graph-edge-dimmed: #e0e0e4;
+    --graph-edge-label-bg: rgba(255,255,255,0.90);
+    --graph-edge-label-text: #8a8a94;
+    --graph-degree-bg: rgba(0,0,0,0.03);
+    --graph-degree-text: #8a8a94;
+    --graph-bg-dots: #dcdce0;
+
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.970 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.870 0 0);
+}
+
+.dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.809 0.105 251.813);
+    --chart-2: oklch(0.623 0.214 259.815);
+    --chart-3: oklch(0.546 0.245 262.881);
+    --chart-4: oklch(0.488 0.243 264.376);
+    --chart-5: oklch(0.424 0.199 265.638);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+
+    /* Graph node kind colors - dark (muted jewel tones) */
+    --kind-function-bg: #1c2d40;
+    --kind-function-border: #5a8ab5;
+    --kind-function-text: #a3c4de;
+    --kind-function-badge: #5a8ab5;
+    --kind-class-bg: #1a3328;
+    --kind-class-border: #4d9968;
+    --kind-class-text: #8ec4a2;
+    --kind-class-badge: #4d9968;
+    --kind-module-bg: #2a1c3d;
+    --kind-module-border: #8a6bb5;
+    --kind-module-text: #bfa8d8;
+    --kind-module-badge: #8a6bb5;
+    --kind-service-bg: #302018;
+    --kind-service-border: #b8885a;
+    --kind-service-text: #d4b892;
+    --kind-service-badge: #b8885a;
+    --kind-database-bg: #301818;
+    --kind-database-border: #b56a6a;
+    --kind-database-text: #d4a0a0;
+    --kind-database-badge: #b56a6a;
+    --kind-queue-bg: #2d2510;
+    --kind-queue-border: #b59a40;
+    --kind-queue-text: #d8c880;
+    --kind-queue-badge: #b59a40;
+    --kind-default-bg: #18303a;
+    --kind-default-border: #4a98a8;
+    --kind-default-text: #8ac4d0;
+    --kind-default-badge: #4a98a8;
+    --kind-fallback-0-bg: #301820;
+    --kind-fallback-0-border: #b56a80;
+    --kind-fallback-0-text: #d4a0b2;
+    --kind-fallback-0-badge: #b56a80;
+    --kind-fallback-1-bg: #201830;
+    --kind-fallback-1-border: #7a6ab5;
+    --kind-fallback-1-text: #b0a4d4;
+    --kind-fallback-1-badge: #7a6ab5;
+    --kind-fallback-2-bg: #2a2218;
+    --kind-fallback-2-border: #b5924a;
+    --kind-fallback-2-text: #d4c090;
+    --kind-fallback-2-badge: #b5924a;
+
+    /* Panel controls - dark */
+    --panel-bg: rgba(40,40,48,0.90);
+    --panel-border: #4a4a58;
+    --panel-text: #b0b0c0;
+    --panel-hover: #383844;
+    --panel-label: #8888a0;
+    --panel-value: #a0a0b8;
+
+    /* Button tones - dark (lifted from card bg, tinted) */
+    --btn-primary-bg: #283e30;
+    --btn-primary-hover: #304838;
+    --btn-primary-border: #4a6e52;
+    --btn-primary-text: #a0d8b0;
+    --btn-warn-bg: #3a3220;
+    --btn-warn-hover: #443c28;
+    --btn-warn-border: #6a5a38;
+    --btn-warn-text: #e0cc98;
+    --btn-danger-bg: #3a2424;
+    --btn-danger-hover: #442c2c;
+    --btn-danger-border: #6a4444;
+    --btn-danger-text: #e0b0b0;
+    --btn-muted-bg: #2e2e3a;
+    --btn-muted-hover: #383844;
+    --btn-muted-border: #505060;
+    --btn-muted-text: #b8b8d0;
+
+    /* Graph interaction tokens - dark */
+    --graph-dimmed-opacity: 0.4;
+    --graph-edge-dimmed-opacity: 0.25;
+    --graph-highlight-border: #7ab5e0;
+    --graph-highlight-shadow: rgba(122,181,224,0.4);
+    --graph-node-dimmed-bg: #252530;
+    --graph-node-dimmed-border: #3a3a44;
+    --graph-node-dimmed-text: #5a5a68;
+    --graph-edge-dimmed: #3a3a44;
+    --graph-edge-label-bg: rgba(20,20,24,0.90);
+    --graph-edge-label-text: #7a7a88;
+    --graph-degree-bg: rgba(255,255,255,0.05);
+    --graph-degree-text: #6a6a78;
+    --graph-bg-dots: #2a2a30;
+}
+
+@theme inline {
+    --font-sans: 'Geist Variable', sans-serif;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    scrollbar-width: thin;
+    scrollbar-color: oklch(0 0 0 / 0.12) transparent;
+    }
+  .dark * {
+    scrollbar-color: oklch(1 0 0 / 0.12) transparent;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+}

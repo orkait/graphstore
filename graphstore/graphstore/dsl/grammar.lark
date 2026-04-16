@@ -1,0 +1,343 @@
+start: statement
+?statement: system_query | user_query
+
+// =============================================
+// USER DSL
+// =============================================
+
+?user_query: read_query | write_query | batch | vault_query
+
+// --- Reads ---
+?read_query: node_q | nodes_q | edges_q | traverse_q | subgraph_q
+           | path_q | paths_q | shortest_q | distance_q
+           | weighted_sp_q | weighted_dist_q
+           | ancestors_q | descendants_q | common_q | match_q
+           | count_q
+           | aggregate_q
+           | recall_q
+           | counterfactual
+           | similar_q
+           | lexical_q
+           | remember_q
+
+node_q:        "NODE" STRING with_doc?
+nodes_q:       "NODES" where_clause? order_clause? limit_clause? offset_clause?
+edges_q:       "EDGES" direction STRING where_clause? limit_clause?
+traverse_q:    "TRAVERSE" "FROM" STRING "DEPTH" NUMBER where_clause? limit_clause?
+subgraph_q:    "SUBGRAPH" "FROM" STRING "DEPTH" NUMBER
+path_q:        "PATH" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER where_clause?
+paths_q:       "PATHS" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER where_clause?
+shortest_q:    "SHORTEST" "PATH" "FROM" STRING "TO" STRING where_clause?
+distance_q:    "DISTANCE" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER
+weighted_sp_q: "WEIGHTED" "SHORTEST" "PATH" "FROM" STRING "TO" STRING where_clause?
+weighted_dist_q: "WEIGHTED" "DISTANCE" "FROM" STRING "TO" STRING
+ancestors_q:   "ANCESTORS" "OF" STRING "DEPTH" NUMBER where_clause?
+descendants_q: "DESCENDANTS" "OF" STRING "DEPTH" NUMBER where_clause?
+common_q:      "COMMON" "NEIGHBORS" "OF" STRING "AND" STRING where_clause?
+match_q:       "MATCH" pattern limit_clause?
+count_q:       "COUNT" count_target where_clause?
+count_target:  "NODES" -> count_nodes
+             | "EDGES" -> count_edges
+
+aggregate_q: "AGGREGATE" "NODES" where_clause? group_clause? select_clause having_clause? order_agg_clause? limit_clause?
+
+recall_q: "RECALL" "FROM" STRING "DEPTH" NUMBER limit_clause? where_clause?
+counterfactual: "WHAT" "IF" "RETRACT" STRING
+
+similar_q: "SIMILAR" "TO" similar_target limit_clause? where_clause?
+lexical_q: "LEXICAL" "SEARCH" STRING limit_clause? where_clause?
+remember_q: "REMEMBER" STRING at_clause? tokens_clause? limit_clause? where_clause?
+at_clause: "AT" value
+tokens_clause: "TOKENS" NUMBER
+similar_target: vector_literal      -> similar_vector
+              | STRING              -> similar_text
+              | "NODE" STRING       -> similar_node
+vector_literal: "[" NUMBER ("," NUMBER)* "]"
+group_clause: "GROUP" "BY" IDENTIFIER ("," IDENTIFIER)*
+select_clause: "SELECT" agg_func ("," agg_func)*
+having_clause: "HAVING" having_expr
+having_expr: agg_func OP value
+order_agg_clause: "ORDER" "BY" agg_func_ref order_dir?
+agg_func_ref: agg_func
+
+agg_func: "COUNT" "(" ")"                          -> agg_count
+         | "COUNT" "DISTINCT" "(" IDENTIFIER ")"     -> agg_count_distinct
+         | "SUM" "(" IDENTIFIER ")"                   -> agg_sum
+         | "AVG" "(" IDENTIFIER ")"                   -> agg_avg
+         | "MIN" "(" IDENTIFIER ")"                   -> agg_min
+         | "MAX" "(" IDENTIFIER ")"                   -> agg_max
+
+direction: "FROM" -> dir_from
+         | "TO" -> dir_to
+
+// --- Pattern matching ---
+pattern: match_step (arrow match_step)+
+match_step: "(" STRING ")" -> bound_step
+          | "(" IDENTIFIER step_where? ")" -> var_step
+step_where: "WHERE" expr
+arrow: "-[" expr? "]->"
+
+// --- Writes ---
+?write_query: create_node | update_node | upsert_node
+            | delete_node | delete_nodes
+            | create_edge | update_edge | delete_edge | delete_edges
+            | increment
+            | assert_stmt | retract_stmt | update_nodes | merge_stmt
+            | propagate_stmt
+            | bind_context | discard_context
+            | ingest_stmt
+            | connect_node
+            | forget_node
+
+connect_node: "CONNECT" "NODE" STRING threshold_clause?
+forget_node: "FORGET" "NODE" STRING
+
+create_node:  "CREATE" "NODE" STRING field_pairs vector_clause? expires_clause? event_clause? document_clause?
+            | "CREATE" "NODE" "AUTO" field_pairs vector_clause? expires_clause? event_clause? document_clause? -> create_node_auto
+document_clause: "DOCUMENT" STRING
+with_doc: "WITH" "DOCUMENT"
+update_node:  "UPDATE" "NODE" STRING "SET" field_pairs
+upsert_node:  "UPSERT" "NODE" STRING field_pairs vector_clause? expires_clause? event_clause?
+vector_clause: "VECTOR" vector_literal
+event_clause: "EVENT_AT" value
+delete_node:  "DELETE" "NODE" STRING
+delete_nodes: "DELETE" "NODES" where_clause
+
+assert_stmt:  "ASSERT" STRING field_pairs confidence_clause? source_clause? event_clause?
+confidence_clause: "CONFIDENCE" NUMBER
+source_clause: "SOURCE" STRING
+
+retract_stmt: "RETRACT" STRING reason_clause?
+reason_clause: "REASON" STRING
+
+update_nodes: "UPDATE" "NODES" where_clause "SET" field_pairs
+
+merge_stmt:   "MERGE" "NODE" STRING "INTO" STRING
+
+propagate_stmt: "PROPAGATE" STRING "FIELD" IDENTIFIER "DEPTH" NUMBER
+
+bind_context: "BIND" "CONTEXT" STRING
+discard_context: "DISCARD" "CONTEXT" STRING
+
+ingest_stmt: "INGEST" STRING ingest_as? ingest_kind? ingest_using?
+ingest_as: "AS" STRING
+ingest_kind: "KIND" STRING
+ingest_using: vision_clause | using_clause
+using_clause: "USING" IDENTIFIER
+vision_clause: "USING" "VISION" STRING
+
+expires_clause: "EXPIRES" "IN" NUMBER TIME_UNIT -> expires_in
+              | "EXPIRES" "AT" STRING           -> expires_at
+
+create_edge:  "CREATE" "EDGE" node_ref "->" node_ref field_pairs
+node_ref: STRING | VARIABLE
+update_edge:  "UPDATE" "EDGE" STRING "->" STRING "SET" field_pairs where_clause?
+delete_edge:  "DELETE" "EDGE" STRING "->" STRING where_clause?
+delete_edges: "DELETE" "EDGES" direction STRING where_clause?
+
+increment:    "INCREMENT" "NODE" STRING IDENTIFIER "BY" NUMBER
+
+batch: "BEGIN" _NL (_batch_stmt _NL)* "COMMIT"
+_batch_stmt: var_assign
+           | create_node | update_node | upsert_node
+           | delete_node | delete_nodes
+           | create_edge | update_edge | delete_edge | delete_edges
+           | increment
+           | assert_stmt | retract_stmt | update_nodes | merge_stmt
+           | connect_node | forget_node
+
+var_assign: VARIABLE "=" write_query
+
+field_pairs: (IDENTIFIER "=" value)*
+
+// --- Filters ---
+where_clause: "WHERE" expr
+expr: or_expr
+or_expr: or_expr "OR" and_expr | and_expr
+and_expr: and_expr "AND" not_expr | not_expr
+not_expr: "NOT" not_expr -> not_term
+        | atom
+?atom: condition | contains_cond | like_cond | in_cond | "(" expr ")" | degree_condition | similar_cond
+condition: field_ref OP value
+field_ref: IDENTIFIER ("." IDENTIFIER)?
+contains_cond: field_ref "CONTAINS" STRING
+like_cond: field_ref "LIKE" STRING
+in_cond: field_ref "IN" "(" value ("," value)* ")"
+similar_cond: "SIMILAR" "(" field_ref "," STRING ")" ">" NUMBER
+degree_condition: degree_kw field_ref? OP NUMBER
+degree_kw: "INDEGREE" -> indegree
+          | "OUTDEGREE" -> outdegree
+
+OP: "!=" | ">=" | "<=" | "=" | ">" | "<"
+?value: STRING -> val_string
+      | NUMBER -> val_number
+      | "NULL" -> val_null
+      | time_expr
+
+time_expr: "NOW" "(" ")" "-" NUMBER TIME_UNIT -> time_offset
+         | "NOW" "(" ")"                       -> time_now
+         | "TODAY"                              -> time_today
+         | "YESTERDAY"                          -> time_yesterday
+
+TIME_UNIT: /[smhd]/
+limit_clause: "LIMIT" NUMBER
+offset_clause: "OFFSET" NUMBER
+order_clause: "ORDER" "BY" IDENTIFIER order_dir?
+order_dir: "ASC" -> order_asc
+          | "DESC" -> order_desc
+
+// --- Vault ---
+?vault_query: vault_new | vault_read | vault_write | vault_append
+            | vault_search | vault_backlinks | vault_list
+            | vault_sync | vault_daily | vault_archive
+
+vault_new: "VAULT" "NEW" STRING vault_kind? vault_tags?
+vault_kind: "KIND" STRING
+vault_tags: "TAGS" STRING
+
+vault_read: "VAULT" "READ" STRING
+vault_write: "VAULT" "WRITE" STRING "SECTION" STRING "CONTENT" STRING
+vault_append: "VAULT" "APPEND" STRING "SECTION" STRING "CONTENT" STRING
+
+vault_search: "VAULT" "SEARCH" STRING limit_clause? where_clause?
+vault_backlinks: "VAULT" "BACKLINKS" STRING
+vault_list: "VAULT" "LIST" where_clause? order_clause? limit_clause?
+
+vault_sync: "VAULT" "SYNC"
+vault_daily: "VAULT" "DAILY"
+vault_archive: "VAULT" "ARCHIVE" STRING
+
+// =============================================
+// SYSTEM DSL
+// =============================================
+
+system_query: "SYS" sys_command
+
+?sys_command: sys_stats | sys_kinds | sys_edge_kinds
+            | sys_describe | sys_slow | sys_frequent | sys_failed
+            | sys_explain | sys_register_node_kind | sys_register_edge_kind
+            | sys_unregister | sys_checkpoint | sys_rebuild
+            | sys_clear | sys_wal
+            | sys_expire | sys_contradictions
+            | sys_snapshot | sys_rollback | sys_snapshots
+            | sys_duplicates | sys_embedders
+            | sys_connect | sys_consolidate | sys_reembed | sys_status
+            | sys_retain
+            | sys_health | sys_optimize
+            | sys_log | sys_cron
+            | sys_evict
+            | sys_evolve
+
+sys_stats:      "STATS" STATS_TARGET?
+STATS_TARGET:   "NODES" | "EDGES" | "MEMORY" | "WAL"
+
+sys_kinds:      "KINDS"
+sys_edge_kinds: "EDGE" "KINDS"
+sys_describe:   "DESCRIBE" ENTITY_TYPE STRING
+
+sys_slow:       "SLOW" "QUERIES" since_clause? limit_clause?
+sys_frequent:   "FREQUENT" "QUERIES" limit_clause?
+sys_failed:     "FAILED" "QUERIES" limit_clause?
+since_clause:   "SINCE" STRING
+
+sys_explain:    "EXPLAIN" read_query
+
+sys_register_node_kind: "REGISTER" "NODE" "KIND" STRING "REQUIRED" ident_list optional_clause? embed_clause?
+sys_register_edge_kind: "REGISTER" "EDGE" "KIND" STRING "FROM" string_list "TO" string_list
+optional_clause: "OPTIONAL" ident_list
+embed_clause: "EMBED" IDENTIFIER
+sys_unregister:         "UNREGISTER" ENTITY_TYPE "KIND" STRING
+
+ENTITY_TYPE: "NODE" | "EDGE"
+
+sys_checkpoint: "CHECKPOINT"
+sys_rebuild:    "REBUILD" "INDICES"
+sys_clear:      "CLEAR" CLEAR_TARGET
+sys_wal:        "WAL" WAL_ACTION
+
+sys_expire:          "EXPIRE" where_clause?
+sys_contradictions:  "CONTRADICTIONS" where_clause? "FIELD" IDENTIFIER "GROUP" "BY" IDENTIFIER
+
+sys_snapshot: "SNAPSHOT" STRING
+sys_rollback: "ROLLBACK" "TO" STRING
+sys_snapshots: "SNAPSHOTS"
+
+sys_duplicates: "DUPLICATES" where_clause? threshold_clause?
+threshold_clause: "THRESHOLD" NUMBER
+sys_embedders: "EMBEDDERS"
+
+sys_connect: "CONNECT" where_clause? threshold_clause?
+sys_consolidate: "CONSOLIDATE" threshold_clause? min_cluster_clause?
+min_cluster_clause: "MIN_CLUSTER_SIZE" NUMBER
+sys_reembed: "REEMBED"
+sys_status: "STATUS"
+sys_retain: "RETAIN"
+sys_health: "HEALTH"
+sys_optimize: "OPTIMIZE" OPTIMIZE_TARGET?
+OPTIMIZE_TARGET: "COMPACT" | "STRINGS" | "EDGES" | "VECTORS" | "BLOBS" | "CACHE"
+
+CLEAR_TARGET: "LOG" | "CACHE"
+WAL_ACTION: "STATUS" | "REPLAY"
+
+ident_list: typed_ident ("," typed_ident)*
+typed_ident: IDENTIFIER ":" IDENTIFIER -> typed_ident_with_type
+           | IDENTIFIER -> typed_ident_bare
+string_list: STRING ("," STRING)*
+
+sys_evict: "EVICT" limit_clause?
+
+sys_log: "LOG" log_filter? limit_clause?
+log_filter: "WHERE" expr         -> log_where
+          | "SINCE" STRING       -> log_since
+          | "TRACE" STRING       -> log_trace
+
+sys_cron: "CRON" cron_command
+?cron_command: cron_add | cron_delete | cron_enable | cron_disable | cron_list | cron_run
+cron_add: "ADD" STRING "SCHEDULE" STRING "QUERY" STRING
+cron_delete: "DELETE" STRING
+cron_enable: "ENABLE" STRING
+cron_disable: "DISABLE" STRING
+cron_list: "LIST"
+cron_run: "RUN" STRING
+
+// --- Evolution rules (Layer 5: metacognitive memory) ---
+sys_evolve: "EVOLVE" evolve_command
+?evolve_command: evolve_rule | evolve_list | evolve_show | evolve_enable | evolve_disable | evolve_delete | evolve_history | evolve_reset
+
+evolve_rule: "RULE" STRING evolve_when_clause evolve_then_clause+ evolve_cooldown? evolve_priority?
+evolve_when_clause: "WHEN" evolve_condition ("AND" evolve_condition)*
+evolve_condition: IDENTIFIER EVOLVE_OP NUMBER
+evolve_then_clause: "THEN" evolve_action
+evolve_action: "SET" IDENTIFIER "=" evolve_value      -> evolve_action_set
+             | "ADJUST" IDENTIFIER "BY" NUMBER "UNTIL" NUMBER -> evolve_action_adjust_until
+             | "ADJUST" IDENTIFIER "BY" NUMBER         -> evolve_action_adjust
+             | "ADD" IDENTIFIER STRING                 -> evolve_action_add
+             | "REMOVE" IDENTIFIER STRING              -> evolve_action_remove
+             | "RUN" IDENTIFIER+                       -> evolve_action_run
+evolve_value: "[" NUMBER ("," NUMBER)* "]"             -> evolve_value_list
+            | NUMBER                                   -> evolve_value_scalar
+evolve_cooldown: "COOLDOWN" NUMBER
+evolve_priority: "PRIORITY" NUMBER
+
+EVOLVE_OP: ">=" | "<=" | "==" | "!=" | ">" | "<"
+
+evolve_list: "LIST"
+evolve_show: "SHOW" STRING
+evolve_enable: "ENABLE" STRING
+evolve_disable: "DISABLE" STRING
+evolve_delete: "DELETE" STRING
+evolve_history: "HISTORY" ("LIMIT" NUMBER)?
+evolve_reset: "RESET"
+
+// =============================================
+// TERMINALS
+// =============================================
+
+STRING: "\"" /[^"\\]*(\\.[^"\\]*)*/ "\""
+NUMBER: /-?[0-9]+(\.[0-9]+)?/
+IDENTIFIER: /[a-zA-Z_\u00c0-\u017f\u0400-\u04ff\u4e00-\u9fff][a-zA-Z0-9_\u00c0-\u017f\u0400-\u04ff\u4e00-\u9fff]*/
+VARIABLE: /\$[a-zA-Z_\u00c0-\u017f\u0400-\u04ff\u4e00-\u9fff][a-zA-Z0-9_\u00c0-\u017f\u0400-\u04ff\u4e00-\u9fff]*/
+_NL: /\n/+
+
+%import common.WS_INLINE
+%ignore WS_INLINE

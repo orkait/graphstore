@@ -1,0 +1,33 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/cache/hf \
+    FASTEMBED_CACHE_PATH=/cache/fastembed
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential curl git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /repo
+COPY pyproject.toml /repo/pyproject.toml
+RUN pip install \
+        "numpy>=1.24" "scipy>=1.10" "lark>=1.1" "usearch>=2.0" \
+        "model2vec>=0.4" "msgspec>=0.18" \
+        "fastembed>=0.8" "psutil>=5.9" \
+        "chromadb>=0.5" "rank-bm25>=0.2.2" \
+        "tokenizers>=0.20" "onnxruntime>=1.23"
+
+RUN pip install llama-cpp-python \
+        --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 && \
+    pip install nvidia-cuda-runtime-cu12 nvidia-cublas-cu12
+
+COPY graphstore /repo/graphstore
+COPY benchmarks /repo/benchmarks
+
+ENV PYTHONPATH=/repo
+
+ENTRYPOINT ["python", "-m", "benchmarks.framework.docker_runner"]
+CMD ["--system", "graphstore", "--dataset", "longmemeval", "--variant", "s"]
