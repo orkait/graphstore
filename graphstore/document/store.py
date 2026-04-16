@@ -108,6 +108,16 @@ class DocumentStore:
             (slot, summary))
         self._conn.commit()
 
+    def put_summaries_batch(self, rows: list[tuple[int, str, str | None, int | None, int, int]]) -> None:
+        """Batch insert summaries with single commit."""
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO summaries VALUES (?, ?, ?, ?, ?, ?)",
+            rows)
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO doc_fts (rowid, summary) VALUES (?, ?)",
+            [(r[0], r[1]) for r in rows])
+        self._conn.commit()
+
     def get_summary(self, slot: int) -> dict | None:
         row = self._conn.execute(
             "SELECT summary, heading, page, chunk_index, doc_slot FROM summaries WHERE slot = ?",

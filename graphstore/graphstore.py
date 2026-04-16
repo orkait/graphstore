@@ -868,6 +868,19 @@ class GraphStore:
             return
         self._document_store.put_summary(slot, text)
 
+    def index_text_batch(self, items: list[tuple[str, str]]) -> None:
+        """Batch index text for multiple existing nodes in one commit."""
+        if self._document_store is None:
+            return
+        rows = []
+        for node_id, text in items:
+            str_id = self._store.string_table.intern(node_id)
+            slot = self._store.id_to_slot.get(str_id)
+            if slot is not None:
+                rows.append((slot, text, None, None, 0, 0))
+        if rows:
+            self._document_store.put_summaries_batch(rows)
+
     @property
     def cost_threshold(self) -> int:
         """DSL query cost threshold. Queries exceeding this are rejected."""

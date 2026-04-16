@@ -2,22 +2,22 @@
 
 __version__ = "0.3.0"
 
-from graphstore.graphstore import GraphStore
-from graphstore.core.store import CoreStore
-from graphstore.core.schema import SchemaRegistry
-from graphstore.core.types import Result, Edge
-from graphstore.dsl.parser import parse, clear_cache
-from graphstore.dsl.executor import Executor
-from graphstore.dsl.executor_system import SystemExecutor
-from graphstore.core.errors import (
+from .graphstore import GraphStore
+from .core.store import CoreStore
+from .core.schema import SchemaRegistry
+from .core.types import Result, Edge
+from .dsl.parser import parse, clear_cache
+from .dsl.executor import Executor
+from .dsl.executor_system import SystemExecutor
+from .core.errors import (
     GraphStoreError, QueryError, NodeNotFound, NodeExists,
     CeilingExceeded, VersionMismatch, SchemaError,
     CostThresholdExceeded, BatchRollback, AggregationError,
     VectorError, EmbedderRequired, VectorNotFound,
     OptimizationInProgress,
 )
-from graphstore.core.memory import DEFAULT_CEILING_BYTES
-from graphstore.config import (
+from .core.memory import DEFAULT_CEILING_BYTES
+from .config import (
     GraphStoreConfig, load_config, save_config,
     CoreConfig, VectorConfig, DocumentConfig, DslConfig,
     VaultConfig, PersistenceConfig, RetentionConfig, ServerConfig,

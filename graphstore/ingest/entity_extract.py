@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -82,7 +83,6 @@ def _get_extractor(model_dir: str | Path, max_length: int):
         if not onnx_path.exists():
             raise FileNotFoundError(f"ONNX model not found in {model_dir}")
 
-        import json
         config_path = model_dir / "config.json"
         if not config_path.exists():
             config_path = model_dir / "onnx" / "config.json"
@@ -90,8 +90,6 @@ def _get_extractor(model_dir: str | Path, max_length: int):
         if config_path.exists():
             cfg = json.loads(config_path.read_text())
             raw_id2label = cfg.get("id2label", {})
-            # Some ONNX models use generic LABEL_0–LABEL_8 for CoNLL-2003 NER.
-            # Map them to standard BIO labels.
             if raw_id2label and "LABEL_0" in raw_id2label.values():
                 id2label = {
                     "0": "O",
@@ -108,7 +106,12 @@ def _get_extractor(model_dir: str | Path, max_length: int):
 
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        session = ort.InferenceSession(str(onnx_path), sess_options=sess_options)
+        
+        # Check for CUDA
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if "CUDAExecutionProvider" in ort.get_available_providers() else ["CPUExecutionProvider"]
+        
+        session = ort.InferenceSession(str(onnx_path), sess_options=sess_options, providers=providers)
+        print(f"  [NER] Model loaded. Provider: {session.get_providers()[0]}")
         input_names = {i.name for i in session.get_inputs()}
 
         _extractors[key] = {
@@ -171,6 +174,54 @@ def _decode_entities(text: str, offsets: list[tuple[int, int]],
     return out
 
 
+def extract_batch(texts: list[str], model_dir: str | Path | None = None,
+                  score_threshold: float = 0.6,
+                  max_length: int = 256) -> list[list[Entity]]:
+    """Extract named entities from multiple texts using ONNX TinyBERT NER."""
+    if not texts:
+        return []
+    if model_dir is None:
+        return [[] for _ in texts]
+    
+    extractor = _get_extractor(model_dir, max_length)
+    encodings = [extractor["tokenizer"].encode(t) for t in texts]
+    
+    # Simple padding
+    max_len = max(len(e.ids) for e in encodings)
+    input_ids = []
+    attention_mask = []
+    token_type_ids = []
+    
+    for e in encodings:
+        pad_len = max_len - len(e.ids)
+        input_ids.append(e.ids + [0] * pad_len)
+        attention_mask.append(e.attention_mask + [0] * pad_len)
+        if "token_type_ids" in extractor["input_names"]:
+            token_type_ids.append([0] * max_len)
+
+    feed = {
+        "input_ids": np.array(input_ids, dtype=np.int64),
+        "attention_mask": np.array(attention_mask, dtype=np.int64),
+    }
+    if "token_type_ids" in extractor["input_names"]:
+        feed["token_type_ids"] = np.array(token_type_ids, dtype=np.int64)
+
+    all_logits = extractor["session"].run(None, feed)[0]
+    
+    results = []
+    for i, logits in enumerate(all_logits):
+        # Softmax
+        x = logits[:len(encodings[i].ids)] - np.max(logits[:len(encodings[i].ids)], axis=-1, keepdims=True)
+        probs = np.exp(x) / np.sum(x, axis=-1, keepdims=True)
+        pred_ids = np.argmax(probs, axis=-1)
+        id2label = extractor["id2label"]
+        labels = [id2label.get(str(int(idx)), "O") for idx in pred_ids]
+        scores = np.max(probs, axis=-1)
+        results.append(_decode_entities(texts[i], list(encodings[i].offsets), labels, scores, score_threshold))
+        
+    return results
+
+
 def extract_entities(text: str, model_dir: str | Path | None = None,
                      score_threshold: float = 0.6,
                      max_length: int = 256) -> list[Entity]:
@@ -179,27 +230,5 @@ def extract_entities(text: str, model_dir: str | Path | None = None,
     Returns list of Entity dataclasses sorted by position in text.
     Returns empty list if text is empty or no model_dir provided.
     """
-    if not text or not text.strip():
-        return []
-    if model_dir is None:
-        return []
-    extractor = _get_extractor(model_dir, max_length)
-    enc = extractor["tokenizer"].encode(text)
-    input_ids = np.array([enc.ids], dtype=np.int64)
-    attention_mask = np.array([enc.attention_mask], dtype=np.int64)
-    feed: dict[str, Any] = {
-        "input_ids": input_ids,
-        "attention_mask": attention_mask,
-    }
-    if "token_type_ids" in extractor["input_names"]:
-        feed["token_type_ids"] = np.zeros_like(input_ids)
-
-    logits = extractor["session"].run(None, feed)[0][0]
-    # Softmax
-    x = logits - np.max(logits, axis=-1, keepdims=True)
-    probs = np.exp(x) / np.sum(np.exp(x), axis=-1, keepdims=True)
-    pred_ids = np.argmax(probs, axis=-1)
-    id2label = extractor["id2label"]
-    labels = [id2label.get(str(int(i)), "O") for i in pred_ids]
-    scores = np.max(probs, axis=-1)
-    return _decode_entities(text, list(enc.offsets), labels, scores, score_threshold)
+    res = extract_batch([text], model_dir, score_threshold, max_length)
+    return res[0] if res else []
