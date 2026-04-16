@@ -129,84 +129,28 @@ class GraphStore:
         )
         logger.info("graphstore compute: %s", describe_profile())
 
-        # Layer 4: constructor kwargs (highest priority)
-        overrides = {}
-        if ceiling_mb is not self._UNSET:
-            overrides["ceiling_mb"] = ceiling_mb
-        if embedder is not self._UNSET:
-            overrides["embedder"] = embedder
-        if ingest_root is not self._UNSET:
-            overrides["ingest_root"] = ingest_root
-        if vault is not self._UNSET:
-            overrides["vault"] = vault
-        if retention is not self._UNSET:
-            overrides["retention"] = retention
-        if remember_weights is not self._UNSET:
-            overrides["remember_weights"] = remember_weights
-        if recall_decay is not self._UNSET:
-            overrides["recall_decay"] = recall_decay
-        if search_oversample is not self._UNSET:
-            overrides["search_oversample"] = search_oversample
-        if similarity_threshold is not self._UNSET:
-            overrides["similarity_threshold"] = similarity_threshold
-        if duplicate_threshold is not self._UNSET:
-            overrides["duplicate_threshold"] = duplicate_threshold
-        if recency_half_life_days is not self._UNSET:
-            overrides["recency_half_life_days"] = recency_half_life_days
-        if similar_to_oversample is not self._UNSET:
-            overrides["similar_to_oversample"] = similar_to_oversample
-        if lexical_search_oversample is not self._UNSET:
-            overrides["lexical_search_oversample"] = lexical_search_oversample
-        if fusion_method is not self._UNSET:
-            overrides["fusion_method"] = fusion_method
-        if rrf_k is not self._UNSET:
-            overrides["rrf_k"] = rrf_k
-        if nucleus_expansion is not self._UNSET:
-            overrides["nucleus_expansion"] = nucleus_expansion
-        if nucleus_hops is not self._UNSET:
-            overrides["nucleus_hops"] = nucleus_hops
-        if nucleus_neighbors_per_hop is not self._UNSET:
-            overrides["nucleus_neighbors_per_hop"] = nucleus_neighbors_per_hop
-        if nucleus_min_text_length is not self._UNSET:
-            overrides["nucleus_min_text_length"] = nucleus_min_text_length
-        if nucleus_allowed_kinds is not self._UNSET:
-            overrides["nucleus_allowed_kinds"] = nucleus_allowed_kinds
-        if sentence_query_expansion is not self._UNSET:
-            overrides["sentence_query_expansion"] = sentence_query_expansion
-        if enable_sentence_nodes is not self._UNSET:
-            overrides["enable_sentence_nodes"] = enable_sentence_nodes
-        if enable_rollback is not self._UNSET:
-            overrides["enable_rollback"] = enable_rollback
-        if graph_signal_enabled is not self._UNSET:
-            overrides["graph_signal_enabled"] = graph_signal_enabled
-        if entity_extractor is not self._UNSET:
-            overrides["entity_extractor"] = entity_extractor
-        if entity_model_dir is not self._UNSET:
-            overrides["entity_model_dir"] = entity_model_dir
-        if auto_optimize is not self._UNSET:
-            overrides["auto_optimize"] = auto_optimize
-        if enable_wal is not self._UNSET:
-            overrides["enable_wal"] = enable_wal
-        if entity_score_threshold is not self._UNSET:
-            overrides["entity_score_threshold"] = entity_score_threshold
-        if entity_max_length is not self._UNSET:
-            overrides["entity_max_length"] = entity_max_length
-        if reranker is not self._UNSET:
-            overrides["reranker"] = reranker
-        if reranker_model_dir is not self._UNSET:
-            overrides["reranker_model_dir"] = reranker_model_dir
-        if reranker_projector_path is not self._UNSET:
-            overrides["reranker_projector_path"] = reranker_projector_path
-        if reranker_max_length is not self._UNSET:
-            overrides["reranker_max_length"] = reranker_max_length
-        if reranker_gpu_layers is not self._UNSET:
-            overrides["reranker_gpu_layers"] = reranker_gpu_layers
-        if quantize_binary is not self._UNSET:
-            overrides["quantize_binary"] = quantize_binary
-        if use_compression is not self._UNSET:
-            overrides["use_compression"] = use_compression
-        if initial_capacity is not self._UNSET:
-            overrides["initial_capacity"] = initial_capacity
+        # Layer 4: constructor kwargs (highest priority). Every kwarg listed
+        # here must also appear in config._KWARG_SHORTCUTS or be one of the
+        # legacy keys (embedder, ingest_root, vault, retention, auto_optimize,
+        # enable_wal) that merge_kwargs handles separately.
+        _kwarg_names = (
+            "ceiling_mb", "embedder", "ingest_root", "vault", "retention",
+            "remember_weights", "recall_decay", "search_oversample",
+            "similarity_threshold", "duplicate_threshold",
+            "recency_half_life_days", "similar_to_oversample",
+            "lexical_search_oversample", "fusion_method", "rrf_k",
+            "nucleus_expansion", "nucleus_hops", "nucleus_neighbors_per_hop",
+            "nucleus_min_text_length", "nucleus_allowed_kinds",
+            "sentence_query_expansion", "enable_sentence_nodes",
+            "enable_rollback", "graph_signal_enabled", "entity_extractor",
+            "entity_model_dir", "auto_optimize", "enable_wal",
+            "entity_score_threshold", "entity_max_length", "reranker",
+            "reranker_model_dir", "reranker_projector_path",
+            "reranker_max_length", "reranker_gpu_layers", "quantize_binary",
+            "use_compression", "initial_capacity",
+        )
+        _loc = locals()
+        overrides = {k: _loc[k] for k in _kwarg_names if _loc[k] is not self._UNSET}
         if overrides:
             self._config = merge_kwargs(self._config, **overrides)
         cfg = self._config
@@ -237,40 +181,7 @@ class GraphStore:
                 pass
 
         # Initialize embedder (local; placed into RuntimeState below)
-        emb_cfg = cfg.vector.embedder
-        if embedder is not self._UNSET and embedder is not None and not isinstance(embedder, str):
-            _embedder = embedder
-        elif emb_cfg == "none":
-            _embedder = None
-        elif emb_cfg in ("default", "model2vec"):
-            try:
-                from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
-                _embedder = Model2VecEmbedder(
-                    model_name=cfg.vector.model2vec_model,
-                    cache_dir=cfg.vector.model_cache_dir
-                )
-            except ImportError:
-                _embedder = None
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning("embedder init failed: %s", e)
-                _embedder = None
-        elif emb_cfg == "installed" or emb_cfg.startswith("installed:"):
-            model_name = cfg.vector.embedder_model or (emb_cfg.split(":", 1)[-1] if ":" in emb_cfg else None)
-            if not model_name:
-                raise ValueError(
-                    "embedder='installed' requires vector.embedder_model in config "
-                    "or use 'installed:model-name' format"
-                )
-            from graphstore.registry.installer import load_installed_embedder
-            _embedder = load_installed_embedder(
-                model_name,
-                dims=cfg.vector.embedder_dims,
-                n_gpu_layers=cfg.vector.gpu_layers,
-                max_length=cfg.vector.embedder_max_length,
-            )
-        else:
-            _embedder = None
+        _embedder = self._build_embedder(cfg, embedder)
 
         # Wire model cache directory from config
         if cfg.vector.model_cache_dir:
@@ -345,35 +256,7 @@ class GraphStore:
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
         from graphstore.dsl.parser import set_cache_size
         set_cache_size(cfg.dsl.plan_cache_size)
-        self._executor.cost_threshold = cfg.dsl.cost_threshold
-        self._executor._fts_full_text = cfg.document.fts_full_text
-        self._executor._recall_decay = cfg.dsl.recall_decay
-        self._executor._remember_weights = cfg.dsl.remember_weights
-        self._executor._fusion_method = cfg.dsl.fusion_method
-        self._executor._rrf_k = cfg.dsl.rrf_k
-        self._executor._recency_half_life_days = cfg.dsl.recency_half_life_days
-        self._executor._similar_to_oversample = cfg.dsl.similar_to_oversample
-        self._executor._lexical_search_oversample = cfg.dsl.lexical_search_oversample
-        self._executor._nucleus_expansion = cfg.dsl.nucleus_expansion
-        self._executor._nucleus_hops = cfg.dsl.nucleus_hops
-        self._executor._nucleus_neighbors_per_hop = cfg.dsl.nucleus_neighbors_per_hop
-        self._executor._nucleus_min_text_length = cfg.dsl.nucleus_min_text_length
-        self._executor._nucleus_allowed_kinds = cfg.dsl.nucleus_allowed_kinds
-        self._executor._sentence_query_expansion = cfg.dsl.sentence_query_expansion
-        self._executor._enable_sentence_nodes = cfg.dsl.enable_sentence_nodes
-        self._executor._enable_rollback = cfg.dsl.enable_rollback
-        self._executor._graph_signal_enabled = cfg.dsl.graph_signal_enabled
-        self._executor._entity_model_dir = cfg.dsl.entity_model_dir
-        self._executor._entity_score_threshold = cfg.dsl.entity_score_threshold
-        self._executor._entity_max_length = cfg.dsl.entity_max_length
-        self._executor._reranker = self._build_reranker(cfg)
-        self._executor._chunk_max_size = cfg.document.chunk_max_size
-        self._executor._summary_max_length = cfg.document.summary_max_length
-        self._executor._chunk_overlap = cfg.document.chunk_overlap
-        self._executor._search_oversample = cfg.vector.search_oversample
-        self._executor._vision_model = cfg.document.vision_model
-        self._executor._vision_base_url = cfg.document.vision_base_url
-        self._executor._vision_max_tokens = cfg.document.vision_max_tokens
+        self._wire_executor_from_cfg(self._executor, cfg)
         retention_dict = {
             "blob_warm_days": cfg.retention.blob_warm_days,
             "blob_archive_days": cfg.retention.blob_archive_days,
@@ -464,6 +347,83 @@ class GraphStore:
             self._cron = CronScheduler(self._conn, self.submit_background)
             self._cron.start()
             self._sys_executor._cron = self._cron
+
+    def _build_embedder(self, cfg, embedder_arg):
+        """Resolve the embedder instance from kwarg + cfg. Explicit instance
+        wins over cfg.vector.embedder name. Returns None when embedder is
+        disabled or when an optional dependency is missing.
+        """
+        if embedder_arg is not self._UNSET and embedder_arg is not None and not isinstance(embedder_arg, str):
+            return embedder_arg
+        emb_cfg = cfg.vector.embedder
+        if emb_cfg == "none":
+            return None
+        if emb_cfg in ("default", "model2vec"):
+            try:
+                from graphstore.embedding.model2vec_embedder import Model2VecEmbedder
+                return Model2VecEmbedder(
+                    model_name=cfg.vector.model2vec_model,
+                    cache_dir=cfg.vector.model_cache_dir,
+                )
+            except ImportError:
+                return None
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("embedder init failed: %s", e)
+                return None
+        if emb_cfg == "installed" or emb_cfg.startswith("installed:"):
+            model_name = cfg.vector.embedder_model or (emb_cfg.split(":", 1)[-1] if ":" in emb_cfg else None)
+            if not model_name:
+                raise ValueError(
+                    "embedder='installed' requires vector.embedder_model in config "
+                    "or use 'installed:model-name' format"
+                )
+            from graphstore.registry.installer import load_installed_embedder
+            return load_installed_embedder(
+                model_name,
+                dims=cfg.vector.embedder_dims,
+                n_gpu_layers=cfg.vector.gpu_layers,
+                max_length=cfg.vector.embedder_max_length,
+            )
+        return None
+
+    def _wire_executor_from_cfg(self, executor, cfg) -> None:
+        """Push every DSL / document / vector tuning knob from cfg onto the
+        executor instance. Keeps __init__ readable by factoring out the ~40
+        attribute assignments.
+        """
+        executor.cost_threshold = cfg.dsl.cost_threshold
+        d = cfg.dsl
+        doc = cfg.document
+        vec = cfg.vector
+        executor._fts_full_text = doc.fts_full_text
+        executor._recall_decay = d.recall_decay
+        executor._remember_weights = d.remember_weights
+        executor._fusion_method = d.fusion_method
+        executor._rrf_k = d.rrf_k
+        executor._recency_half_life_days = d.recency_half_life_days
+        executor._similar_to_oversample = d.similar_to_oversample
+        executor._lexical_search_oversample = d.lexical_search_oversample
+        executor._nucleus_expansion = d.nucleus_expansion
+        executor._nucleus_hops = d.nucleus_hops
+        executor._nucleus_neighbors_per_hop = d.nucleus_neighbors_per_hop
+        executor._nucleus_min_text_length = d.nucleus_min_text_length
+        executor._nucleus_allowed_kinds = d.nucleus_allowed_kinds
+        executor._sentence_query_expansion = d.sentence_query_expansion
+        executor._enable_sentence_nodes = d.enable_sentence_nodes
+        executor._enable_rollback = d.enable_rollback
+        executor._graph_signal_enabled = d.graph_signal_enabled
+        executor._entity_model_dir = d.entity_model_dir
+        executor._entity_score_threshold = d.entity_score_threshold
+        executor._entity_max_length = d.entity_max_length
+        executor._reranker = self._build_reranker(cfg)
+        executor._chunk_max_size = doc.chunk_max_size
+        executor._summary_max_length = doc.summary_max_length
+        executor._chunk_overlap = doc.chunk_overlap
+        executor._search_oversample = vec.search_oversample
+        executor._vision_model = doc.vision_model
+        executor._vision_base_url = doc.vision_base_url
+        executor._vision_max_tokens = doc.vision_max_tokens
 
     def execute(self, query: str) -> Result:
         """Execute a DSL query. Thread-safe if queued=True."""
