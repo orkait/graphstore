@@ -105,16 +105,19 @@ class WALManager:
                     err["error_type"], err["error"], err["statement"],
                 )
                 
-                # Insert into dead letter queue
+                # Insert into dead letter queue, then always remove from WAL.
                 try:
                     conn.execute(
                         "INSERT INTO failed_wal_entries (timestamp, statement, error_msg) VALUES (?, ?, ?)",
                         (time.time(), statement, err["error"])
                     )
+                except Exception as dlq_e:
+                    logger.error("Failed to log to dead letter queue: %s", dlq_e)
+                try:
                     conn.execute("DELETE FROM wal WHERE seq = ?", (seq,))
                     conn.commit()
-                except Exception as dlq_e:
-                    logger.error(f"Failed to log to dead letter queue: {dlq_e}")
+                except Exception as del_e:
+                    logger.error("Failed to delete failed WAL entry seq=%s: %s", seq, del_e)
                     
         if self._replay_errors:
             logger.warning(
