@@ -367,8 +367,11 @@ class MutationHandlers:
         if self._document_store and slot is not None:
             try:
                 self._document_store.delete_document(slot)
-            except Exception:
-                pass
+            except Exception as _doc_err:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "DocumentStore.delete_document failed for slot=%s: %s", slot, _doc_err
+                )
         self.store.delete_node(q.id)
         return Result(kind="ok", data={"id": q.id}, count=1)
 
@@ -626,8 +629,11 @@ class MutationHandlers:
             try:
                 self._document_store._conn.execute("DELETE FROM doc_fts WHERE rowid = ?", (slot,))
                 self._document_store._conn.commit()
-            except Exception:
-                pass
+            except Exception as _fts_err:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "FORGET: doc_fts delete failed for slot=%s: %s", slot, _fts_err
+                )
         self.store.delete_node(q.id)
         return Result(kind="ok", data={"forgotten": q.id}, count=1)
 

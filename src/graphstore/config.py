@@ -23,7 +23,14 @@ _log = logging.getLogger(__name__)
 
 
 def _coerce_remember_weights(weights) -> list[float]:
-    """Accept 3 or 4 weights. 4th weight is for graph signal (additive)."""
+    """Accept 3 or 4 weights for REMEMBER fusion.
+
+    Fusion interprets the list based on length + graph_signal_enabled:
+      4 weights, graph on   -> [vec, bm25, recency, graph]  (additive)
+      3 weights, graph on   -> [vec, bm25, graph]           (graph replaces recency)
+      3 weights, graph off  -> [vec, bm25, recency]         (classic)
+    See intelligence.py::_remember for the matching dispatch.
+    """
     parsed = [float(w) for w in weights]
     if len(parsed) not in (3, 4):
         raise ValueError(f"remember_weights must have length 3 or 4, got {len(parsed)}")

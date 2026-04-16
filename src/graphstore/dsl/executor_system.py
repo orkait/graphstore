@@ -987,12 +987,14 @@ class SystemExecutor:
             if self._wal_manager.replay_error_count > 0:
                 data["wal_replay_error_details"] = self._wal_manager.replay_errors
 
-        # Accurate measurement
+        # Accurate measurement (best-effort, failure leaves status without
+        # memory_measured rather than failing SYS STATUS).
         try:
             from graphstore.core.memory import measure as measure_memory
             data["memory_measured"] = measure_memory(store, self._vector_store, self._document_store)
-        except Exception:
-            pass
+        except Exception as _mem_err:
+            import logging as _logging
+            _logging.getLogger(__name__).debug("SYS STATUS memory measure failed: %s", _mem_err)
 
         return Result(kind="status", data=data, count=1)
 
@@ -1060,8 +1062,9 @@ class SystemExecutor:
             health["memory_total"] = mem["total"]
             health["memory_ceiling"] = self.store._ceiling_bytes
             health["memory_utilization"] = round(mem["total"] / max(self.store._ceiling_bytes, 1), 3)
-        except Exception:
-            pass
+        except Exception as _mem_err:
+            import logging as _logging
+            _logging.getLogger(__name__).debug("SYS HEALTH memory measure failed: %s", _mem_err)
         health["recommended"] = needs_optimization(health)
         return Result(kind="health", data=health, count=1)
 

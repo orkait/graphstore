@@ -13,7 +13,11 @@ import numpy as np
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
-pytestmark = [pytest.mark.needs_embedder, pytest.mark.needs_ingest]
+pytestmark = [
+    pytest.mark.needs_embedder,
+    pytest.mark.needs_ingest,
+    pytest.mark.xdist_group("e2e_real_embedder"),
+]
 
 
 @pytest.fixture(scope="module")
