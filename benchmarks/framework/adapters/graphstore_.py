@@ -24,7 +24,6 @@ from typing import Any
 import numpy as np
 
 from graphstore import GraphStore, __version__ as _GS_VERSION
-from graphstore.config import DslConfig
 from graphstore.core.errors import NodeExists
 
 from ..adapter import QueryContext, QueryResult, Session, TimedOperation
@@ -37,7 +36,14 @@ _BENCHMARK_DEFAULTS: dict[str, Any] = {
     # No overrides - trust config.py defaults as single source of truth.
 }
 
-_DSL_DEFAULTS = DslConfig()
+# Adapter-only tuning knobs used to size per-strategy fan-out. Not passed
+# to GraphStore - they only scale k in adapter-side dispatch helpers.
+_ADAPTER_DEFAULTS: dict[str, Any] = {
+    "retrieval_depth": 9,
+    "recall_depth": 2,
+    "max_query_entities": 6,
+    "recency_boost_k": 4,
+}
 
 
 def _escape(text: str) -> str:
@@ -211,13 +217,10 @@ class GraphStoreAdapter:
         # GraphStore constructor kwargs (must match __init__ signature)
         for key in ("remember_weights", "search_oversample", "recall_decay",
                      "similarity_threshold", "duplicate_threshold",
-                     "retrieval_depth", "recall_depth",
-                     "max_query_entities", "recency_boost_k",
                      "recency_half_life_days", "similar_to_oversample",
                      "lexical_search_oversample",
-                     "fusion_method", "rrf_k", "type_weights",
+                     "fusion_method", "rrf_k",
                      "nucleus_expansion", "nucleus_hops",
-                     "nucleus_max_neighbors", "recency_mode",
                      "sentence_query_expansion"):
             val = self.config.get(key, _BENCHMARK_DEFAULTS.get(key))
             if val is not None:
@@ -379,8 +382,8 @@ class GraphStoreAdapter:
             self._gs.execute("SYS CONSOLIDATE")
 
     def _cfg(self, attr: str):
-        """Read a config value from own config, falling back to DslConfig defaults."""
-        return self.config.get(attr, getattr(_DSL_DEFAULTS, attr))
+        """Read a config value from own config, falling back to adapter defaults."""
+        return self.config.get(attr, _ADAPTER_DEFAULTS.get(attr))
 
     def _resolve_strategy(self, category: str) -> str:
         """Pick a retrieval strategy for the current benchmark question."""
