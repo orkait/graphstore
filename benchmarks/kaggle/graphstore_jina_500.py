@@ -5,8 +5,16 @@ Environment config: inlined below (Kaggle-specific paths, deps, GPU settings)
 """
 import subprocess, sys, os
 
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
-os.environ["HF_TOKEN"] = HF_TOKEN
+# Use Kaggle secrets for authenticated HF Hub access (avoids rate limits)
+try:
+    from kaggle_secrets import UserSecretsClient
+    user_secrets = UserSecretsClient()
+    HF_TOKEN = user_secrets.get_secret("HF_TOKEN")
+except Exception:
+    HF_TOKEN = os.environ.get("HF_TOKEN", "")
+
+if HF_TOKEN:
+    os.environ["HF_TOKEN"] = HF_TOKEN
 
 subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
     "numpy>=1.24", "scipy>=1.10", "lark>=1.1", "usearch>=2.0",
@@ -22,6 +30,7 @@ from huggingface_hub import snapshot_download, login
 if HF_TOKEN:
     print("Logging into Hugging Face...")
     login(token=HF_TOKEN)
+
 print("Downloading Jina v5 Small ONNX...")
 snapshot_download("jinaai/jina-embeddings-v5-text-small-retrieval",
     local_dir="/kaggle/working/jina-small")
