@@ -708,6 +708,10 @@ class IntelligenceHandlers:
             meta["nucleus_visits"] = visits
 
         # ── Retrieval Feedback ───────────────────────────────────────
+        # Recall-count bumps are best-effort - if ColumnStore rejects a write
+        # (schema lock, concurrent compact), retrieval still succeeds.
+        import logging as _logging
+        _rc_log = _logging.getLogger(__name__)
         for slot in retrieved_slots:
             if slot is None:
                 continue
@@ -721,8 +725,8 @@ class IntelligenceHandlers:
                 else:
                     self.store.columns.set_reserved(slot, "__recall_count__", 1)
                 self.store.columns.set_reserved(slot, "__last_recalled_at__", int(time.time() * 1000))
-            except Exception:
-                pass
+            except Exception as _rc_err:
+                _rc_log.debug("recall count bump failed for slot=%s: %s", slot, _rc_err)
 
         buf = getattr(self._runtime, "similarity_buffer", None)
         if buf is not None and results:

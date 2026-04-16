@@ -323,17 +323,19 @@ class CoreStore:
                     if lst is not None and slot in lst:
                         lst.remove(slot)
 
+        import logging as _logging
+        _rm_log = _logging.getLogger(__name__)
         for slot in slots_to_remove:
             if vector_store is not None:
                 try:
                     vector_store.remove(slot)
-                except Exception:
-                    pass
+                except Exception as _vs_err:
+                    _rm_log.debug("vector remove failed slot=%s: %s", slot, _vs_err)
             if document_store is not None:
                 try:
                     document_store.delete_document(slot)
-                except Exception:
-                    pass
+                except Exception as _ds_err:
+                    _rm_log.debug("doc delete failed slot=%s: %s", slot, _ds_err)
             self.columns.clear(slot)
 
         self.node_tombstones.update(slot_set)
