@@ -105,19 +105,20 @@ def _get_extractor(model_dir: str | Path, max_length: int):
         tokenizer.enable_truncation(max_length=max_length)
 
         from graphstore.core.compute_profile import get_profile
+        profile = get_profile()
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
-        use_cuda = "CUDAExecutionProvider" in ort.get_available_providers()
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if use_cuda else ["CPUExecutionProvider"]
-
-        if not use_cuda:
-            sess_options.intra_op_num_threads = get_profile().ner_threads
+        if profile.has_gpu:
+            providers = [profile.gpu_provider, "CPUExecutionProvider"]
+        else:
+            providers = ["CPUExecutionProvider"]
+            sess_options.intra_op_num_threads = profile.ner_threads
             sess_options.inter_op_num_threads = 1
             sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 
         session = ort.InferenceSession(str(onnx_path), sess_options=sess_options, providers=providers)
-        print(f"  [NER] Model loaded. Provider: {session.get_providers()[0]}")
+        print(f"  [NER] Model loaded. Provider: {session.get_providers()[0]} threads={profile.ner_threads}")
         input_names = {i.name for i in session.get_inputs()}
 
         _extractors[key] = {
