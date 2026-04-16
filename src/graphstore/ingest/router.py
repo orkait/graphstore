@@ -12,8 +12,6 @@ EXTENSION_MAP = {
     "pdf": "pymupdf4llm",
     "png": "markitdown", "jpg": "markitdown", "jpeg": "markitdown",
     "gif": "markitdown", "webp": "markitdown",
-    # Audio (requires voice opt-in)
-    "wav": "audio", "mp3": "audio", "ogg": "audio", "flac": "audio",
 }
 
 # Formats only docling can handle - added when docling is installed
@@ -23,11 +21,6 @@ _DOCLING_EXCLUSIVE = {
     "tif": "docling",           # TIFF images
     "tiff": "docling",
     "bmp": "docling",           # BMP images
-    "m4a": "docling",           # audio (docling[asr])
-    "aac": "docling",
-    "mp4": "docling",           # video (docling[asr] + ffmpeg)
-    "avi": "docling",
-    "mov": "docling",
 }
 
 try:
@@ -53,28 +46,8 @@ def _get_ingestor(name: str, **kwargs):
         elif name == "docling":
             from graphstore.ingest.docling_ingestor import DoclingIngestor
             _ingestor_cache[cache_key] = DoclingIngestor()
-        elif name == "audio":
-            from graphstore.voice.stt import MoonshineSTT
-            from graphstore.ingest.base import Ingestor, IngestResult
-
-            class AudioIngestor(Ingestor):
-                name = "audio"
-                supported_extensions = ["wav", "mp3", "ogg", "flac"]
-
-                def __init__(self):
-                    self._stt = MoonshineSTT()
-
-                def convert(self, file_path, **kwargs):
-                    text = self._stt.transcribe_file(file_path)
-                    return IngestResult(
-                        markdown=text,
-                        metadata={"source": file_path},
-                        parser_used="moonshine",
-                    )
-
-            _ingestor_cache[cache_key] = AudioIngestor()
         else:
-            raise ValueError(f"Unknown ingestor: {name!r}. Available: markitdown, pymupdf4llm, docling, audio")
+            raise ValueError(f"Unknown ingestor: {name!r}. Available: markitdown, pymupdf4llm, docling")
     return _ingestor_cache[cache_key]
 
 

@@ -25,7 +25,6 @@ from graphstore.core.scheduler import OptimizerScheduler
 from graphstore.cron import CronScheduler
 from graphstore.core.errors import OptimizationInProgress
 from graphstore.dsl.handlers import is_write_op
-from graphstore.core.memory import estimate as _estimate_memory
 from graphstore.config import GraphStoreConfig, load_config, merge_kwargs, apply_env_overrides
 
 # All system AST types
@@ -57,7 +56,7 @@ class GraphStore:
 
     def __init__(self, path: str | None = None, ceiling_mb=_UNSET,
                  embedder=_UNSET, allow_system_queries: bool = True,
-                 voice: bool = False, ingest_root=_UNSET,
+                 ingest_root=_UNSET,
                  vault=_UNSET, retention=_UNSET,
                  config: GraphStoreConfig | None = None,
                  config_path: str | None = None,
@@ -67,8 +66,6 @@ class GraphStore:
                  strict_recovery: bool = False,
                  ingestors: dict | None = None,
                  chunker=None,
-                 stt=None,
-                 tts=None,
                  remember_weights=_UNSET,
                  recall_decay=_UNSET,
                  search_oversample=_UNSET,
@@ -159,26 +156,6 @@ class GraphStore:
         self._ceiling_bytes = cfg.core.ceiling_mb * 1_000_000
         self._allow_system = allow_system_queries
         self._ingest_root = cfg.server.ingest_root
-        self._stt = None
-        self._tts = None
-
-        # Custom STT/TTS override built-ins; voice=True enables built-ins when not overridden
-        if stt is not None:
-            self._stt = stt
-        elif voice:
-            try:
-                from graphstore.voice.stt import MoonshineSTT
-                self._stt = MoonshineSTT()
-            except ImportError:
-                pass
-        if tts is not None:
-            self._tts = tts
-        elif voice:
-            try:
-                from graphstore.voice.tts import PiperTTS
-                self._tts = PiperTTS()
-            except ImportError:
-                pass
 
         # Initialize embedder (local; placed into RuntimeState below)
         _embedder = self._build_embedder(cfg, embedder)
@@ -461,7 +438,7 @@ class GraphStore:
 
         self._optimizer.maybe_optimize()
 
-        tag, phase, source, trace_id = "system", "system", getattr(self, '_current_source', 'user'), self._active_trace
+        tag, phase, source, trace_id = "system", "system", "user", self._active_trace
 
         start = time.perf_counter_ns()
 
@@ -627,25 +604,6 @@ class GraphStore:
         from graphstore.persistence.database import get_metadata
         return get_metadata(conn, "playground_script")
 
-    def speak(self, text: str) -> None:
-        """Text-to-speech via Piper."""
-        if not self._tts:
-            raise ImportError("Voice not installed. Run: graphstore install-voice")
-        self._tts.speak(text)
-
-    def listen(self, on_text=None) -> None:
-        """Start real-time STT via Moonshine."""
-        if not self._stt:
-            raise ImportError("Voice not installed. Run: graphstore install-voice")
-        if on_text is None:
-            raise ValueError("on_text callback is required")
-        self._stt.start_listening(on_text)
-
-    def stop_listening(self) -> None:
-        """Stop real-time STT."""
-        if self._stt:
-            self._stt.stop_listening()
-
     def close(self) -> None:
         """Checkpoint + close sqlite connection."""
         if self._cron is not None:
@@ -731,14 +689,11 @@ class GraphStore:
         return Result(kind="ok", data={"reset": "store"}, count=0)
         
     def reset_session(self) -> Result:
-        """Clears all bindings, active context, trace IDs, and terminates active Voice sessions."""
+        """Clears active context, trace IDs, and embedder-dirty flag."""
         if self._store:
             self._store._active_context = None
         self.discard_trace()
         self._embedder_dirty = False
-        self._current_source = 'user'
-        if self._stt:
-            self._stt.stop_listening()
         if self._conn:
             self._wal.maybe_auto_checkpoint()
         return Result(kind="ok", data={"reset": "session"}, count=0)
@@ -798,10 +753,6 @@ class GraphStore:
     def edge_count(self) -> int:
         return self._store.edge_count
 
-    @property
-    def memory_usage(self) -> int:
-        return _estimate_memory(self._store.node_count, self._store.edge_count)
-
     def get_all_nodes(self) -> list[dict]:
         """Return all live nodes. Used by server /api/graph endpoint."""
         return self._store.get_all_nodes()
@@ -809,33 +760,6 @@ class GraphStore:
     def get_all_edges(self) -> list[dict]:
         """Return all live edges. Used by server /api/graph endpoint."""
         return self._store.get_all_edges()
-
-    def index_text(self, node_id: str, text: str) -> None:
-        """Index text for full-text/BM25 search on an existing node.
-
-        Call after CREATE NODE to make the node's text searchable via
-        LEXICAL SEARCH and REMEMBER's BM25 signal.
-        """
-        if self._document_store is None:
-            return
-        str_id = self._store.string_table.intern(node_id)
-        slot = self._store.id_to_slot.get(str_id)
-        if slot is None:
-            return
-        self._document_store.put_summary(slot, text)
-
-    def index_text_batch(self, items: list[tuple[str, str]]) -> None:
-        """Batch index text for multiple existing nodes in one commit."""
-        if self._document_store is None:
-            return
-        rows = []
-        for node_id, text in items:
-            str_id = self._store.string_table.intern(node_id)
-            slot = self._store.id_to_slot.get(str_id)
-            if slot is not None:
-                rows.append((slot, text, None, None, 0, 0))
-        if rows:
-            self._document_store.put_summaries_batch(rows)
 
     @property
     def cost_threshold(self) -> int:

@@ -241,7 +241,7 @@ def _create_benchmark_node(gs: GraphStore, item: CorpusItem, question_id: str) -
         fields.append(f"turn_id = {item.turn_id}")
     fields.append(f'DOCUMENT {_dsl_quote(item.text)}')
     gs.execute(" ".join(fields))
-    gs.index_text(item.corpus_id, item.text[:2000])
+    # DOCUMENT auto-populates doc_fts BM25 for text content since PR #102.
 
 
 def _result_rows(result, item_by_id: dict[str, CorpusItem]) -> list[dict]:

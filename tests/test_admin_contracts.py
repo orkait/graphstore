@@ -123,15 +123,15 @@ def test_reset_memory_syncs_optimizer():
     assert db._optimizer._vector_store is db._vector_store
 
 
-def test_reset_session_clears_source_and_dirty():
-    """reset_session should clear _current_source and _embedder_dirty flags."""
+def test_reset_session_clears_dirty_and_trace():
+    """reset_session clears _embedder_dirty and _active_trace."""
     db = GraphStore(ceiling_mb=100, embedder=None)
-    db._current_source = "agent"
     db._embedder_dirty = True
+    db.bind_trace("test-session")
+    assert db._active_trace == "test-session"
 
     res = db.reset_session()
     assert res.kind == "ok"
-    assert db._current_source == "user"
     assert db._embedder_dirty is False
     assert db._active_trace is None
 
