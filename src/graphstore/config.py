@@ -74,27 +74,11 @@ class DslConfig(msgspec.Struct, frozen=True):
     remember_weights: list[float] = msgspec.field(default_factory=lambda: [0.52, 0.25, 0.15, 0.08])
     fusion_method: str = "weighted"  # "rrf" or "weighted"
     rrf_k: float = 60.0
-    retrieval_strategy: str = "full"
-    retrieval_depth: int = 9
-    recall_depth: int = 2
-    max_query_entities: int = 6
-    recency_mode: str = "multiplicative"  # "additive" or "multiplicative"
-    recency_boost_k: int = 4
     recency_half_life_days: float = 7300.0  # ~20 years
     similar_to_oversample: int = 2
     lexical_search_oversample: int = 3
-    hybridrag_weight: float = 0.0
-    hybridrag_min_seeds: int = 5
-    type_weights: dict = msgspec.field(default_factory=lambda: {
-        "observation": 1.8, "fact": 1.3, "event": 1.2, "preference": 1.3,
-        "claim": 1.2, "decision": 1.5, "lesson": 1.5,
-        "memory": 1.0, "entity": 0.8, "session": 0.7,
-    })
-    temporal_weight: float = 0.15
-    temporal_decay_days: float = 365.0
     nucleus_expansion: bool = False
     nucleus_hops: int = 1
-    nucleus_max_neighbors: int = 3
     nucleus_neighbors_per_hop: int = 3
     nucleus_min_text_length: int = 20
     nucleus_allowed_kinds: list[str] = msgspec.field(default_factory=lambda: ["message", "chunk", "section"])
@@ -111,7 +95,6 @@ class DslConfig(msgspec.Struct, frozen=True):
     reranker_projector_path: str | None = "./models/jina-reranker-v3/projector.safetensors"
     reranker_max_length: int = 2048
     reranker_gpu_layers: int = -1
-    rerank_oversample: int = 10
     cache_gc_threshold: int = 200
 
 
@@ -203,23 +186,11 @@ _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "fusion_method":        ("dsl", "fusion_method"),
     "rrf_k":                ("dsl", "rrf_k"),
     "recall_decay":         ("dsl", "recall_decay"),
-    "retrieval_strategy":   ("dsl", "retrieval_strategy"),
-    "retrieval_depth":      ("dsl", "retrieval_depth"),
-    "recall_depth":         ("dsl", "recall_depth"),
-    "max_query_entities":   ("dsl", "max_query_entities"),
-    "recency_mode":         ("dsl", "recency_mode"),
-    "recency_boost_k":      ("dsl", "recency_boost_k"),
     "recency_half_life_days": ("dsl", "recency_half_life_days"),
     "similar_to_oversample": ("dsl", "similar_to_oversample"),
     "lexical_search_oversample": ("dsl", "lexical_search_oversample"),
-    "hybridrag_weight":     ("dsl", "hybridrag_weight"),
-    "hybridrag_min_seeds":  ("dsl", "hybridrag_min_seeds"),
-    "type_weights":         ("dsl", "type_weights"),
-    "temporal_weight":      ("dsl", "temporal_weight"),
-    "temporal_decay_days":  ("dsl", "temporal_decay_days"),
     "nucleus_expansion":    ("dsl", "nucleus_expansion"),
     "nucleus_hops":         ("dsl", "nucleus_hops"),
-    "nucleus_max_neighbors":("dsl", "nucleus_max_neighbors"),
     "nucleus_neighbors_per_hop": ("dsl", "nucleus_neighbors_per_hop"),
     "nucleus_min_text_length": ("dsl", "nucleus_min_text_length"),
     "nucleus_allowed_kinds":   ("dsl", "nucleus_allowed_kinds"),
@@ -234,7 +205,6 @@ _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "reranker_projector_path": ("dsl", "reranker_projector_path"),
     "reranker_max_length":  ("dsl", "reranker_max_length"),
     "reranker_gpu_layers":  ("dsl", "reranker_gpu_layers"),
-    "rerank_oversample":    ("dsl", "rerank_oversample"),
     "quantize_binary":      ("vector", "quantize_binary"),
     "search_oversample":    ("vector", "search_oversample"),
     "similarity_threshold": ("vector", "similarity_threshold"),
@@ -264,42 +234,23 @@ def load_config(path: str | Path | None = None) -> GraphStoreConfig:
     The file is expected to be a partial dict - only sections/fields the user
     changed. Missing sections and fields fall back to config.py defaults.
     Returns full defaults if the file doesn't exist or is empty.
-
-    If a base tuned config exists alongside the path, it is loaded first and
-    the main config overrides it. For example, if path is benchmarks/graphstore.json,
-    tools/autoresearch/tuned_config.48.json is loaded first (if it exists).
     """
     if path is None:
         return GraphStoreConfig()
     p = Path(path)
-
-    # Try to load tuned base config if it exists
-    base_config = GraphStoreConfig()
-    tuned_path = p.parent.parent / "tools" / "autoresearch" / "tuned_config.48.json"
-    if tuned_path.exists():
-        raw_tuned = tuned_path.read_bytes().strip()
-        if raw_tuned:
-            try:
-                tuned_overrides = json.loads(raw_tuned)
-                if isinstance(tuned_overrides, dict) and tuned_overrides:
-                    base_config = _rebuild_config(base_config, tuned_overrides)
-            except (json.JSONDecodeError, ValueError) as e:
-                _log.debug("tuned config parse error in %s: %s - skipping", tuned_path, e)
-
-    # Load and apply main config on top of tuned base
     if not p.exists():
-        return base_config
+        return GraphStoreConfig()
     raw = p.read_bytes().strip()
     if not raw:
-        return base_config
+        return GraphStoreConfig()
     try:
         overrides = json.loads(raw)
     except (json.JSONDecodeError, ValueError) as e:
-        _log.warning("config parse error in %s: %s - using tuned base or defaults", p, e)
-        return base_config
+        _log.warning("config parse error in %s: %s - using defaults", p, e)
+        return GraphStoreConfig()
     if not isinstance(overrides, dict) or not overrides:
-        return base_config
-    return _rebuild_config(base_config, overrides)
+        return GraphStoreConfig()
+    return _rebuild_config(GraphStoreConfig(), overrides)
 
 
 def save_config(config: GraphStoreConfig, path: str | Path) -> None:
@@ -372,17 +323,6 @@ def apply_env_overrides(config: GraphStoreConfig) -> GraphStoreConfig:
                 updates.setdefault(section, {})[field] = parsed
             elif field == "protected_kinds" or field == "cors_origins":
                 updates.setdefault(section, {})[field] = [v.strip() for v in env_val.split(",")]
-            elif field == "type_weights":
-                # Format: "fact:1.3,decision:1.5,entity:0.8"
-                try:
-                    parsed = {}
-                    for pair in env_val.split(","):
-                        k, v = pair.strip().split(":")
-                        parsed[k.strip()] = float(v.strip())
-                    updates.setdefault(section, {})[field] = parsed
-                except (ValueError, IndexError):
-                    _log.warning("GRAPHSTORE_DSL_TYPE_WEIGHTS format: 'kind:weight,kind:weight'")
-                    continue
             else:
                 updates.setdefault(section, {})[field] = _coerce(env_val, target_type)
         except (ValueError, TypeError) as e:

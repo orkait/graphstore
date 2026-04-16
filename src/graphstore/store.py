@@ -27,7 +27,6 @@ from graphstore.core.errors import OptimizationInProgress
 from graphstore.dsl.handlers import is_write_op
 from graphstore.core.memory import estimate as _estimate_memory
 from graphstore.config import GraphStoreConfig, load_config, merge_kwargs, apply_env_overrides
-from graphstore.retrieval import RetrievalPlanner
 
 # All system AST types
 _SYS_TYPES = tuple(
@@ -75,25 +74,16 @@ class GraphStore:
                  search_oversample=_UNSET,
                  similarity_threshold=_UNSET,
                  duplicate_threshold=_UNSET,
-                 retrieval_depth=_UNSET,
-                 recall_depth=_UNSET,
-                 max_query_entities=_UNSET,
-                 recency_boost_k=_UNSET,
                  recency_half_life_days=_UNSET,
                  similar_to_oversample=_UNSET,
                  lexical_search_oversample=_UNSET,
                  fusion_method=_UNSET,
                  rrf_k=_UNSET,
-                 type_weights=_UNSET,
-                 temporal_weight=_UNSET,
-                 temporal_decay_days=_UNSET,
                  nucleus_expansion=_UNSET,
                  nucleus_hops=_UNSET,
-                 nucleus_max_neighbors=_UNSET,
                  nucleus_neighbors_per_hop=_UNSET,
                  nucleus_min_text_length=_UNSET,
                  nucleus_allowed_kinds=_UNSET,
-                 recency_mode=_UNSET,
                  sentence_query_expansion=_UNSET,
                  enable_sentence_nodes=_UNSET,
                  enable_rollback=_UNSET,
@@ -107,7 +97,6 @@ class GraphStore:
                  reranker_projector_path=_UNSET,
                  reranker_max_length=_UNSET,
                  reranker_gpu_layers=_UNSET,
-                 rerank_oversample=_UNSET,
                  quantize_binary=_UNSET,
                  use_compression=_UNSET,
                  initial_capacity=_UNSET,
@@ -162,14 +151,6 @@ class GraphStore:
             overrides["similarity_threshold"] = similarity_threshold
         if duplicate_threshold is not self._UNSET:
             overrides["duplicate_threshold"] = duplicate_threshold
-        if retrieval_depth is not self._UNSET:
-            overrides["retrieval_depth"] = retrieval_depth
-        if recall_depth is not self._UNSET:
-            overrides["recall_depth"] = recall_depth
-        if max_query_entities is not self._UNSET:
-            overrides["max_query_entities"] = max_query_entities
-        if recency_boost_k is not self._UNSET:
-            overrides["recency_boost_k"] = recency_boost_k
         if recency_half_life_days is not self._UNSET:
             overrides["recency_half_life_days"] = recency_half_life_days
         if similar_to_oversample is not self._UNSET:
@@ -180,26 +161,16 @@ class GraphStore:
             overrides["fusion_method"] = fusion_method
         if rrf_k is not self._UNSET:
             overrides["rrf_k"] = rrf_k
-        if type_weights is not self._UNSET:
-            overrides["type_weights"] = type_weights
-        if temporal_weight is not self._UNSET:
-            overrides["temporal_weight"] = temporal_weight
-        if temporal_decay_days is not self._UNSET:
-            overrides["temporal_decay_days"] = temporal_decay_days
         if nucleus_expansion is not self._UNSET:
             overrides["nucleus_expansion"] = nucleus_expansion
         if nucleus_hops is not self._UNSET:
             overrides["nucleus_hops"] = nucleus_hops
-        if nucleus_max_neighbors is not self._UNSET:
-            overrides["nucleus_max_neighbors"] = nucleus_max_neighbors
         if nucleus_neighbors_per_hop is not self._UNSET:
             overrides["nucleus_neighbors_per_hop"] = nucleus_neighbors_per_hop
         if nucleus_min_text_length is not self._UNSET:
             overrides["nucleus_min_text_length"] = nucleus_min_text_length
         if nucleus_allowed_kinds is not self._UNSET:
             overrides["nucleus_allowed_kinds"] = nucleus_allowed_kinds
-        if recency_mode is not self._UNSET:
-            overrides["recency_mode"] = recency_mode
         if sentence_query_expansion is not self._UNSET:
             overrides["sentence_query_expansion"] = sentence_query_expansion
         if enable_sentence_nodes is not self._UNSET:
@@ -230,8 +201,6 @@ class GraphStore:
             overrides["reranker_max_length"] = reranker_max_length
         if reranker_gpu_layers is not self._UNSET:
             overrides["reranker_gpu_layers"] = reranker_gpu_layers
-        if rerank_oversample is not self._UNSET:
-            overrides["rerank_oversample"] = rerank_oversample
         if quantize_binary is not self._UNSET:
             overrides["quantize_binary"] = quantize_binary
         if use_compression is not self._UNSET:
@@ -374,7 +343,6 @@ class GraphStore:
                                   ingestor_registry=self._ingestor_registry,
                                   chunker=self._chunker)
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
-        self._executor._retrieval_planner = RetrievalPlanner()
         from graphstore.dsl.parser import set_cache_size
         set_cache_size(cfg.dsl.plan_cache_size)
         self._executor.cost_threshold = cfg.dsl.cost_threshold
@@ -383,23 +351,11 @@ class GraphStore:
         self._executor._remember_weights = cfg.dsl.remember_weights
         self._executor._fusion_method = cfg.dsl.fusion_method
         self._executor._rrf_k = cfg.dsl.rrf_k
-        self._executor._retrieval_strategy = cfg.dsl.retrieval_strategy
-        self._executor._retrieval_depth = cfg.dsl.retrieval_depth
-        self._executor._recall_depth = cfg.dsl.recall_depth
-        self._executor._max_query_entities = cfg.dsl.max_query_entities
-        self._executor._recency_mode = cfg.dsl.recency_mode
-        self._executor._recency_boost_k = cfg.dsl.recency_boost_k
         self._executor._recency_half_life_days = cfg.dsl.recency_half_life_days
         self._executor._similar_to_oversample = cfg.dsl.similar_to_oversample
         self._executor._lexical_search_oversample = cfg.dsl.lexical_search_oversample
-        self._executor._hybridrag_weight = cfg.dsl.hybridrag_weight
-        self._executor._hybridrag_min_seeds = cfg.dsl.hybridrag_min_seeds
-        self._executor._type_weights = cfg.dsl.type_weights
-        self._executor._temporal_weight = cfg.dsl.temporal_weight
-        self._executor._temporal_decay_days = cfg.dsl.temporal_decay_days
         self._executor._nucleus_expansion = cfg.dsl.nucleus_expansion
         self._executor._nucleus_hops = cfg.dsl.nucleus_hops
-        self._executor._nucleus_max_neighbors = cfg.dsl.nucleus_max_neighbors
         self._executor._nucleus_neighbors_per_hop = cfg.dsl.nucleus_neighbors_per_hop
         self._executor._nucleus_min_text_length = cfg.dsl.nucleus_min_text_length
         self._executor._nucleus_allowed_kinds = cfg.dsl.nucleus_allowed_kinds
@@ -411,7 +367,6 @@ class GraphStore:
         self._executor._entity_score_threshold = cfg.dsl.entity_score_threshold
         self._executor._entity_max_length = cfg.dsl.entity_max_length
         self._executor._reranker = self._build_reranker(cfg)
-        self._executor._rerank_oversample = cfg.dsl.rerank_oversample
         self._executor._chunk_max_size = cfg.document.chunk_max_size
         self._executor._summary_max_length = cfg.document.summary_max_length
         self._executor._chunk_overlap = cfg.document.chunk_overlap
