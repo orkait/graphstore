@@ -67,13 +67,6 @@ subprocess.check_call(["git", "clone", "--depth", "1",
     "--branch", "refactor/simplify-retrieval-pipeline",
     "https://github.com/orkait/graphstore.git", "/kaggle/working/graphstore"], env=env)
 
-# Ensure we have all models (including TinyBERT NER) in the default relative models/ folder
-print("Running model downloader...")
-dl_env = os.environ.copy()
-dl_env["PYTHONPATH"] = "/kaggle/working/graphstore"
-subprocess.check_call([sys.executable, "scripts/download_models.py"],
-    cwd="/kaggle/working/graphstore", env=dl_env)
-
 # Point GraphStore at the benchmark config (single source of truth for tuning)
 os.environ["GRAPHSTORE_CONFIG"] = "/kaggle/working/graphstore/benchmarks/graphstore.json"
 
