@@ -41,6 +41,7 @@ class ExecutorBase(VisibilityMixin, FilteringMixin):
         self._pending_embeddings: list[tuple[int, str]] = []
         self._embed_batch_size: int = 64
         self._similarity_threshold: float | None = None
+        self._batch_vector_record: list[int] | None = None
 
     @property
     def store(self):
