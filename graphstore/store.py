@@ -63,6 +63,8 @@ class GraphStore:
                  config: GraphStoreConfig | None = None,
                  config_path: str | None = None,
                  queued: bool = False,
+                 auto_optimize=_UNSET,
+                 enable_wal=_UNSET,
                  strict_recovery: bool = False,
                  ingestors: dict | None = None,
                  chunker=None,
@@ -93,6 +95,8 @@ class GraphStore:
                  nucleus_allowed_kinds=_UNSET,
                  recency_mode=_UNSET,
                  sentence_query_expansion=_UNSET,
+                 enable_sentence_nodes=_UNSET,
+                 enable_rollback=_UNSET,
                  graph_signal_enabled=_UNSET,
                  entity_extractor=_UNSET,
                  entity_model_dir=_UNSET,
@@ -185,12 +189,20 @@ class GraphStore:
             overrides["recency_mode"] = recency_mode
         if sentence_query_expansion is not self._UNSET:
             overrides["sentence_query_expansion"] = sentence_query_expansion
+        if enable_sentence_nodes is not self._UNSET:
+            overrides["enable_sentence_nodes"] = enable_sentence_nodes
+        if enable_rollback is not self._UNSET:
+            overrides["enable_rollback"] = enable_rollback
         if graph_signal_enabled is not self._UNSET:
             overrides["graph_signal_enabled"] = graph_signal_enabled
         if entity_extractor is not self._UNSET:
             overrides["entity_extractor"] = entity_extractor
         if entity_model_dir is not self._UNSET:
             overrides["entity_model_dir"] = entity_model_dir
+        if auto_optimize is not self._UNSET:
+            overrides["auto_optimize"] = auto_optimize
+        if enable_wal is not self._UNSET:
+            overrides["enable_wal"] = enable_wal
         if entity_score_threshold is not self._UNSET:
             overrides["entity_score_threshold"] = entity_score_threshold
         if entity_max_length is not self._UNSET:
@@ -379,6 +391,8 @@ class GraphStore:
         self._executor._nucleus_min_text_length = cfg.dsl.nucleus_min_text_length
         self._executor._nucleus_allowed_kinds = cfg.dsl.nucleus_allowed_kinds
         self._executor._sentence_query_expansion = cfg.dsl.sentence_query_expansion
+        self._executor._enable_sentence_nodes = cfg.dsl.enable_sentence_nodes
+        self._executor._enable_rollback = cfg.dsl.enable_rollback
         self._executor._graph_signal_enabled = cfg.dsl.graph_signal_enabled
         self._executor._entity_model_dir = cfg.dsl.entity_model_dir
         self._executor._entity_score_threshold = cfg.dsl.entity_score_threshold
@@ -517,7 +531,8 @@ class GraphStore:
         if self._optimizer.optimizing:
             raise OptimizationInProgress()
 
-        self._optimizer.maybe_optimize()
+        if self._config.dsl.auto_optimize:
+            self._optimizer.maybe_optimize()
 
         tag, phase, source, trace_id = "system", "system", getattr(self, '_current_source', 'user'), self._active_trace
 
@@ -558,13 +573,13 @@ class GraphStore:
             else:
                 is_write = is_write_op(ast)
 
-                if is_write and self._conn:
+                if is_write and self._conn and self._config.persistence.enable_wal:
                     self._wal.append(query)
 
                 result = self._executor.execute(ast)
 
                 if is_write:
-                    if self._conn:
+                    if self._conn and self._config.persistence.enable_wal:
                         self._wal.maybe_auto_checkpoint()
                     self._optimizer.on_write()
 

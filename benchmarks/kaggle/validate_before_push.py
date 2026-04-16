@@ -43,7 +43,7 @@ def validate_imports():
     print("\n[1] Core imports")
     ok = True
     ok &= check("graphstore package", lambda: __import__("graphstore"))
-    ok &= check("graphstore.graphstore.GraphStore", lambda: __import__("graphstore.graphstore", fromlist=["GraphStore"]))
+    ok &= check("graphstore.store.GraphStore", lambda: __import__("graphstore.store", fromlist=["GraphStore"]))
     ok &= check("graphstore.ingest.entity_extract", lambda: __import__("graphstore.ingest.entity_extract"))
     ok &= check("graphstore.registry.installer", lambda: __import__("graphstore.registry.installer"))
     ok &= check("benchmarks.framework.docker_runner", lambda: __import__("benchmarks.framework.docker_runner"))
@@ -57,7 +57,7 @@ def validate_no_circular():
     import importlib, sys
     mods_before = set(sys.modules.keys())
     ok = True
-    for mod in ["graphstore", "graphstore.graphstore", "graphstore.registry.installer",
+    for mod in ["graphstore", "graphstore.store", "graphstore.registry.installer",
                 "graphstore.ingest.entity_extract"]:
         try:
             if mod in sys.modules:

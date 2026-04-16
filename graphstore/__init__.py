@@ -2,7 +2,7 @@
 
 __version__ = "0.3.0"
 
-from .graphstore import GraphStore
+from .store import GraphStore
 from .core.store import CoreStore
 from .core.schema import SchemaRegistry
 from .core.types import Result, Edge

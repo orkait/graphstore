@@ -189,13 +189,13 @@ Caused by absolute imports in `graphstore/graphstore/__init__.py`. Fixed by swit
 
 `graphstore/graphstore/__init__.py` must use:
 ```python
-from .graphstore import GraphStore   # relative - correct
+from .store import GraphStore   # relative - correct
 from .core.store import CoreStore    # relative - correct
 ```
 
 NOT:
 ```python
-from graphstore.graphstore import GraphStore  # absolute - circular when on PYTHONPATH
+from graphstore.store import GraphStore  # absolute - circular when on PYTHONPATH
 ```
 
 </details>
