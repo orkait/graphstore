@@ -62,9 +62,9 @@ class CoreStore:
 
         # Dirty tracking for incremental checkpoint
         self._dirty_nodes = True
-        self._dirty_columns = True
         self._dirty_edges = True
         self._dirty_strings = True
+        # _dirty_columns is a property delegating to self.columns.dirty
 
         # Live mask / live slots version cache - invalidated on every mutation
         self._live_version: int = 0
@@ -77,6 +77,14 @@ class CoreStore:
         self._bytes_per_node_estimate: float = float(BYTES_PER_NODE_ESTIMATE)
         self._bytes_per_edge_estimate: float = float(BYTES_PER_EDGE_ESTIMATE)
         self._calibrate_at_count: int = 1000  # next node count that triggers recalibration
+
+    @property
+    def _dirty_columns(self) -> bool:
+        return self.columns.dirty
+
+    @_dirty_columns.setter
+    def _dirty_columns(self, value: bool) -> None:
+        self.columns.dirty = bool(value)
 
     # -- slot management -----------------------------------------------------
 
@@ -851,6 +859,6 @@ class CoreStore:
     def reset_dirty_flags(self):
         """Reset all dirty tracking flags after checkpoint."""
         self._dirty_nodes = False
-        self._dirty_columns = False
+        self.columns.dirty = False
         self._dirty_edges = False
         self._dirty_strings = False
