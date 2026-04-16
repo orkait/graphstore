@@ -167,14 +167,29 @@ run_with_retry(
 validate_file_exists("/kaggle/working/graphstore/benchmarks/graphstore.json",
     "GraphStore config")
 
-# Step 8: Validate benchmark config
-print("\n=== Step 8: Validating Benchmark Configuration ===")
+# Step 8: Validate TinyBERT exists at download location
+print("\n=== Step 8: Validating TinyBERT NER Model ===")
+tinybert_path = Path("/kaggle/working/tinybert-ner")
+tokenizer_locations = [
+    tinybert_path / "tokenizer.json",
+    tinybert_path / "onnx" / "tokenizer.json"
+]
+has_tokenizer = any(p.exists() for p in tokenizer_locations)
+if not has_tokenizer:
+    print("ERROR: TinyBERT tokenizer.json missing after download")
+    print(f"       Checked: {[str(p) for p in tokenizer_locations]}")
+    print(f"       Contents: {list(tinybert_path.glob('**/*'))[:10]}...")
+    sys.exit(1)
+print("✓ TinyBERT model verified")
+
+# Step 9: Validate benchmark config
+print("\n=== Step 9: Validating Benchmark Configuration ===")
 config_path = "/kaggle/working/graphstore/benchmarks/graphstore.json"
 validate_file_exists(config_path, "Benchmark configuration")
 os.environ["GRAPHSTORE_CONFIG"] = config_path
 
-# Step 9: Prepare benchmark environment
-print("\n=== Step 9: Preparing Benchmark Environment ===")
+# Step 10: Prepare benchmark environment
+print("\n=== Step 10: Preparing Benchmark Environment ===")
 sys.path.insert(0, "/kaggle/working/graphstore")
 sys.argv = ["bench",
     "--system", "graphstore",
