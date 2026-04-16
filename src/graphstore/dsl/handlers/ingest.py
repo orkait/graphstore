@@ -164,6 +164,16 @@ class IngestHandlers:
 
         t0 = time.monotonic()
         entity_seen: dict[str, str] = {}  # slug -> display_name
+
+        # Pre-batch NER across all chunks (1 ONNX run instead of N)
+        chunk_ents: list[list] = [[] for _ in chunks]
+        if entity_model_dir:
+            from graphstore.ingest.entity_extract import extract_batch, slug as _ent_slug
+            chunk_ents = extract_batch(
+                [c.text for c in chunks], model_dir=entity_model_dir,
+                score_threshold=entity_score_threshold, max_length=entity_max_length,
+            )
+
         for i, chunk in enumerate(chunks):
             chunk_id = f"{parent_id}:chunk:{chunk.index}"
             chunk_fields = {"summary": chunk.summary}
@@ -195,14 +205,9 @@ class IngestHandlers:
             else:
                 self.store.put_edge(parent_id, chunk_id, "has_chunk")
 
-            # Entity extraction + linking (use full chunk text, not summary)
+            # Entity linking (use pre-computed batch result)
             if entity_model_dir:
-                from graphstore.ingest.entity_extract import extract_entities, slug as _ent_slug
-                ents = extract_entities(
-                    chunk.text, model_dir=entity_model_dir,
-                    score_threshold=entity_score_threshold, max_length=entity_max_length,
-                )
-                for ent in ents:
+                for ent in chunk_ents[i]:
                     s = _ent_slug(ent.text)
                     if not s:
                         continue

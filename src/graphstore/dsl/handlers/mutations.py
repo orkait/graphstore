@@ -191,7 +191,7 @@ class MutationHandlers:
         
         from graphstore.algos.sentence_split import split_sentences
         from graphstore.ingest.entity_extract import (
-            extract_entities, CoReferenceResolver, slug as _ent_slug,
+            extract_batch, CoReferenceResolver, slug as _ent_slug,
         )
 
         resolver = CoReferenceResolver()
@@ -214,6 +214,24 @@ class MutationHandlers:
         if need_sentence_nodes:
             # Parse parent's EVENT_AT for inheritance by sentence nodes
             parent_event_ms = self._parse_event_at(getattr(q, 'event_at', None))
+
+            # Batch NER across all sentences (1 ONNX run instead of N)
+            if entity_model_dir:
+                all_ents = extract_batch(
+                    sentences, model_dir=entity_model_dir,
+                    score_threshold=entity_score_threshold,
+                    max_length=entity_max_length,
+                )
+            else:
+                all_ents = [[] for _ in sentences]
+
+            # Batch sentence embeddings when embedder supports it and not deferred
+            batch_embed_sentences = (
+                self._embedder is not None
+                and not getattr(self, '_defer_embeddings', False)
+            )
+            sent_slots: list[int] = []
+
             for i, sent_text in enumerate(sentences):
                 sent_id = f"{node_id}:s{i}"
                 sent_slot = self.store.put_node(sent_id, "sentence", {
@@ -224,23 +242,17 @@ class MutationHandlers:
                 if parent_event_ms is not None:
                     self.store.columns.set_reserved(sent_slot, "__event_at__", parent_event_ms)
                 self.store.put_edge(node_id, sent_id, "has_sentence")
+                sent_slots.append(sent_slot)
 
-                # Embed sentence (respect deferred mode)
-                if self._embedder:
-                    if getattr(self, '_defer_embeddings', False):
-                        self._pending_embeddings.append((sent_slot, sent_text))
-                        if len(self._pending_embeddings) >= self._embed_batch_size:
-                            self.flush_pending_embeddings()
-                    else:
-                        self._embed_and_store(sent_slot, sent_text)
+                # Embed (deferred path only; batched path runs after the loop)
+                if self._embedder and getattr(self, '_defer_embeddings', False):
+                    self._pending_embeddings.append((sent_slot, sent_text))
+                    if len(self._pending_embeddings) >= self._embed_batch_size:
+                        self.flush_pending_embeddings()
 
-                # Entity extraction
+                # Entity linking (use pre-computed batch result)
                 if entity_model_dir:
-                    ents = extract_entities(
-                        sent_text, model_dir=entity_model_dir,
-                        score_threshold=entity_score_threshold,
-                        max_length=entity_max_length,
-                    )
+                    ents = all_ents[i]
                     sentence_entities: dict[str, str] = {}
                     resolved = resolver.resolve(sent_text)
                     for name in resolved:
@@ -264,6 +276,9 @@ class MutationHandlers:
                             self.store.put_edge(sent_id, ent_id, "mentions")
                         except Exception:
                             pass
+
+            if batch_embed_sentences:
+                self._batch_embed_and_store(list(zip(sent_slots, sentences)))
 
         # ── Standard embedding / document handling ──────────────
         # Sentences supplement the parent for fine-grained retrieval.
