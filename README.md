@@ -64,20 +64,20 @@ Three storage engines, one typed DSL, and a hybrid retrieval pipeline that fuses
 REMEMBER "European architecture" LIMIT 10
 
   ┌─────────────────────────────────────────────────────────┐
-  │  vec_signal     cosine similarity (usearch ANN)         │  0.50
-  │  bm25_signal    keyword match (SQLite FTS5)             │  0.20
-  │  recency        decay from event time                   │  0.10
-  │  graph_degree   how connected is this node              │  0.15
-  │  recall_freq    how often retrieved before              │  0.05
+  │  vec_signal     cosine similarity (usearch ANN)         │  0.52
+  │  bm25_signal    keyword match (SQLite FTS5)             │  0.25
+  │  recency        decay from event time                   │  0.15
+  │  graph_signal   entity-degree boost (opt-in)            │  0.08
   │                                                         │
   │  + co-occurrence boost (found by both vec AND bm25)     │
-  │  + HybridRAG graph expansion (spreading activation)     │
-  │  + temporal-first filtering (when AT anchor present)    │
-  │  + type-weighted scoring (observations > messages)      │
+  │  + recall-frequency nudge (log-scaled)                  │
+  │  + temporal hard filter (when AT anchor present)        │
+  │  + optional reranker (GGUF / ONNX) after fusion         │
+  │  + optional nucleus expansion (structural edges only)   │
   └─────────────────────────────────────────────────────────┘
 ```
 
-Weights are configurable. The pipeline is 10 stages.
+Weights are configurable. The pipeline is 5 stages: gather → fuse → temporal → rerank → (optional nucleus).
 
 ---
 
@@ -212,8 +212,6 @@ NODES WHERE __event_at__ > 1710000000000 LIMIT 10
 ```sql
 -- Cluster episodic memories into observations (no LLM needed)
 SYS CONSOLIDATE THRESHOLD 0.7
-
--- Observations get higher retrieval priority via type_weights
 ```
 
 <details>
@@ -380,10 +378,10 @@ Only include fields you want to override. Missing fields use defaults from `conf
   },
   "dsl": {
     "fusion_method": "weighted",
-    "remember_weights": [0.50, 0.20, 0.10, 0.15, 0.05],
+    "remember_weights": [0.52, 0.25, 0.15, 0.08],
     "recency_half_life_days": 7300,
-    "hybridrag_weight": 0.15,
-    "nucleus_expansion": true
+    "graph_signal_enabled": true,
+    "nucleus_expansion": false
   }
 }
 ```
