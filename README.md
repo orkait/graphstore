@@ -430,7 +430,7 @@ WHAT IF RETRACT "id"
 ```sql
 CREATE NODE "id" kind = "x" name = "foo"
 CREATE NODE "id" kind = "x" EVENT_AT "2024-03-15"
-CREATE NODE "id" kind = "x" DOCUMENT "full text..." EXPIRES IN 1h
+CREATE NODE "id" kind = "x" DOCUMENT "full text..." EXPIRES IN 1h   -- DOCUMENT blob is auto-indexed into BM25 for text content types
 UPDATE NODE "id" SET name = "new"
 UPSERT NODE "id" kind = "x" name = "foo"
 DELETE NODE "id"

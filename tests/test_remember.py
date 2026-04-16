@@ -148,3 +148,46 @@ def test_remember_nucleus_respects_visit_budget():
         assert r.meta.get("nucleus_visits", 0) <= 150
     finally:
         gs.close()
+
+
+def test_document_clause_populates_bm25_index():
+    """CREATE NODE ... DOCUMENT "text" must make the content searchable via
+    REMEMBER's BM25 channel without a separate put_summary() call."""
+    gs = GraphStore(embedder=None)
+    try:
+        gs.execute('CREATE NODE "a" kind = "doc" text = "tag1" DOCUMENT "quantum entanglement"')
+        gs.execute('CREATE NODE "b" kind = "doc" text = "tag2" DOCUMENT "classical mechanics"')
+        r = gs.execute('REMEMBER "quantum" LIMIT 5')
+        assert r.count >= 1, f"expected DOCUMENT content to surface via BM25, got {r.count} with meta={r.meta}"
+        ids = {node["id"] for node in r.data}
+        assert "a" in ids
+    finally:
+        gs.close()
+
+
+def test_remember_empty_reports_diagnostic_reasons():
+    """When REMEMBER returns zero, meta.debug.empty_result_reasons must
+    explain why - no embedder, no FTS content, etc."""
+    gs = GraphStore(embedder=None)
+    try:
+        gs.execute('CREATE NODE "a" kind = "doc" text = "just a column, no DOCUMENT"')
+        r = gs.execute('REMEMBER "anything" LIMIT 5')
+        reasons = (r.meta or {}).get("debug", {}).get("empty_result_reasons", [])
+        assert r.count == 0
+        assert reasons, f"expected diagnostic reasons; got meta={r.meta}"
+        joined = " ".join(reasons).lower()
+        assert "embedder" in joined or "vec" in joined or "bm25" in joined
+    finally:
+        gs.close()
+
+
+def test_remember_empty_store_reports_no_nodes():
+    gs = GraphStore(embedder=None)
+    try:
+        r = gs.execute('REMEMBER "anything" LIMIT 5')
+        reasons = (r.meta or {}).get("debug", {}).get("empty_result_reasons", [])
+        assert any("no nodes" in r_.lower() for r_ in reasons), (
+            f"expected 'no nodes' reason on empty store; got {reasons}"
+        )
+    finally:
+        gs.close()

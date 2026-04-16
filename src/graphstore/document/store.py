@@ -8,6 +8,25 @@ from pathlib import Path
 from graphstore.algos.text import fts5_sanitize as _sanitize_fts5_query
 
 
+_TEXT_CONTENT_TYPES = (
+    "text/plain", "text/markdown", "text/html", "text/xml",
+    "text/csv", "text/rtf",
+    "application/json", "application/xml", "application/xhtml+xml",
+)
+
+
+def _is_text_content_type(content_type: str) -> bool:
+    """True when content_type indicates UTF-8 decodable text.
+
+    BM25 indexing of binary data (PDF bytes, images) ruins ranking, so
+    put_document only auto-writes to doc_fts for known text content types.
+    """
+    if not content_type:
+        return False
+    ct = content_type.split(";", 1)[0].strip().lower()
+    return ct in _TEXT_CONTENT_TYPES or ct.startswith("text/")
+
+
 class DocumentStore:
     """SQLite-backed storage for raw documents. Always on disk, never in RAM."""
 
@@ -70,6 +89,18 @@ class DocumentStore:
         self._conn.execute(
             "INSERT OR REPLACE INTO documents (slot, content, content_type, size) VALUES (?, ?, ?, ?)",
             (slot, content, content_type, len(content)))
+        # Plaintext documents also land in the BM25 index so REMEMBER can find
+        # them without a separate put_summary() call. Binary/PDF content stays
+        # out of FTS (indexing garbled bytes hurts ranking).
+        if _is_text_content_type(content_type):
+            try:
+                text = content.decode("utf-8", errors="replace")
+            except Exception:
+                text = None
+            if text:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO doc_fts (rowid, summary) VALUES (?, ?)",
+                    (slot, text))
         self._conn.commit()
 
     def put_documents_batch(self, rows: list[tuple[int, bytes, str]]) -> None:
@@ -77,6 +108,21 @@ class DocumentStore:
         self._conn.executemany(
             "INSERT OR REPLACE INTO documents (slot, content, content_type, size) VALUES (?, ?, ?, ?)",
             [(slot, content, ctype, len(content)) for slot, content, ctype in rows])
+        # Same BM25 auto-index path as put_document, batched.
+        fts_rows: list[tuple[int, str]] = []
+        for slot, content, ctype in rows:
+            if not _is_text_content_type(ctype):
+                continue
+            try:
+                text = content.decode("utf-8", errors="replace")
+            except Exception:
+                continue
+            if text:
+                fts_rows.append((slot, text))
+        if fts_rows:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO doc_fts (rowid, summary) VALUES (?, ?)",
+                fts_rows)
         self._conn.commit()
 
     def get_document(self, slot: int) -> tuple[bytes, str] | None:
@@ -86,11 +132,15 @@ class DocumentStore:
 
     def delete_document(self, slot: int) -> None:
         self._conn.execute("DELETE FROM documents WHERE slot = ?", (slot,))
+        # Mirror the auto-FTS in put_document so deletion is symmetric. Safe
+        # to issue unconditionally - no-op if this slot never had an FTS row.
+        self._conn.execute("DELETE FROM doc_fts WHERE rowid = ?", (slot,))
         self._conn.commit()
 
     def delete_documents_batch(self, slots: list[int]) -> None:
         """Batch delete documents with single commit."""
         self._conn.executemany("DELETE FROM documents WHERE slot = ?", [(s,) for s in slots])
+        self._conn.executemany("DELETE FROM doc_fts WHERE rowid = ?", [(s,) for s in slots])
         self._conn.commit()
 
     def has_document(self, slot: int) -> bool:

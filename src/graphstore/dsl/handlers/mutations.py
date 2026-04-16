@@ -178,6 +178,20 @@ class MutationHandlers:
 
     @handles(CreateNode, write=True)
     def _create_node(self, q: CreateNode) -> Result:
+        """Create a node. Text content has four distinct landing pads:
+
+        | Clause                  | ColumnStore | DocumentStore blob | doc_fts BM25 | Embedded |
+        |-------------------------|-------------|--------------------|--------------|----------|
+        | Regular field (text=X)  | yes         | no                 | no           | iff schema has EMBED <field> |
+        | DOCUMENT "..."          | no          | yes                | yes (text/*) | fallback when no sentences + no VECTOR |
+        | VECTOR [...]            | no          | no                 | no           | yes (direct) |
+        | put_summary / INGEST    | no          | yes (via ingest)   | yes          | per-sentence via pipeline |
+
+        Pick the one that matches what you want REMEMBER to find:
+          - Column field with EMBED  -> semantic (vec) search
+          - DOCUMENT "plaintext"     -> both vec (fallback) and BM25 work
+          - INGEST file.pdf          -> full pipeline, sentence-level vectors + BM25
+        """
         data = {fp.name: fp.value for fp in q.fields}
         kind = data.pop("kind", "default")
         self.schema.validate_node(kind, data)
