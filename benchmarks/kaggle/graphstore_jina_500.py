@@ -18,7 +18,10 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
 subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
     "--no-deps", "--force-reinstall", "onnxruntime-gpu>=1.23"])
 
-from huggingface_hub import snapshot_download
+from huggingface_hub import snapshot_download, login
+if HF_TOKEN:
+    print("Logging into Hugging Face...")
+    login(token=HF_TOKEN)
 print("Downloading Jina v5 Small ONNX...")
 snapshot_download("jinaai/jina-embeddings-v5-text-small-retrieval",
     local_dir="/kaggle/working/jina-small")
