@@ -51,17 +51,21 @@ print("Downloading Jina v5 Small ONNX...")
 snapshot_download("jinaai/jina-embeddings-v5-text-small-retrieval",
     local_dir="/kaggle/working/jina-small", token=HF_TOKEN)
 print("Downloading LongMemEval-S...")
+# Download directly to /kaggle/working/dataset/longmemeval
 snapshot_download("xiaowu0162/longmemeval-cleaned",
-    repo_type="dataset", local_dir="/kaggle/working/longmemeval-data", token=HF_TOKEN)
+    repo_type="dataset", local_dir="/kaggle/working/dataset/longmemeval", token=HF_TOKEN)
 
 print("Downloading TinyBERT NER...")
 snapshot_download("onnx-community/TinyBERT-finetuned-NER-ONNX",
     local_dir="/kaggle/working/models/tinybert-ner", token=HF_TOKEN)
 
-print("Cloning graphstore (refactor/simplify-retrieval-pipeline)...")
+print("Cloning graphstore (refactor/simplify-retrieval-pipeline) [SKIP LFS]...")
+# Use GIT_LFS_SKIP_SMUDGE=1 to avoid LFS overhead/failures
+env = os.environ.copy()
+env["GIT_LFS_SKIP_SMUDGE"] = "1"
 subprocess.check_call(["git", "clone", "--depth", "1",
     "--branch", "refactor/simplify-retrieval-pipeline",
-    "https://github.com/orkait/graphstore.git", "/kaggle/working/graphstore"])
+    "https://github.com/orkait/graphstore.git", "/kaggle/working/graphstore"], env=env)
 
 # Ensure we have all models (including TinyBERT NER) in the default relative models/ folder
 print("Running model downloader...")
@@ -75,7 +79,7 @@ sys.path.insert(0, "/kaggle/working/graphstore")
 sys.argv = ["bench",
     "--system", "graphstore",
     "--dataset", "longmemeval",
-    "--data-path", "/kaggle/working/longmemeval-data",
+    "--data-path", "/kaggle/working/dataset/longmemeval",
     "--variant", "s",
     "--embedder", "onnx",
     "--embedder-model-dir", "/kaggle/working/jina-small",
