@@ -24,10 +24,11 @@ def test_speed():
         "embedder_model_dir": "models/jina-v5-small-retrieval",
         "embedder_pooling": "last_token",
         "embedder_output_dims": 1024,
-        "entity_extractor": "tinybert_onnx", # EXPLICITLY USE AI MODEL
+        "entity_extractor": "tinybert_onnx", 
         "entity_model_dir": "models/tinybert-ner",
         "entities": True,
-        "gpu": True,
+        "embedder_gpu": True,
+        "entity_gpu": True,
         "embed_batch_size": 256
     }
     

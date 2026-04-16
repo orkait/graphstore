@@ -143,7 +143,17 @@ class OnnxTokenClassificationEntityExtractor:
                 "sess_options": sess_options,
             },
         )
-        print(f"  [NER] Model loaded. Provider: {self._session.get_providers()[0]}")
+        active_providers = self._session.get_providers()
+        print(f"  [NER] Model loaded. Provider: {active_providers[0]}")
+        
+        # Check strict enforcement
+        if any(p in ("CUDAExecutionProvider", "TensorrtExecutionProvider") for p in resolved_providers):
+            if not any(p in ("CUDAExecutionProvider", "TensorrtExecutionProvider") for p in active_providers):
+                raise RuntimeError(
+                    f"NER GPU provider requested but unavailable. Active: {active_providers}. "
+                    "Check LD_LIBRARY_PATH and nvidia-* wheels."
+                )
+
         self._input_names = {i.name for i in self._session.get_inputs()}
         self._needs_token_type_ids = "token_type_ids" in self._input_names
 

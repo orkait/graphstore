@@ -204,11 +204,13 @@ class MutationHandlers:
         embed_field = kind_def.get("embed_field") if kind_def else None
         text_to_split = data.get(embed_field) if embed_field else data.get("content", "")
 
+        enable_sentences = getattr(self, '_enable_sentence_nodes', True)
+
         sentences = []
-        if not is_sub_node and text_to_split and isinstance(text_to_split, str):
+        if enable_sentences and not is_sub_node and text_to_split and isinstance(text_to_split, str):
             sentences = split_sentences(text_to_split)
 
-        need_sentence_nodes = not is_sub_node and len(sentences) >= 1
+        need_sentence_nodes = enable_sentences and not is_sub_node and len(sentences) >= 1
         if need_sentence_nodes:
             # Parse parent's EVENT_AT for inheritance by sentence nodes
             parent_event_ms = self._parse_event_at(getattr(q, 'event_at', None))
@@ -602,20 +604,29 @@ class MutationHandlers:
 
     @handles(Batch, write=True)
     def _batch(self, q: Batch) -> Result:
-        """Execute batch with rollback on failure.
+        """Execute batch with rollback on failure."""
+        enable_rollback = getattr(self, '_enable_rollback', True)
+        
+        saved_edges = None
+        saved_edge_keys = None
+        saved_columns = None
+        saved_tombstones = None
+        saved_id_to_slot = None
+        saved_count = None
+        saved_next_slot = None
+        saved_node_ids = None
+        saved_node_kinds = None
 
-        Saves a copy of the store state before executing. If any statement
-        fails, restores from the copy.
-        """
-        saved_edges = {k: list(v) for k, v in self.store._edges_by_type.items()}
-        saved_edge_keys = set(self.store._edge_keys)
-        saved_columns = self.store.columns.snapshot_arrays()
-        saved_tombstones = set(self.store.node_tombstones)
-        saved_id_to_slot = dict(self.store.id_to_slot)
-        saved_count = self.store._count
-        saved_next_slot = self.store._next_slot
-        saved_node_ids = self.store.node_ids[: self.store._next_slot].copy()
-        saved_node_kinds = self.store.node_kinds[: self.store._next_slot].copy()
+        if enable_rollback:
+            saved_edges = {k: list(v) for k, v in self.store._edges_by_type.items()}
+            saved_edge_keys = set(self.store._edge_keys)
+            saved_columns = self.store.columns.snapshot_arrays()
+            saved_tombstones = set(self.store.node_tombstones)
+            saved_id_to_slot = dict(self.store.id_to_slot)
+            saved_count = self.store._count
+            saved_next_slot = self.store._next_slot
+            saved_node_ids = self.store.node_ids[: self.store._next_slot].copy()
+            saved_node_kinds = self.store.node_kinds[: self.store._next_slot].copy()
 
         try:
             variables: dict[str, str] = {}
@@ -643,16 +654,17 @@ class MutationHandlers:
             self.store._ensure_edges_built()
             return Result(kind="ok", data=None, count=0)
         except Exception as e:
-            self.store._edges_by_type = saved_edges
-            self.store._edge_keys = saved_edge_keys
-            self.store.node_tombstones = saved_tombstones
-            self.store.id_to_slot = saved_id_to_slot
-            self.store._count = saved_count
-            self.store._next_slot = saved_next_slot
-            self.store.node_ids[:saved_next_slot] = saved_node_ids
-            self.store.node_kinds[:saved_next_slot] = saved_node_kinds
-            self.store._rebuild_edges()
-            self.store.columns.restore_arrays(saved_columns)
+            if enable_rollback:
+                self.store._edges_by_type = saved_edges
+                self.store._edge_keys = saved_edge_keys
+                self.store.node_tombstones = saved_tombstones
+                self.store.id_to_slot = saved_id_to_slot
+                self.store._count = saved_count
+                self.store._next_slot = saved_next_slot
+                self.store.node_ids[:saved_next_slot] = saved_node_ids
+                self.store.node_kinds[:saved_next_slot] = saved_node_kinds
+                self.store._rebuild_edges()
+                self.store.columns.restore_arrays(saved_columns)
             raise BatchRollback(
                 failed_statement=str(type(e).__name__), error=str(e)
             )

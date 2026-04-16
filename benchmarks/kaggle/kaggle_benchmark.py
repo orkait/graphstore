@@ -223,7 +223,7 @@ def setup_env():
         return False
 
     os.environ["GRAPHSTORE_CONFIG"] = CONFIG_PATH
-    sys.path.insert(0, GRAPHSTORE_DIR)
+    sys.path.insert(0, f"{GRAPHSTORE_DIR}/src")
 
     sys.argv = [
         "bench",

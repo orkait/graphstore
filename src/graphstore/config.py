@@ -99,6 +99,8 @@ class DslConfig(msgspec.Struct, frozen=True):
     nucleus_min_text_length: int = 20
     nucleus_allowed_kinds: list[str] = msgspec.field(default_factory=lambda: ["message", "chunk", "section"])
     sentence_query_expansion: bool = True
+    enable_sentence_nodes: bool = True
+    enable_rollback: bool = True
     graph_signal_enabled: bool = True
     entity_extractor: str = "tinybert_onnx"
     entity_model_dir: str | None = "./models/tinybert-ner"
@@ -120,10 +122,12 @@ class VaultConfig(msgspec.Struct, frozen=True):
 
 
 class PersistenceConfig(msgspec.Struct, frozen=True):
+    enabled: bool = True
     wal_hard_limit: int = 100_000
     auto_checkpoint_threshold: int = 50_000
     log_retention_days: int = 7
     busy_timeout_ms: int = 5000
+    enable_wal: bool = True
 
 
 class RetentionConfig(msgspec.Struct, frozen=True):

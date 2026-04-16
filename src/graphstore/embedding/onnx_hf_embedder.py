@@ -126,17 +126,30 @@ def _preload_cu12_libs() -> None:
         _CU12_PRELOADED = True
         return
 
-    for sp in (p for p in sys.path if p.endswith("site-packages")):
+    site_packages_dirs = [p for p in sys.path if "site-packages" in p]
+    added_paths = []
+    for sp in site_packages_dirs:
         nvidia_root = Path(sp) / "nvidia"
         if not nvidia_root.exists():
             continue
         for soname in _CU12_SONAMES:
-            lib_path = nvidia_root / _WHEEL_LAYOUT[soname] / soname
-            if lib_path.exists():
-                try:
-                    ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
-                except OSError:
-                    pass
+            lib_dir = nvidia_root / _WHEEL_LAYOUT[soname]
+            if lib_dir.exists():
+                added_paths.append(str(lib_dir))
+                lib_path = lib_dir / soname
+                if lib_path.exists():
+                    try:
+                        ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
+                    except OSError:
+                        pass
+    
+    if added_paths:
+        current_ld = os.environ.get("LD_LIBRARY_PATH", "")
+        new_ld = ":".join(added_paths)
+        if current_ld:
+            new_ld = f"{new_ld}:{current_ld}"
+        os.environ["LD_LIBRARY_PATH"] = new_ld
+
     _CU12_PRELOADED = True
 
 
@@ -178,13 +191,9 @@ def _resolve_providers(providers: list[str] | str | None) -> list[str]:
     import onnxruntime as ort
     available = set(ort.get_available_providers())
 
-    resolved = [p for p in wanted if p in available]
-    dropped = [p for p in wanted if p not in available and p != "CPUExecutionProvider"]
-    if dropped:
-        import logging
-        logging.getLogger(__name__).warning(
-            "requested providers %s not available, falling back to CPU", dropped
-        )
+    # Do not drop providers here. Keep everything wanted.
+    resolved = list(wanted)
+    
     if "CPUExecutionProvider" not in resolved:
         resolved.append("CPUExecutionProvider")
     return resolved
@@ -195,23 +204,20 @@ def _cuda_requested(providers: list[str]) -> bool:
 
 
 def _create_inference_session(ort, model_source, sess_kwargs: dict):
-    """Create ORT session, retrying once if CUDA silently fell back to CPU.
-
-    We have observed first-attempt CUDA provider init occasionally produce a
-    CPU-only session in a fresh process while the second identical call in the
-    same process succeeds. Detect that case by inspecting the created session's
-    provider list.
-    """
+    """Create ORT session, enforcing GPU if requested."""
     session = ort.InferenceSession(model_source, **sess_kwargs)
     requested = sess_kwargs.get("providers", [])
-    if _cuda_requested(requested):
+    if any(p in ("CUDAExecutionProvider", "TensorrtExecutionProvider") for p in requested):
         active = list(session.get_providers())
-        if "CUDAExecutionProvider" not in active and "CPUExecutionProvider" in active:
-            import logging
-            logging.getLogger(__name__).warning(
-                "CUDA provider requested but ORT created CPU-only session; retrying once"
-            )
+        if not any(p in ("CUDAExecutionProvider", "TensorrtExecutionProvider") for p in active):
+            # Try one more time (sometimes works after initial fail)
             session = ort.InferenceSession(model_source, **sess_kwargs)
+            active = list(session.get_providers())
+            if not any(p in ("CUDAExecutionProvider", "TensorrtExecutionProvider") for p in active):
+                raise RuntimeError(
+                    f"GPU provider requested but unavailable. Active: {active}. "
+                    "Check LD_LIBRARY_PATH and nvidia-* wheels."
+                )
     return session
 
 

@@ -100,7 +100,11 @@ voice = [
     "piper-tts>=1.4",
 ]
 
+[tool.setuptools.package-dir]
+"" = "src"
+
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["graphstore*"]
 
 [tool.setuptools.package-data]
@@ -130,7 +134,7 @@ search = 'version = "{current_version}"'
 replace = 'version = "{new_version}"'
 
 [[tool.bumpversion.files]]
-filename = "graphstore/__init__.py"
+filename = "src/graphstore/__init__.py"
 search = '__version__ = "{current_version}"'
 replace = '__version__ = "{new_version}"'
 

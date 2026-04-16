@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -201,7 +202,11 @@ class GraphStoreAdapter:
             "ceiling_mb": self.config.get("ceiling_mb", 4096),
             "queued": False,
             "embedder": self._embedder,
-            "entity_model_dir": None,  # Disable engine-side extraction; adapter handles it
+            "entity_model_dir": None, # Force engine NER OFF
+            "enable_sentence_nodes": False, # Force sentence splitting OFF
+            "enable_rollback": False, # Force rollback snapshots OFF
+            "auto_optimize": False, # Force optimizer checks OFF
+            "enable_wal": False, # Force WAL OFF
         }
         # GraphStore constructor kwargs (must match __init__ signature)
         for key in ("remember_weights", "search_oversample", "recall_decay",
@@ -258,10 +263,13 @@ class GraphStoreAdapter:
             # 1. Batch extract entities for all messages in the session
             msg_contents = [msg.content for msg in session.messages]
             all_entities = []
+            st = time.time()
             if self._entity_extraction:
                 all_entities = self._entity_extractor.extract_batch(msg_contents)
+            t_ner = time.time() - st
 
             # 2. Build a single transaction block for the entire session
+            st = time.time()
             dsl = ["BEGIN"]
             
             sess_node_id = f"sess:{session.session_id}"
@@ -324,14 +332,22 @@ class GraphStoreAdapter:
                 dsl.append(f'CREATE EDGE "{a}" -> "{b}" kind = "next"')
 
             dsl.append("COMMIT")
+            t_dsl_gen = time.time() - st
 
             # 3. Execute the single batch transaction
+            st = time.time()
             with self._gs.deferred_embeddings(batch_size=self._embed_batch_size):
                 self._gs.execute("\n".join(dsl))
+            t_exec = time.time() - st
                 
             # 4. Batch index FTS
+            st = time.time()
             if fts_items:
                 self._gs.index_text_batch(fts_items)
+            t_fts = time.time() - st
+
+        if t.elapsed_ms > 100:
+            print(f"    [DEBUG] sess={session.session_id} msgs={n} ner={t_ner:.2f}s, exec={t_exec:.2f}s, fts={t_fts:.2f}s")
 
         return t.elapsed_ms / 1000.0
 

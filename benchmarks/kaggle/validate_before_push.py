@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 JINA_DIR = ROOT / "jina-small"
 NER_DIR = ROOT / "models" / "tinybert-ner"
-FIXTURE = ROOT / "graphstore" / "tests" / "fixtures" / "benchmarks" / "longmemeval_sample.json"
+FIXTURE = ROOT / "tests" / "fixtures" / "benchmarks" / "longmemeval_sample.json"
 CONFIG = ROOT / "benchmarks" / "graphstore.json"
 
 PASS = "[PASS]"
@@ -117,7 +117,7 @@ def validate_mini_run():
     os.environ["GRAPHSTORE_CONFIG"] = str(CONFIG)
     out_dir = Path(tempfile.mkdtemp(prefix="kg_validate_"))
 
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(ROOT / "src"))
     saved_argv = sys.argv[:]
     sys.argv = [
         "bench",
@@ -184,7 +184,7 @@ if __name__ == "__main__":
     p.add_argument("--skip-run", action="store_true", help="skip the mini benchmark run (faster)")
     args = p.parse_args()
 
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(ROOT / "src"))
 
     results = []
     results.append(("imports", validate_imports()))
