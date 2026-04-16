@@ -1,6 +1,6 @@
 """GraphStore adapter, skill-compliant.
 
-Implements every rule from skills/graphstore-ingestion/SKILL.md:
+Implements every rule from tools/skills/graphstore-ingestion/SKILL.md:
     - Schema first (SYS REGISTER NODE KIND) with EMBED on message only
     - deferred_embeddings() per session
     - put_summary() per message so REMEMBER's BM25 leg actually works (G2)
@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -79,7 +80,7 @@ def _build_embedder(config: dict[str, Any]):
 
         return FastEmbedEmbedder(
             model_name=config.get("embedder_model", "BAAI/bge-small-en-v1.5"),
-            cache_dir=config.get("cache_dir"),
+            cache_dir=config.get("cache_dir") or config.get("model_cache_dir"),
             threads=config.get("embedder_threads"),
         )
     if name == "onnx":
@@ -107,6 +108,16 @@ def _build_embedder(config: dict[str, Any]):
         return load_installed_embedder(
             model_name,
             dims=config.get("embedder_output_dims"),
+            providers=providers,
+        )
+    if name in ("jina-v5-nano", "jina-v5-nano-retrieval"):
+        from graphstore.registry.installer import load_installed_embedder, set_cache_dir
+        cache = config.get("embedder_cache_dir")
+        if cache:
+            set_cache_dir(cache)
+        return load_installed_embedder(
+            "jina-v5-nano-retrieval",
+            dims=768,
             providers=providers,
         )
     if name == "gguf":
@@ -191,6 +202,11 @@ class GraphStoreAdapter:
             "ceiling_mb": self.config.get("ceiling_mb", 4096),
             "queued": False,
             "embedder": self._embedder,
+            "entity_model_dir": None, # Force engine NER OFF
+            "enable_sentence_nodes": False, # Force sentence splitting OFF
+            "enable_rollback": False, # Force rollback snapshots OFF
+            "auto_optimize": False, # Force optimizer checks OFF
+            "enable_wal": False, # Force WAL OFF
         }
         # GraphStore constructor kwargs (must match __init__ signature)
         for key in ("remember_weights", "search_oversample", "recall_decay",
@@ -223,6 +239,16 @@ class GraphStoreAdapter:
                 'SYS REGISTER NODE KIND "entity" REQUIRED name:string'
             )
 
+    def warmup(self) -> None:
+        """Pre-load AI models into GPU to avoid first-run latency."""
+        if self._entity_extraction:
+            self._entity_extractor.extract("warmup")
+        if self._embedder and hasattr(self._embedder, "embed"):
+            try:
+                self._embedder.embed(["warmup"])
+            except Exception:
+                pass
+
     def ingest(self, session: Session) -> float:
         if self._gs is None:
             raise RuntimeError("reset() must be called first")
@@ -234,68 +260,94 @@ class GraphStoreAdapter:
         sid = _escape(session.session_id)
 
         with TimedOperation() as t:
-            with self._gs.deferred_embeddings(batch_size=self._embed_batch_size):
-                sess_node_id = f"sess:{session.session_id}"
-                self._gs.execute(
-                    f'CREATE NODE "{sess_node_id}" kind = "session" '
-                    f'session_id = "{sid}" '
-                    f'position = {int(session.metadata.get("position", 0))} '
-                    f'msg_count = {n}'
+            # 1. Batch extract entities for all messages in the session
+            msg_contents = [msg.content for msg in session.messages]
+            all_entities = []
+            st = time.time()
+            if self._entity_extraction:
+                all_entities = self._entity_extractor.extract_batch(msg_contents)
+            t_ner = time.time() - st
+
+            # 2. Build a single transaction block for the entire session
+            st = time.time()
+            dsl = ["BEGIN"]
+            
+            sess_node_id = f"sess:{session.session_id}"
+            dsl.append(
+                f'CREATE NODE "{sess_node_id}" kind = "session" '
+                f'session_id = "{sid}" '
+                f'position = {int(session.metadata.get("position", 0))} '
+                f'msg_count = {n}'
+            )
+
+            # Parse session date for EVENT_AT clause
+            sess_date_str = session.metadata.get("date", "")
+            sess_event_ms = None
+            if sess_date_str:
+                from graphstore.core.temporal import parse_date
+                sess_event_ms = parse_date(sess_date_str)
+
+            event_at_clause = f" EVENT_AT {sess_event_ms}" if sess_event_ms else ""
+
+            entity_seen: set[str] = set()
+            fts_items: list[tuple[str, str]] = []
+            
+            for i, msg in enumerate(session.messages):
+                entities = all_entities[i] if all_entities else []
+                msg_id = f"{session.session_id}:msg{i}"
+                content_raw = msg.content
+                content = _escape(content_raw)
+                role = _escape(msg.role)
+                
+                dsl.append(
+                    f'CREATE NODE "{msg_id}" kind = "message" '
+                    f'session = "{sid}" role = "{role}" '
+                    f'content = "{content}" '
+                    f'position = {i}{event_at_clause}'
                 )
+                
+                if self._populate_fts:
+                    fts_items.append((msg_id, content_raw))
+                
+                dsl.append(f'CREATE EDGE "{sess_node_id}" -> "{msg_id}" kind = "has_message"')
 
-                # Parse session date for EVENT_AT clause
-                sess_date_str = session.metadata.get("date", "")
-                sess_event_ms = None
-                if sess_date_str:
-                    from graphstore.core.temporal import parse_date
-                    sess_event_ms = parse_date(sess_date_str)
+                if self._entity_extraction:
+                    for ent_name in entities:
+                        ent_slug = _slug(ent_name)
+                        if not ent_slug:
+                            continue
+                        ent_id = f"ent:{ent_slug}"
+                        if ent_id not in entity_seen:
+                            dsl.append(
+                                f'UPSERT NODE "{ent_id}" kind = "entity" '
+                                f'name = "{_escape(ent_name)}"'
+                            )
+                            entity_seen.add(ent_id)
+                        
+                        dsl.append(f'CREATE EDGE "{msg_id}" -> "{ent_id}" kind = "mentions"')
 
-                event_at_clause = f" EVENT_AT {sess_event_ms}" if sess_event_ms else ""
+            for i in range(n - 1):
+                a = f"{session.session_id}:msg{i}"
+                b = f"{session.session_id}:msg{i + 1}"
+                dsl.append(f'CREATE EDGE "{a}" -> "{b}" kind = "next"')
 
-                entity_seen: set[str] = set()
-                for i, msg in enumerate(session.messages):
-                    msg_id = f"{session.session_id}:msg{i}"
-                    content_raw = msg.content
-                    content = _escape(content_raw)
-                    role = _escape(msg.role)
-                    self._gs.execute(
-                        f'CREATE NODE "{msg_id}" kind = "message" '
-                        f'session = "{sid}" role = "{role}" '
-                        f'content = "{content}" '
-                        f'position = {i}{event_at_clause}'
-                    )
-                    if self._populate_fts:
-                        self._gs.index_text(msg_id, content_raw)
-                    self._gs.execute(
-                        f'CREATE EDGE "{sess_node_id}" -> "{msg_id}" kind = "has_message"'
-                    )
+            dsl.append("COMMIT")
+            t_dsl_gen = time.time() - st
 
-                    if self._entity_extraction:
-                        for ent_name in self._entity_extractor.extract(content_raw):
-                            ent_slug = _slug(ent_name)
-                            if not ent_slug:
-                                continue
-                            ent_id = f"ent:{ent_slug}"
-                            if ent_id not in entity_seen:
-                                try:
-                                    self._gs.execute(
-                                        f'CREATE NODE "{ent_id}" kind = "entity" '
-                                        f'name = "{_escape(ent_name)}"'
-                                    )
-                                except NodeExists:
-                                    pass
-                                entity_seen.add(ent_id)
-                            try:
-                                self._gs.execute(
-                                    f'CREATE EDGE "{msg_id}" -> "{ent_id}" kind = "mentions"'
-                                )
-                            except Exception:
-                                pass
+            # 3. Execute the single batch transaction
+            st = time.time()
+            with self._gs.deferred_embeddings(batch_size=self._embed_batch_size):
+                self._gs.execute("\n".join(dsl))
+            t_exec = time.time() - st
+                
+            # 4. Batch index FTS
+            st = time.time()
+            if fts_items:
+                self._gs.index_text_batch(fts_items)
+            t_fts = time.time() - st
 
-                for i in range(n - 1):
-                    a = f"{session.session_id}:msg{i}"
-                    b = f"{session.session_id}:msg{i + 1}"
-                    self._gs.execute(f'CREATE EDGE "{a}" -> "{b}" kind = "next"')
+        if t.elapsed_ms > 100:
+            print(f"    [DEBUG] sess={session.session_id} msgs={n} ner={t_ner:.2f}s, exec={t_exec:.2f}s, fts={t_fts:.2f}s")
 
         return t.elapsed_ms / 1000.0
 

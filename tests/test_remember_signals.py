@@ -28,22 +28,6 @@ class FixedEmbedder(Embedder):
         return self._encode(texts)
 
 
-def test_remember_includes_confidence_in_scoring():
-    """Nodes with higher confidence should score higher (all else equal)."""
-    gs = GraphStore(embedder=FixedEmbedder())
-    gs.execute('SYS REGISTER NODE KIND "fact" REQUIRED claim:string EMBED claim')
-    gs.execute('ASSERT "high_conf" kind = "fact" claim = "attention is important" CONFIDENCE 0.99')
-    gs.execute('ASSERT "low_conf" kind = "fact" claim = "attention is important" CONFIDENCE 0.1')
-
-    result = gs.execute('REMEMBER "attention" LIMIT 10')
-    if len(result.data) >= 2:
-        # Confidence is folded into _graph_score (overrides degree when present)
-        scores = {n["id"]: n["_graph_score"] for n in result.data}
-        if "high_conf" in scores and "low_conf" in scores:
-            assert scores["high_conf"] > scores["low_conf"]
-    gs.close()
-
-
 def test_remember_records_recall_feedback():
     """REMEMBER should increment __recall_count__ on returned nodes."""
     gs = GraphStore(embedder=FixedEmbedder())
@@ -71,7 +55,6 @@ def test_remember_includes_score_breakdown():
     if result.data:
         node = result.data[0]
         assert "_remember_score" in node
-        assert "_graph_score" in node
-        assert "_recall_score" in node
         assert "_recency_score" in node
+        # _graph_score and _recall_score removed in pipeline refactor
     gs.close()

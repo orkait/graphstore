@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import tempfile
 import time
@@ -10,6 +11,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from graphstore import GraphStore
+
+# --- Download models if missing ---
+try:
+    from tools.scripts.download_models import download_all
+    download_all()
+except ImportError:
+    import sys
+    scripts_path = Path(__file__).parent.parent.parent / "tools" / "scripts"
+    if scripts_path.exists():
+        sys.path.append(str(scripts_path))
+        try:
+            from download_models import download_all
+            download_all()
+        except ImportError:
+            pass
 
 _EMBEDDER_UNSET = object()
 
@@ -176,10 +192,14 @@ def is_abstention_entry(entry: dict) -> bool:
     return entry["question_id"].endswith("_abs") or entry["question_type"] == "abstention"
 
 
-def iter_scored_entries(entries: list[dict], include_abstention: bool, limit: int | None) -> list[dict]:
+def iter_scored_entries(entries: list[dict], include_abstention: bool, limit: int | None, skip: int = 0) -> list[dict]:
     selected = []
+    skipped = 0
     for entry in entries:
         if not include_abstention and is_abstention_entry(entry):
+            continue
+        if skipped < skip:
+            skipped += 1
             continue
         selected.append(entry)
         if limit is not None and len(selected) >= limit:
@@ -296,6 +316,7 @@ def run_benchmark(
     granularity: str = "session",
     top_k: int = 10,
     limit: int | None = None,
+    skip: int = 0,
     include_abstention: bool = False,
     out_path: str | Path | None = None,
     embedder=_EMBEDDER_UNSET,
@@ -306,6 +327,7 @@ def run_benchmark(
         all_entries,
         include_abstention=include_abstention,
         limit=limit,
+        skip=skip,
     )
     metrics: dict[str, defaultdict[str, list[float]]] = {
         "session": defaultdict(list),
@@ -315,7 +337,13 @@ def run_benchmark(
     results_log = []
     started_at = time.time()
 
-    for entry in entries:
+    try:
+        from tqdm import tqdm
+        entries_iter = tqdm(entries, desc=f"Evaluating {mode}")
+    except ImportError:
+        entries_iter = entries
+
+    for entry in entries_iter:
         items = build_corpus(entry, granularity=granularity)
         item_by_id = {item.corpus_id: item for item in items}
 
@@ -475,6 +503,37 @@ def _resolve_embedder(name: str | None):
         print("[embedder] loading harrier-oss-v1-0.6b (1024d, last-token pooling)", flush=True)
         return load_installed_embedder("harrier-oss-v1-0.6b", dims=1024)
 
+    if name in ("jina-v5-nano", "jina-v5-nano-retrieval"):
+        from graphstore.registry.installer import load_installed_embedder, install_embedder, is_installed
+        if not is_installed("jina-v5-nano-retrieval"):
+            print("[embedder] jina-v5-nano-retrieval not installed", flush=True)
+            install_embedder("jina-v5-nano-retrieval")
+        import os
+        gpu_flag = os.environ.get("GRAPHSTORE_GPU") == "1"
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if gpu_flag else None
+        print(f"[embedder] loading jina-v5-nano-retrieval (768d, {'GPU' if gpu_flag else 'CPU'})", flush=True)
+        return load_installed_embedder("jina-v5-nano-retrieval", dims=768, providers=providers)
+
+    if name.startswith("installed:"):
+        model_id = name[len("installed:"):]
+        from graphstore.registry.installer import load_installed_embedder, is_installed, install_embedder
+        if not is_installed(model_id):
+            print(f"[embedder] {model_id} not installed - running: graphstore install-embedder {model_id}", flush=True)
+            install_embedder(model_id)
+        print(f"[embedder] loading installed model: {model_id}", flush=True)
+        # Use GPU if GRAPHSTORE_VECTOR_GPU_LAYERS is set
+        gpu_layers = int(os.environ.get("GRAPHSTORE_VECTOR_GPU_LAYERS", 0))
+        gpu_mem_limit = os.environ.get("GRAPHSTORE_GPU_MEM_LIMIT")
+        if gpu_mem_limit:
+            gpu_mem_limit = int(gpu_mem_limit)
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if gpu_layers != 0 else None
+        return load_installed_embedder(
+            model_id, 
+            providers=providers, 
+            n_gpu_layers=gpu_layers,
+            gpu_mem_limit=gpu_mem_limit
+        )
+
     # FastEmbed shortcuts - strong encoder models with pre-exported ONNX.
     _FASTEMBED_ALIASES = {
         "bge-large":       "BAAI/bge-large-en-v1.5",
@@ -529,6 +588,7 @@ def main(argv: list[str] | None = None) -> int:
                         ))
     parser.add_argument("--granularity", choices=["session", "turn"], default="session")
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--skip", type=int, default=0)
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--include-abstention", action="store_true")
     parser.add_argument("--out")
@@ -543,6 +603,7 @@ def main(argv: list[str] | None = None) -> int:
         granularity=args.granularity,
         top_k=args.top_k,
         limit=args.limit,
+        skip=args.skip,
         include_abstention=args.include_abstention,
         out_path=args.out,
         embedder=embedder,

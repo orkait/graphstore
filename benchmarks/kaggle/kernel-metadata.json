@@ -1,0 +1,13 @@
+{
+  "id": "superkaiii/graphstore-jina-v5-small",
+  "title": "GraphStore Jina V5 Small",
+  "code_file": "kaggle_benchmark.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "competition_sources": [],
+  "dataset_sources": ["superkaiii/hf-token-private", "superkaiii/tinybert-ner-onnx"],
+  "kernel_sources": []
+}

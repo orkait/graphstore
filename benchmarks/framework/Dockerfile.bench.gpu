@@ -45,6 +45,7 @@ RUN pip uninstall -y onnxruntime && \
 
 COPY graphstore /repo/graphstore
 COPY benchmarks /repo/benchmarks
+COPY scripts /repo/scripts
 
 ENV PYTHONPATH=/repo
 

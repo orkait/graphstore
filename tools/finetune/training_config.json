@@ -1,0 +1,31 @@
+{
+  "algo": "compact",
+  "active_provider": "local_ollama",
+  "active_model": "qwen3-coder-next:cloud",
+  "provider_fallback_order": ["local_ollama", "openrouter"],
+  "providers": {
+    "openrouter": {
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": "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",
+      "is_local": false,
+      "litellm_prefix": "openrouter",
+      "models": {
+        "minimax/minimax-m2.7:nitro":   { "notes": "Via OpenRouter." },
+        "deepseek/deepseek-v3.2:nitro": {"noted": "Via OpenRouter."}
+      },
+      "model_fallback_order": [
+        "deepseek/deepseek-v3.2:nitro",
+        "minimax/minimax-m2.7:nitro"
+      ]
+    }
+  },
+  "max_iterations": 50,
+  "iteration_timeout": 180,
+  "checkpoint_interval": 5,
+  "sleep_between": 2,
+  "fast_bench": true,
+  "noise_tolerance": 1.02,
+  "full_bench_repeats": 3,
+  "attempts_per_hypothesis": 1,
+  "notes": "attempts_per_hypothesis: each hypothesis gets N iterations per model before lockout for the current baseline. Any non-win outcome (slow reject, purity fail, stale, correctness drift, bench crash, timeout, error) counts as 1 attempt. WIN resets all attempts. Max LLM calls per (algo, model) = 6 hypotheses × attempts_per_hypothesis = 18 at default."
+}

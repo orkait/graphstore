@@ -31,16 +31,16 @@ jobs:
           restore-keys: |
             pip-${{ runner.os }}-${{ matrix.python-version }}-
 
-      - name: Cache HuggingFace model weights
+      - name: Cache model weights
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: hf-model2vec-${{ runner.os }}-${{ matrix.python-version }}
+          key: hf-models-${{ runner.os }}
           restore-keys: |
-            hf-model2vec-${{ runner.os }}-
+            hf-models-${{ runner.os }}-
 
       - name: Install dependencies
-        run: pip install -e ".[dev,playground,ingest-pro]"
+        run: pip install -e ".[dev,playground,ingest-pro,embed-default]"
 
       - name: Run tests
         run: pytest --tb=short -q --ignore=tests/test_server.py

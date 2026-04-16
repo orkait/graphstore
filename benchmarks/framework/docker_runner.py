@@ -86,6 +86,10 @@ def main() -> int:
                    help="ONNX file within reranker model dir")
     p.add_argument("--retrieval-strategy", default=None,
                    help="adapter retrieval strategy: remember_rerank, full_rerank, remember_lexical, full, etc.")
+    p.add_argument("--entity-extractor", default=None,
+                   help="dsl.entity_extractor - tinybert_onnx, regex, or None")
+    p.add_argument("--entity-model-dir", default=None,
+                   help="dsl.entity_model_dir - local dir for ONNX entity extractor")
 
     # Adapter query strategy (how the adapter calls REMEMBER/RECALL)
     p.add_argument("--retrieval-depth", type=int, default=None,
@@ -99,7 +103,7 @@ def main() -> int:
 
     # GraphStore engine config (mirrors graphstore.json, overrides config chain)
     p.add_argument("--remember-weights", default=None,
-                   help="dsl.remember_weights - 5 comma-separated fusion weights")
+                   help="dsl.remember_weights - 3 or 4 comma-separated fusion weights (vec,bm25,recency[,graph])")
     p.add_argument("--search-oversample", type=int, default=None,
                    help="vector.search_oversample - usearch ANN oversample factor")
     p.add_argument("--recall-decay", type=float, default=None,
@@ -212,10 +216,20 @@ def main() -> int:
         ("fusion_method", "fusion_method"),
         ("rrf_k", "rrf_k"),
         ("retrieval_strategy", "retrieval_strategy"),
+        ("entity_extractor", "entity_extractor"),
+        ("entity_model_dir", "entity_model_dir"),
     ]:
         val = getattr(args, attr, None)
         if val is not None:
             adapter_config[key] = val
+
+    # Validate entity_model_dir if passed
+    if "entity_model_dir" in adapter_config and adapter_config["entity_model_dir"]:
+        ent_dir = Path(adapter_config["entity_model_dir"])
+        if not ent_dir.exists():
+            print(f"ERROR: entity_model_dir not found: {ent_dir}")
+            sys.exit(1)
+        print(f"✓ entity_model_dir: {ent_dir}")
     if args.remember_weights:
         adapter_config["remember_weights"] = [float(w) for w in args.remember_weights.split(",")]
     adapter = adapter_cls(config=adapter_config)

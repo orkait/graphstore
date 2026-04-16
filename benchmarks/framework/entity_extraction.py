@@ -58,6 +58,9 @@ class RegexEntityExtractor:
         self._limit = limit
         self._blocklist = blocklist
 
+    def extract_batch(self, texts: list[str]) -> list[list[str]]:
+        return [self.extract(t) for t in texts]
+
     def extract(self, text: str) -> list[str]:
         content = _strip_prefix(text)
         out: list[str] = []
@@ -131,14 +134,26 @@ class OnnxTokenClassificationEntityExtractor:
         self._blocklist = blocklist
 
         resolved_providers = _resolve_providers(providers)
+        sess_options = ort.SessionOptions()
         self._session = _create_inference_session(
             ort,
             str(onnx_path),
             {
                 "providers": resolved_providers,
-                "sess_options": ort.SessionOptions(),
+                "sess_options": sess_options,
             },
         )
+        active_providers = self._session.get_providers()
+        print(f"  [NER] Model loaded. Provider: {active_providers[0]}")
+        
+        # Check strict enforcement
+        if any(p in ("CUDAExecutionProvider", "TensorrtExecutionProvider") for p in resolved_providers):
+            if not any(p in ("CUDAExecutionProvider", "TensorrtExecutionProvider") for p in active_providers):
+                raise RuntimeError(
+                    f"NER GPU provider requested but unavailable. Active: {active_providers}. "
+                    "Check LD_LIBRARY_PATH and nvidia-* wheels."
+                )
+
         self._input_names = {i.name for i in self._session.get_inputs()}
         self._needs_token_type_ids = "token_type_ids" in self._input_names
 
@@ -206,24 +221,47 @@ class OnnxTokenClassificationEntityExtractor:
         flush()
         return _unique(out)
 
-    def extract(self, text: str) -> list[str]:
-        content = _strip_prefix(text)
-        enc = self._tokenizer.encode(content)
-        input_ids = np.array([enc.ids], dtype=np.int64)
-        attention_mask = np.array([enc.attention_mask], dtype=np.int64)
-        feed: dict[str, Any] = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
+    def extract_batch(self, texts: list[str]) -> list[list[str]]:
+        if not texts:
+            return []
+        
+        stripped_texts = [_strip_prefix(t) for t in texts]
+        encodings = [self._tokenizer.encode(t) for t in stripped_texts]
+        
+        # Simple padding for batch inference
+        max_len = max(len(e.ids) for e in encodings)
+        input_ids = []
+        attention_mask = []
+        token_type_ids = []
+        
+        for e in encodings:
+            pad_len = max_len - len(e.ids)
+            input_ids.append(e.ids + [0] * pad_len)
+            attention_mask.append(e.attention_mask + [0] * pad_len)
+            if self._needs_token_type_ids:
+                token_type_ids.append([0] * max_len)
+                
+        feed = {
+            "input_ids": np.array(input_ids, dtype=np.int64),
+            "attention_mask": np.array(attention_mask, dtype=np.int64),
         }
         if self._needs_token_type_ids:
-            feed["token_type_ids"] = np.zeros_like(input_ids)
+            feed["token_type_ids"] = np.array(token_type_ids, dtype=np.int64)
+            
+        all_logits = self._session.run(None, feed)[0]
+        
+        results = []
+        for i, logits in enumerate(all_logits):
+            probs = _softmax(logits[:len(encodings[i].ids)])
+            pred_ids = np.argmax(probs, axis=-1)
+            labels = [self._id2label[int(idx)] for idx in pred_ids]
+            scores = np.max(probs, axis=-1)
+            results.append(self._decode_entities(stripped_texts[i], list(encodings[i].offsets), labels, scores)[:6])
+            
+        return results
 
-        logits = self._session.run(None, feed)[0][0]
-        probs = _softmax(logits)
-        pred_ids = np.argmax(probs, axis=-1)
-        labels = [self._id2label[int(i)] for i in pred_ids]
-        scores = np.max(probs, axis=-1)
-        return self._decode_entities(content, list(enc.offsets), labels, scores)[:6]
+    def extract(self, text: str) -> list[str]:
+        return self.extract_batch([text])[0]
 
 
 def build_entity_extractor(config: dict[str, Any]):

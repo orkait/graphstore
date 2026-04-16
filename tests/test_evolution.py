@@ -517,9 +517,9 @@ def test_remember_weights_normalization():
     """Test 19: After SET remember_weights, values are auto-normalized to sum=1.0."""
     db = GraphStore(ceiling_mb=100, embedder=None)
 
-    # Set weights that don't sum to 1 (sum = 2.0)
+    # Set weights that don't sum to 1 (sum = 1.3)
     db.execute(
-        'SYS EVOLVE RULE "weights" WHEN memory_pct >= 0 THEN SET remember_weights = [0.6, 0.4, 0.3, 0.4, 0.3] COOLDOWN 10'
+        'SYS EVOLVE RULE "weights" WHEN memory_pct >= 0 THEN SET remember_weights = [0.6, 0.4, 0.3] COOLDOWN 10'
     )
 
     if not hasattr(db, "_evolution_engine"):
