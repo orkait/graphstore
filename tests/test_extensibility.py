@@ -79,7 +79,7 @@ class TestIngestorRegistry:
 
 class TestChunkerProtocol:
     def test_heading_chunker_implements_protocol(self):
-        from graphstore.voice.protocol import ChunkerProtocol
+        from graphstore.ingest.base import ChunkerProtocol
         from graphstore.ingest.chunker import HeadingChunker
         chunker = HeadingChunker()
         assert isinstance(chunker, ChunkerProtocol)
@@ -98,7 +98,7 @@ class TestChunkerProtocol:
         assert len(chunks) > 1  # kwargs were honored
 
     def test_custom_chunker_satisfies_protocol(self):
-        from graphstore.voice.protocol import ChunkerProtocol
+        from graphstore.ingest.base import ChunkerProtocol
         from graphstore.ingest.base import Chunk
 
         class SingleChunker:
@@ -108,72 +108,12 @@ class TestChunkerProtocol:
         assert isinstance(SingleChunker(), ChunkerProtocol)
 
     def test_object_without_chunk_method_fails_protocol(self):
-        from graphstore.voice.protocol import ChunkerProtocol
+        from graphstore.ingest.base import ChunkerProtocol
 
         class NotAChunker:
             pass
 
         assert not isinstance(NotAChunker(), ChunkerProtocol)
-
-
-class TestVoiceProtocols:
-    def test_moonshine_stt_satisfies_protocol_when_installed(self):
-        pytest.importorskip("moonshine_voice")
-        from graphstore.voice.protocol import STTProtocol
-        from graphstore.voice.stt import MoonshineSTT
-        stt = MoonshineSTT()
-        assert isinstance(stt, STTProtocol)
-
-    def test_piper_tts_satisfies_protocol_when_installed(self):
-        pytest.importorskip("piper")
-        from graphstore.voice.protocol import TTSProtocol
-        from graphstore.voice.tts import PiperTTS
-        tts = PiperTTS.__new__(PiperTTS)
-        assert isinstance(tts, TTSProtocol)
-
-    def test_custom_stt_satisfies_protocol(self):
-        from graphstore.voice.protocol import STTProtocol
-
-        class StubSTT:
-            def transcribe_file(self, audio_path: str) -> str:
-                return "hello"
-            def start_listening(self, on_text) -> None:
-                pass
-            def stop_listening(self) -> None:
-                pass
-            @property
-            def is_listening(self) -> bool:
-                return False
-
-        stt = StubSTT()
-        # runtime_checkable checks method names only (not signatures)
-        assert isinstance(stt, STTProtocol)
-        # Also verify callable contract
-        assert stt.transcribe_file("x") == "hello"
-        assert stt.is_listening is False
-
-    def test_custom_tts_satisfies_protocol(self):
-        from graphstore.voice.protocol import TTSProtocol
-
-        class StubTTS:
-            def speak(self, text: str) -> None:
-                pass
-            def synthesize(self, text: str) -> bytes:
-                return b""
-
-        tts = StubTTS()
-        assert isinstance(tts, TTSProtocol)
-        assert tts.synthesize("hi") == b""
-
-    def test_object_missing_methods_fails_stt_protocol(self):
-        from graphstore.voice.protocol import STTProtocol
-
-        class IncompleteSTT:
-            def transcribe_file(self, path: str) -> str:
-                return ""
-            # Missing start_listening, stop_listening, is_listening
-
-        assert not isinstance(IncompleteSTT(), STTProtocol)
 
 
 class TestGraphStoreInjection:
@@ -222,47 +162,6 @@ class TestGraphStoreInjection:
 
         assert len(chunk_calls) >= 1
 
-    def test_custom_tts_used_by_speak(self, tmp_path):
-        from graphstore import GraphStore
-
-        spoken = []
-
-        class StubTTS:
-            def speak(self, text: str) -> None:
-                spoken.append(text)
-            def synthesize(self, text: str) -> bytes:
-                return b""
-
-        g = GraphStore(path=str(tmp_path / "db"), embedder=None,
-                       tts=StubTTS(), voice=True)
-        g.speak("hello world")
-        g.close()
-
-        assert spoken == ["hello world"]
-
-    def test_custom_stt_used_by_listen(self, tmp_path):
-        from graphstore import GraphStore
-
-        class StubSTT:
-            def transcribe_file(self, path: str) -> str:
-                return "hello"
-            def start_listening(self, on_text) -> None:
-                on_text("hello from stub")  # synchronous stub
-            def stop_listening(self) -> None:
-                pass
-            @property
-            def is_listening(self) -> bool:
-                return False
-
-        received = []
-        g = GraphStore(path=str(tmp_path / "db"), embedder=None,
-                       stt=StubSTT(), voice=True)
-        g.listen(on_text=lambda t: received.append(t))
-        g.stop_listening()
-        g.close()
-
-        assert received == ["hello from stub"]
-
     def test_default_path_preserved_without_ingestors(self, tmp_path):
         """No ingestors= passed → existing router path still active (no regression)."""
         from graphstore import GraphStore
@@ -275,36 +174,3 @@ class TestGraphStoreInjection:
         # router.py fast-paths .txt/.md as "direct"
         assert result.data["parser"] in ("markitdown", "direct")
         g.close()
-
-    def test_custom_tts_wins_over_voice_true(self, tmp_path, monkeypatch):
-        """When tts= and voice=True are both given, custom tts wins and PiperTTS is never instantiated."""
-        from graphstore import GraphStore
-        from graphstore.voice import tts as tts_module
-
-        piper_init_called = []
-
-        class FakePiperTTS:
-            def __init__(self, *a, **kw):
-                piper_init_called.append(True)
-            def speak(self, text: str) -> None:
-                pass
-            def synthesize(self, text: str) -> bytes:
-                return b""
-
-        monkeypatch.setattr(tts_module, "PiperTTS", FakePiperTTS, raising=False)
-
-        spoken = []
-
-        class StubTTS:
-            def speak(self, text: str) -> None:
-                spoken.append(text)
-            def synthesize(self, text: str) -> bytes:
-                return b""
-
-        g = GraphStore(path=str(tmp_path / "db"), embedder=None,
-                       tts=StubTTS(), voice=True)
-        g.speak("priority test")
-        g.close()
-
-        assert spoken == ["priority test"]
-        assert piper_init_called == [], "PiperTTS should NOT be instantiated when tts= is provided"

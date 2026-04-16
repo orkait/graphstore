@@ -342,7 +342,7 @@ class IntelligenceHandlers:
 
         live_mask = self._compute_live_mask(n)
         now_ms = int(time.time() * 1000)
-        anchor_ms = getattr(q, 'at', None) or getattr(self, '_temporal_anchor_ms', None)
+        anchor_ms = getattr(q, 'at', None)
         at_range = getattr(q, 'at_range', None)
 
         # Sentence query expansion
@@ -417,7 +417,7 @@ class IntelligenceHandlers:
 
         if len(vec_slots_np) == 0 and len(bm25_slots_np) == 0:
             early_meta: dict = {}
-            anchor_ms_e = getattr(q, 'at', None) or getattr(self, '_temporal_anchor_ms', None)
+            anchor_ms_e = getattr(q, 'at', None)
             at_range_e = getattr(q, 'at_range', None)
             warnings: list[str] = []
             if at_range_e is not None or anchor_ms_e is not None:

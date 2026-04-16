@@ -59,7 +59,6 @@ _EXTRA_TO_DEP: dict[str, tuple[str, ...]] = {
     "needs_scheduler": ("croniter",),
     "needs_playground": ("fastapi", "pydantic"),
     "needs_gpu": ("onnxruntime",),
-    "needs_voice": ("sounddevice",),
 }
 
 _FILES_REQUIRING: dict[str, str] = {
@@ -67,7 +66,6 @@ _FILES_REQUIRING: dict[str, str] = {
     "test_server.py": "needs_playground",
     "test_server_endpoints.py": "needs_playground",
     "test_server_security.py": "needs_playground",
-    "test_voice.py": "needs_voice",
     "test_ingest.py": "needs_ingest",
 }
 

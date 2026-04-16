@@ -42,25 +42,6 @@ def _make_builtin_ingestor(name: str) -> Ingestor:
     if name == "docling":
         from graphstore.ingest.docling_ingestor import DoclingIngestor
         return DoclingIngestor()
-    if name == "audio":
-        from graphstore.voice.stt import MoonshineSTT
-
-        class _AudioIngestor(Ingestor):
-            name = "audio"
-            supported_extensions = ["wav", "mp3", "ogg", "flac"]
-
-            def __init__(self):
-                self._stt = MoonshineSTT()
-
-            def convert(self, file_path: str, **kwargs) -> IngestResult:
-                text = self._stt.transcribe_file(file_path)
-                return IngestResult(
-                    markdown=text,
-                    metadata={"source": file_path},
-                    parser_used="moonshine",
-                )
-
-        return _AudioIngestor()
     raise ValueError(f"Unknown built-in ingestor: {name!r}")
 
 
