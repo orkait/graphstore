@@ -46,3 +46,8 @@ gemini
 test.usearch
 data/
 .autoresearch/
+
+# Binary fixtures (downloaded via scripts)
+tests/fixtures/pdf/*.pdf
+tests/fixtures/voice/*.wav
+tests/fixtures/voice/*.mp3
