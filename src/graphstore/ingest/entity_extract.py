@@ -212,7 +212,8 @@ def extract_batch(texts: list[str], model_dir: str | Path | None = None,
     for i, logits in enumerate(all_logits):
         # Softmax
         x = logits[:len(encodings[i].ids)] - np.max(logits[:len(encodings[i].ids)], axis=-1, keepdims=True)
-        probs = np.exp(x) / np.sum(x, axis=-1, keepdims=True)
+        exp_x = np.exp(x)
+        probs = exp_x / np.sum(exp_x, axis=-1, keepdims=True)
         pred_ids = np.argmax(probs, axis=-1)
         id2label = extractor["id2label"]
         labels = [id2label.get(str(int(idx)), "O") for idx in pred_ids]
