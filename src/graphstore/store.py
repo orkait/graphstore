@@ -127,7 +127,17 @@ class GraphStore:
         # Layer 3: env var overrides (GRAPHSTORE_SECTION_FIELD)
         self._config = apply_env_overrides(self._config)
 
-        from graphstore.core.compute_profile import describe_profile
+        from graphstore.core.compute_profile import configure as _configure_profile, describe_profile
+        cc = self._config.compute
+        _configure_profile(
+            profile=cc.profile,
+            ner_threads=cc.ner_threads,
+            embed_threads=cc.embed_threads,
+            rerank_threads=cc.rerank_threads,
+            embed_batch_size=cc.embed_batch_size,
+            disable_load_scaling=cc.disable_load_scaling,
+            disable_battery_scaling=cc.disable_battery_scaling,
+        )
         logger.info("graphstore compute: %s", describe_profile())
 
         # Layer 4: constructor kwargs (highest priority)
@@ -645,11 +655,25 @@ class GraphStore:
         executor._embed_batch_size = batch_size
         try:
             yield
+        except BaseException:
+            try:
+                executor.flush_pending_embeddings()
+            except Exception as flush_err:
+                pending = list(getattr(executor, "_pending_embeddings", []))
+                slots = [s for s, _ in pending]
+                import logging as _logging
+                _logging.getLogger(__name__).error(
+                    "deferred_embeddings: flush failed during exception unwind; "
+                    "%d slot(s) have no vector: %s (flush error: %s)",
+                    len(slots), slots[:20], flush_err,
+                )
+                executor._pending_embeddings.clear()
+            raise
+        else:
             executor.flush_pending_embeddings()
         finally:
             executor._defer_embeddings = prev_defer
             executor._embed_batch_size = prev_batch_size
-            executor._pending_embeddings.clear()
 
     def submit_background(self, query: str) -> "Future":
         """Submit a background query (low priority). Only available in queued mode.
@@ -968,9 +992,10 @@ class GraphStore:
             )
         return vs
 
-    @staticmethod
-    def _check_embedder_identity(conn, embedder):
-        """On open, verify current embedder matches what the database was built with."""
+    def _check_embedder_identity(self, conn, embedder):
+        """On open, verify current embedder matches what the database was built
+        with. Sets self._embedder_dirty on mismatch; SIMILAR/REMEMBER will refuse
+        until SYS REEMBED is run."""
         if conn is None or embedder is None:
             return
         from graphstore.persistence.database import get_metadata
@@ -983,9 +1008,11 @@ class GraphStore:
             import logging
             logging.getLogger(__name__).warning(
                 "embedder mismatch: database was built with '%s' (%s dims), "
-                "current embedder is '%s'. Run SYS REEMBED to re-encode.",
+                "current embedder is '%s'. Run SYS REEMBED to re-encode; "
+                "until then SIMILAR and REMEMBER will raise.",
                 stored, stored_dims, current,
             )
+            self._embedder_dirty = True
 
     def _record_embedder_identity(self, dims: int):
         """Store embedder name + dims in database metadata on first vector write."""

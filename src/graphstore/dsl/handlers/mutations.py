@@ -35,7 +35,7 @@ class MutationHandlers:
         for k in sorted(data.keys()):
             parts.append(f"{k}={data[k]}")
         content = "|".join(parts)
-        return hashlib.sha256(content.encode()).hexdigest()[:12]
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
 
     def _handle_vector(self, slot: int, kind: str, data: dict, explicit_vector: list[float] | None) -> bool:
         """Handle explicit VECTOR clause or auto-embed from schema EMBED field.
@@ -45,12 +45,16 @@ class MutationHandlers:
         if explicit_vector is not None and self._vector_store is not None:
             vec = np.array(explicit_vector, dtype=np.float32)
             self._vector_store.add(slot, vec)
+            if self._batch_vector_record is not None:
+                self._batch_vector_record.append(slot)
             return True
         if explicit_vector is not None and self._vector_store is None:
             if hasattr(self, '_ensure_vector_store_cb') and self._ensure_vector_store_cb:
                 vec = np.array(explicit_vector, dtype=np.float32)
                 self._ensure_vector_store_cb(len(vec))
                 self._vector_store.add(slot, vec)
+                if self._batch_vector_record is not None:
+                    self._batch_vector_record.append(slot)
                 return True
             return False
         if self._embedder:
@@ -95,6 +99,8 @@ class MutationHandlers:
             return True
         vec = self._embedder.encode_documents([text])[0]
         self._vector_store.add(slot, vec)
+        if self._batch_vector_record is not None:
+            self._batch_vector_record.append(slot)
         return True
 
     def _batch_embed_and_store(self, items: list[tuple[int, str]]) -> None:
@@ -110,6 +116,8 @@ class MutationHandlers:
         vecs = self._embedder.encode_documents(list(texts))
         for slot, vec in zip(slots, vecs):
             self._vector_store.add(slot, vec)
+            if self._batch_vector_record is not None:
+                self._batch_vector_record.append(slot)
 
     def flush_pending_embeddings(self) -> None:
         """Flush any pending embeddings queued in deferred mode."""
@@ -517,6 +525,12 @@ class MutationHandlers:
         if tgt_slot is None or tgt_slot in self.store.node_tombstones:
             raise NodeNotFound(q.target_id)
 
+        if src_slot == tgt_slot:
+            raise GraphStoreError(
+                f"MERGE source and target resolve to the same slot: "
+                f"{q.source_id!r} == {q.target_id!r}"
+            )
+
         saved_edges = {k: list(v) for k, v in self.store._edges_by_type.items()}
         saved_edge_keys = set(self.store._edge_keys)
         saved_columns = self.store.columns.snapshot_arrays()
@@ -621,7 +635,10 @@ class MutationHandlers:
     def _batch(self, q: Batch) -> Result:
         """Execute batch with rollback on failure."""
         enable_rollback = getattr(self, '_enable_rollback', True)
-        
+
+        prev_record = self._batch_vector_record
+        self._batch_vector_record = [] if enable_rollback else None
+
         saved_edges = None
         saved_edge_keys = None
         saved_columns = None
@@ -669,6 +686,14 @@ class MutationHandlers:
             self.store._ensure_edges_built()
             return Result(kind="ok", data=None, count=0)
         except Exception as e:
+            if enable_rollback and self._batch_vector_record:
+                vs = self._vector_store
+                if vs is not None:
+                    for slot in self._batch_vector_record:
+                        try:
+                            vs.remove(slot)
+                        except Exception:
+                            pass
             if enable_rollback:
                 self.store._edges_by_type = saved_edges
                 self.store._edge_keys = saved_edge_keys
@@ -683,3 +708,5 @@ class MutationHandlers:
             raise BatchRollback(
                 failed_statement=str(type(e).__name__), error=str(e)
             )
+        finally:
+            self._batch_vector_record = prev_record

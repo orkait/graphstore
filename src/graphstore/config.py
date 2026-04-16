@@ -153,6 +153,16 @@ class EvolutionConfig(msgspec.Struct, frozen=True):
     history_retention: int = 1000
 
 
+class ComputeConfig(msgspec.Struct, frozen=True):
+    profile: str | None = None
+    ner_threads: int | None = None
+    embed_threads: int | None = None
+    rerank_threads: int | None = None
+    embed_batch_size: int | None = None
+    disable_load_scaling: bool = False
+    disable_battery_scaling: bool = False
+
+
 class GraphStoreConfig(msgspec.Struct, frozen=True):
     core: CoreConfig = msgspec.field(default_factory=CoreConfig)
     vector: VectorConfig = msgspec.field(default_factory=VectorConfig)
@@ -163,6 +173,7 @@ class GraphStoreConfig(msgspec.Struct, frozen=True):
     retention: RetentionConfig = msgspec.field(default_factory=RetentionConfig)
     server: ServerConfig = msgspec.field(default_factory=ServerConfig)
     evolution: EvolutionConfig = msgspec.field(default_factory=EvolutionConfig)
+    compute: ComputeConfig = msgspec.field(default_factory=ComputeConfig)
 
 
 _decoder = msgspec.json.Decoder(GraphStoreConfig)
@@ -179,6 +190,7 @@ _SECTION_MAP: dict[str, tuple[type, dict[str, type]]] = {
     "retention": (RetentionConfig, {f: type(getattr(RetentionConfig(), f)) for f in RetentionConfig.__struct_fields__}),
     "server": (ServerConfig, {f: type(getattr(ServerConfig(), f)) for f in ServerConfig.__struct_fields__}),
     "evolution": (EvolutionConfig, {f: type(getattr(EvolutionConfig(), f)) for f in EvolutionConfig.__struct_fields__}),
+    "compute": (ComputeConfig, {f: type(getattr(ComputeConfig(), f)) for f in ComputeConfig.__struct_fields__}),
 }
 
 # Flat kwarg name -> (section, field) for constructor shortcuts

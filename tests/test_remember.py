@@ -71,3 +71,80 @@ def test_remember_limit():
     result = gs.execute('REMEMBER "test" LIMIT 3')
     assert len(result.data) <= 3
     gs.close()
+
+
+def test_remember_at_without_event_column_warns():
+    gs = GraphStore()
+    try:
+        gs.execute('CREATE NODE "a" kind = "doc" text = "hello world"')
+        r = gs.execute('REMEMBER "hello" AT "2024-01-01" LIMIT 5')
+        warnings = r.meta.get("warnings", []) if r.meta else []
+        assert any("__event_at__" in w for w in warnings), (
+            f"Expected warning about missing __event_at__; got {warnings!r}"
+        )
+    finally:
+        gs.close()
+
+
+def test_remember_recall_count_persists_across_checkpoint(tmp_path):
+    path = tmp_path / "gs"
+    gs = GraphStore(path=str(path))
+    try:
+        gs.execute('CREATE NODE "doc1" kind = "doc" text = "the quick brown fox" DOCUMENT "the quick brown fox"')
+        r = gs.execute('REMEMBER "quick" LIMIT 5')
+        assert r.count >= 1
+        gs.checkpoint()
+    finally:
+        gs.close()
+
+    gs2 = GraphStore(path=str(path))
+    try:
+        cs = gs2._store
+        n = cs._next_slot
+        col = cs.columns.get_column("__recall_count__", n)
+        assert col is not None, "__recall_count__ column lost across checkpoint"
+        col_data, col_pres, _ = col
+        assert int(col_data[col_pres].sum()) >= 1, "recall count value did not persist"
+    finally:
+        gs2.close()
+
+
+def test_remember_reranker_error_surfaces_in_meta(tmp_path):
+    class BrokenReranker:
+        def score(self, q, docs):
+            raise RuntimeError("rerank boom")
+
+    gs = GraphStore(path=str(tmp_path / "gs"))
+    gs._executor._reranker = BrokenReranker()
+    try:
+        for i in range(20):
+            gs.execute(
+                f'CREATE NODE "d{i}" kind = "doc" text = "alpha beta {i}" '
+                f'DOCUMENT "alpha beta {i}"'
+            )
+        r = gs.execute('REMEMBER "alpha" LIMIT 3')
+        assert r.count == 3
+        assert "reranker_error" in (r.meta or {}), (
+            f"expected reranker_error in meta; got {r.meta!r}"
+        )
+    finally:
+        gs.close()
+
+
+def test_remember_nucleus_respects_visit_budget():
+    gs = GraphStore(nucleus_expansion=True, nucleus_hops=3,
+                    nucleus_neighbors_per_hop=50,
+                    nucleus_allowed_kinds=["chunk"])
+    try:
+        gs.execute('CREATE NODE "root" kind = "chunk" text = "seed chunk content"')
+        for i in range(300):
+            gs.execute(
+                f'CREATE NODE "c{i}" kind = "chunk" '
+                f'text = "chunk {i} body content must be long enough"'
+            )
+            src = "root" if i == 0 else f"c{i-1}"
+            gs.execute(f'CREATE EDGE "{src}" -> "c{i}" kind = "next"')
+        r = gs.execute('REMEMBER "seed" LIMIT 1')
+        assert r.meta.get("nucleus_visits", 0) <= 150
+    finally:
+        gs.close()

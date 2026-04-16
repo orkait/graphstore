@@ -33,6 +33,7 @@ class ColumnStore:
         self._dtypes: dict[str, str] = {}
         self._string_table = string_table
         self._capacity = capacity
+        self.dirty: bool = False
 
     def set(self, slot: int, data: dict) -> None:
         """Write field values to columns. Auto-infers types for new fields."""
@@ -65,6 +66,7 @@ class ColumnStore:
                 else:
                     self._columns[field][slot] = self.STR_SENTINEL
                     self._presence[field][slot] = False
+        self.dirty = True
 
     def clear(self, slot: int) -> None:
         """Clear all column values at slot (node deletion)."""
@@ -77,6 +79,7 @@ class ColumnStore:
             elif dtype_str == "int32_interned":
                 self._columns[field][slot] = self.STR_SENTINEL
             self._presence[field][slot] = False
+        self.dirty = True
 
     def grow(self, new_capacity: int) -> None:
         """Extend all arrays to new_capacity."""
@@ -91,6 +94,7 @@ class ColumnStore:
             new_pres[: len(old_pres)] = old_pres
             self._presence[field] = new_pres
         self._capacity = new_capacity
+        self.dirty = True
 
     def get_mask(self, field: str, op: str, value: Any, n: int) -> np.ndarray | None:
         """Return boolean mask for a comparison, or None if field not columnarized."""
@@ -141,6 +145,7 @@ class ColumnStore:
         """Pre-create a typed column. No-op if column already exists."""
         if field not in self._dtypes:
             self._create_column(field, dtype_str)
+            self.dirty = True
 
     def _ensure_column(self, field: str, dtype_str: str) -> None:
         """Create column if it doesn't exist. No-op if it already exists."""
@@ -158,6 +163,7 @@ class ColumnStore:
             self._ensure_column(field, "int64")
             self._columns[field][slot] = int(value)
         self._presence[field][slot] = True
+        self.dirty = True
 
     def set_field(self, slot: int, field: str, value) -> None:
         """Set a single field value at a slot. Auto-infers type like set()."""
@@ -186,6 +192,7 @@ class ColumnStore:
             self._columns[field] = col
             self._presence[field] = pres
             self._dtypes[field] = dtype_str
+        self.dirty = True
 
     @property
     def memory_bytes(self) -> int:
@@ -213,6 +220,7 @@ class ColumnStore:
         self._columns[field] = self._make_sentinel_array(dtype_str, self._capacity)
         self._presence[field] = np.zeros(self._capacity, dtype=bool)
         self._dtypes[field] = dtype_str
+        self.dirty = True
 
     def _make_sentinel_array(self, dtype_str: str, size: int) -> np.ndarray:
         if dtype_str == "int64":
