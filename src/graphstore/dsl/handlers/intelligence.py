@@ -532,17 +532,24 @@ class IntelligenceHandlers:
             if max_gs > 0:
                 graph_signal /= max_gs
 
-        # Fusion
+        # Fusion. Graph-signal semantics, parity across fusion methods:
+        #   - 4 weights: graph is additive 4th channel       (w3 * graph)
+        #   - 3 weights: graph replaces recency channel      (w2 * graph)  per spec
+        #   - graph_enabled=False: recency stays, no graph
         fusion_method = getattr(self, '_fusion_method', 'weighted')
         if fusion_method == 'weighted':
             w = weights if len(weights) >= 3 else [0.55, 0.25, 0.20]
-            base_final = w[0] * vec_signal + w[1] * bm25_signal + w[2] * recency_signal
-            if graph_enabled and len(weights) >= 4:
-                base_final += weights[3] * graph_signal
+            if graph_enabled and len(w) >= 4:
+                base_final = w[0] * vec_signal + w[1] * bm25_signal + w[2] * recency_signal + w[3] * graph_signal
+            elif graph_enabled:
+                base_final = w[0] * vec_signal + w[1] * bm25_signal + w[2] * graph_signal
+            else:
+                base_final = w[0] * vec_signal + w[1] * bm25_signal + w[2] * recency_signal
         else:
-            signals = [vec_signal, bm25_signal, recency_signal]
-            if graph_enabled:
-                signals.append(graph_signal)
+            signals = [vec_signal, bm25_signal]
+            signals.append(graph_signal if graph_enabled else recency_signal)
+            if graph_enabled and len(weights) >= 4:
+                signals.append(recency_signal)
             base_final = _algo_rrf_fusion(*signals, candidate_slots=slot_arr,
                                            k_rrf=max(getattr(self, '_rrf_k', 60.0), 1.0))
 
