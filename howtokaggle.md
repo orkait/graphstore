@@ -4,6 +4,22 @@ Everything you need to push, run, monitor, and debug GraphStore benchmarks on Ka
 
 ---
 
+## ⚠️ Free Tier Limits & Push Protocol
+
+**CRITICAL:** Free tier allows **max 2 concurrent kernel runs** at any time.
+
+**ALWAYS ASK FOR PERMISSION BEFORE PUSHING TO KAGGLE.**
+
+Before pushing:
+1. **Ask user for permission** - Never push without explicit approval
+2. Check current run status: `python3 benchmarks/kaggle/kernel_ctl.py status`
+3. Wait for previous run to complete (COMPLETE or ERROR status)
+4. Do NOT push new versions while one is running
+5. Validate locally first: `python3 benchmarks/kaggle/validate_before_push.py`
+6. Each push increments kernel version; wasted pushes = wasted runs on free tier
+
+---
+
 ## 🔑 Authentication
 
 Two auth methods. **KGAT is preferred** (new bearer token format).
@@ -27,18 +43,19 @@ Used by `kaggle` CLI (`kaggle kernels push`, `kaggle kernels status`).
 
 ---
 
-## ✅ Before Every Push - Validate Locally
+## ✅ Validate Before Every Push
 
-Catches import errors, circular imports, missing models, and broken config before wasting Kaggle GPU time.
+**REQUIRED:** Run validation locally before pushing to Kaggle. Catches errors before wasting GPU time and limited free-tier runs.
 
+### Quick Validation (imports + structure only):
 ```bash
-.venv/bin/python3 benchmarks/kaggle/validate_before_push.py
+python3 benchmarks/kaggle/validate_before_push.py --skip-run
 ```
 
-With mini 1-record benchmark run (slower, catches runtime errors too):
+### Full Validation (includes 1-record benchmark):
 ```bash
-.venv/bin/python3 benchmarks/kaggle/validate_before_push.py
-# (mini run is on by default, skip with --skip-run)
+python3 benchmarks/kaggle/validate_before_push.py
+# (mini run is ON by default, takes ~2-3min)
 ```
 
 **What it checks:**
@@ -49,6 +66,44 @@ With mini 1-record benchmark run (slower, catches runtime errors too):
 | models | jina-small + tinybert-ner structure valid |
 | argv | all required flags present in sys.argv config |
 | mini-run | 1 record through full pipeline (CPU, local models) |
+
+**Exit codes:**
+- `0` = All checks pass, safe to push
+- `1` = Failure detected, fix issues before pushing
+
+---
+
+## 💾 Model Caching (skip downloads)
+
+Models are uploaded as Kaggle datasets once and reused across runs. Saves ~5 min per run.
+
+**Cached datasets:**
+| Kaggle Dataset | Model | Size |
+|---|---|---|
+| `superkaiii/tinybert-ner-onnx` | TinyBERT NER (entity extractor) | 15MB |
+| `superkaiii/jina-v5-small-onnx` | Jina v5 Small ONNX (embedder) | ~260MB |
+
+**How it works:**
+- Datasets attached in `kernel-metadata.json` under `dataset_sources`
+- Script checks `/kaggle/input/<slug>/` first - if found, symlinks it (no download)
+- Falls back to HF download if not attached
+
+**To add/update a cached model:**
+```bash
+# 1. Download model locally
+.venv/bin/python3 -c "
+from huggingface_hub import snapshot_download
+snapshot_download('owner/model-repo', local_dir='/tmp/my-model')
+"
+
+# 2. Init + upload as Kaggle dataset
+kaggle datasets init -p /tmp/my-model
+# edit /tmp/my-model/dataset-metadata.json (set id + title)
+kaggle datasets create -p /tmp/my-model --dir-mode zip
+
+# 3. Add slug to kernel-metadata.json dataset_sources
+# 4. Add slug to EMBEDDER_KAGGLE_SLUG or NER_KAGGLE_SLUG in kaggle_benchmark.py CONFIG
+```
 
 ---
 
@@ -65,12 +120,7 @@ kaggle kernels push -p benchmarks/kaggle/
 Kernel metadata files in `benchmarks/kaggle/`:
 | File | Kernel |
 |---|---|
-| `kernel-metadata.json` | `graphstore-jina-v5-small` (default) |
-| `pipeline-kernel-metadata.json` | `graphstore-pipeline-refactored` |
-| `rrf-kernel-metadata.json` | `graphstore-jina-500-rrf` |
-| `q4-kernel-metadata.json` | `graphstore-jina-500-rerank-q4` |
-| `q8-kernel-metadata.json` | `graphstore-jina-500-rerank-q8` |
-| `gs-kernel-metadata.json` | `graphstore-jina-500` |
+| `kernel-metadata.json` | `graphstore-jina-v5-small` (default, active) |
 
 ---
 
@@ -231,8 +281,7 @@ python3 benchmarks/kaggle/kernel_ctl.py logs 2>&1 | grep "\[ERR\]"
 
 | File | Purpose |
 |---|---|
-| `benchmarks/kaggle/graphstore_jina_500.py` | Main benchmark script (jina-small, 500 records) |
-| `benchmarks/kaggle/graphstore_pipeline_refactored.py` | Pipeline refactor benchmark |
+| `benchmarks/kaggle/kaggle_benchmark.py` | Main benchmark runner (configurable - edit CONFIG block at top) |
 | `benchmarks/kaggle/kernel_ctl.py` | kagglesdk kernel control |
 | `benchmarks/kaggle/validate_before_push.py` | Pre-push local validator |
 | `benchmarks/kaggle/kernel-metadata.json` | Kaggle kernel config (maps script to kernel) |

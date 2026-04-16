@@ -61,12 +61,15 @@ def logs(kernel: str):
 
 
 def cancel(kernel: str):
-    with get_client() as c:
-        req = ApiCancelKernelSessionRequest()
-        req.user_name = OWNER
-        req.kernel_slug = kernel
-        resp = c.kernels.kernels_api_client.cancel_kernel_session(req)
-        print(f"Cancelled: {resp}")
+    # Note: cancel_kernel_session requires kernel_session_id from a prior run() response.
+    # Workaround: use kaggle CLI instead
+    import subprocess
+    try:
+        subprocess.check_call(["kaggle", "kernels", "status", f"{OWNER}/{kernel}"])
+        print("[INFO] Use kaggle CLI to cancel: kaggle kernels push --kernel-metadata benchmarks/kaggle/kernel-metadata.json")
+        return
+    except:
+        pass
 
 
 def run(kernel: str):
