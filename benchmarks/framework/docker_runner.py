@@ -222,6 +222,14 @@ def main() -> int:
         val = getattr(args, attr, None)
         if val is not None:
             adapter_config[key] = val
+
+    # Validate entity_model_dir if passed
+    if "entity_model_dir" in adapter_config and adapter_config["entity_model_dir"]:
+        ent_dir = Path(adapter_config["entity_model_dir"])
+        if not ent_dir.exists():
+            print(f"ERROR: entity_model_dir not found: {ent_dir}")
+            sys.exit(1)
+        print(f"✓ entity_model_dir: {ent_dir}")
     if args.remember_weights:
         adapter_config["remember_weights"] = [float(w) for w in args.remember_weights.split(",")]
     adapter = adapter_cls(config=adapter_config)
