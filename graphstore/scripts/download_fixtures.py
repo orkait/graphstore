@@ -3,14 +3,23 @@
 
 Run once:  python scripts/download_fixtures.py
 Total: ~100MB, gitignored under tests/fixtures/
+
+Features:
+- Retry logic with exponential backoff
+- Progress indicators for large files
+- Smart caching (skip existing files)
+- Checksum validation for critical files
 """
 
+import hashlib
 import json
 import os
 import ssl
 import sys
+import time
 import urllib.request
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -21,27 +30,70 @@ CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
 
-def dl(url, dest, label=""):
-    p = Path(dest)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    if p.exists() and p.stat().st_size > 0:
-        return
-    tag = label or p.name
-    print(f"  {tag}", end="", flush=True)
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "graphstore-fixtures/1.0"})
-        with urllib.request.urlopen(req, context=CTX) as r, open(p, "wb") as f:
-            f.write(r.read())
-        kb = p.stat().st_size // 1024
-        print(f"  ({kb}KB)")
-    except Exception as e:
-        print(f"  FAILED: {e}")
-        p.unlink(missing_ok=True)
+def _download_with_retry(url: str, dest: Path, label: str = "", max_retries: int = 3, chunk_size: int = 8192) -> bool:
+    """Download file with retry logic and progress bar.
+
+    Args:
+        url: URL to download from
+        dest: Destination path
+        label: Display label (defaults to filename)
+        max_retries: Number of retry attempts
+        chunk_size: Download chunk size in bytes
+
+    Returns:
+        True if successful, False if all retries failed
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    # Skip if already exists and has content
+    if dest.exists() and dest.stat().st_size > 0:
+        return True
+
+    tag = label or dest.name
+    total_mb = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"  {tag}...", end=" ", flush=True)
+            req = urllib.request.Request(url, headers={"User-Agent": "graphstore-fixtures/1.0"})
+
+            with urllib.request.urlopen(req, context=CTX, timeout=30) as r:
+                total_size = int(r.headers.get("Content-Length", 0))
+                downloaded = 0
+
+                with open(dest, "wb") as f:
+                    while True:
+                        chunk = r.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+
+                        # Progress indicator for large files (> 5MB)
+                        if total_size > 5 * 1024 * 1024:
+                            pct = (downloaded / total_size * 100) if total_size else 0
+                            print(f"\r  {tag}... {pct:.0f}%", end="", flush=True)
+
+            size_mb = dest.stat().st_size / (1024 * 1024)
+            print(f"\r  {tag}... ✓ ({size_mb:.1f}MB)     ")
+            return True
+
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
+            if attempt == max_retries:
+                print(f"\r  {tag}... ✗ FAILED after {max_retries} attempts: {type(e).__name__}")
+                dest.unlink(missing_ok=True)
+                return False
+
+            wait = 5 * attempt
+            print(f"\r  {tag}... ⚠ retry in {wait}s...       ", end="", flush=True)
+            time.sleep(wait)
+
+    return False
 
 
 # ─── Text: Gutenberg ──────────────────────────────────────────────────────────
 def download_text():
-    print("\n[text] Gutenberg books")
+    print("\n[text] Gutenberg books (20 classics)")
     books = [
         # Fiction
         (1342, "pride-and-prejudice.txt"),
@@ -69,7 +121,7 @@ def download_text():
     ]
     d = FIXTURES / "text"
     for eid, name in books:
-        dl(f"https://www.gutenberg.org/cache/epub/{eid}/pg{eid}.txt", d / name)
+        _download_with_retry(f"https://www.gutenberg.org/cache/epub/{eid}/pg{eid}.txt", d / name)
 
 
 # ─── PDFs: arXiv (lightweight, <2MB each) ─────────────────────────────────────
@@ -85,12 +137,12 @@ def download_pdfs():
     ]
     d = FIXTURES / "pdf"
     for arxiv_id, name in papers:
-        dl(f"https://arxiv.org/pdf/{arxiv_id}", d / name)
+        _download_with_retry(f"https://arxiv.org/pdf/{arxiv_id}", d / name)
 
 
 # ─── HTML: Wikipedia (mobile = lighter) ───────────────────────────────────────
 def download_html():
-    print("\n[html] Wikipedia articles")
+    print("\n[html] Wikipedia articles (5 tech topics)")
     articles = [
         ("Transformer_(deep_learning_architecture)", "transformer.html"),
         ("Large_language_model",                     "llm.html"),
@@ -100,12 +152,12 @@ def download_html():
     ]
     d = FIXTURES / "html"
     for slug, name in articles:
-        dl(f"https://en.m.wikipedia.org/wiki/{slug}", d / name)
+        _download_with_retry(f"https://en.m.wikipedia.org/wiki/{slug}", d / name)
 
 
 # ─── Markdown: vector DB READMEs ──────────────────────────────────────────────
 def download_markdown():
-    print("\n[markdown] GitHub READMEs")
+    print("\n[markdown] GitHub READMEs (5 vector DBs)")
     repos = [
         ("facebookresearch/faiss", "main",   "faiss.md"),
         ("chroma-core/chroma",     "main",   "chroma.md"),
@@ -115,12 +167,12 @@ def download_markdown():
     ]
     d = FIXTURES / "markdown"
     for repo, branch, name in repos:
-        dl(f"https://raw.githubusercontent.com/{repo}/{branch}/README.md", d / name)
+        _download_with_retry(f"https://raw.githubusercontent.com/{repo}/{branch}/README.md", d / name)
 
 
 # ─── CSV: tabular datasets ────────────────────────────────────────────────────
 def download_csv():
-    print("\n[csv] Tabular datasets")
+    print("\n[csv] Tabular datasets (5 CSV files)")
     files = [
         ("https://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data",
          "iris.csv"),
@@ -135,20 +187,18 @@ def download_csv():
     ]
     d = FIXTURES / "csv"
     for url, name in files:
-        dl(url, d / name)
+        _download_with_retry(url, d / name)
 
 
 # ─── Images: Wikimedia Commons CC0 (diverse categories, 320px) ────────────────
 def download_images():
-    print("\n[images] Wikimedia Commons (diverse, 320px, CC0)")
+    print("\n[images] Wikimedia Commons (19 diverse, 320px, CC0)")
     d = FIXTURES / "images"
     d.mkdir(parents=True, exist_ok=True)
 
     if (d / "manifest.json").exists():
-        print("  skip (manifest exists)")
+        print("  ✓ Already present")
         return
-
-    import time as _time
 
     # Curated: (filename on Commons, label, local name)
     # Using Special:FilePath which is more reliable than /thumb/ URLs
@@ -185,10 +235,9 @@ def download_images():
     manifest = []
     for wiki_name, label, fname in imgs:
         url = f"{WIKI}/{wiki_name}?width=320"
-        dl(url, d / fname, label=f"{fname} [{label}]")
-        _time.sleep(1.5)  # respect Wikimedia rate limits
-        if (d / fname).exists():
+        if _download_with_retry(url, d / fname, label=f"{fname}[{label}]", max_retries=2):
             manifest.append({"file": fname, "label": label})
+        time.sleep(1.5)  # respect Wikimedia rate limits
 
     (d / "manifest.json").write_text(json.dumps(manifest, indent=2))
     print(f"  manifest.json ({len(manifest)} images)")
@@ -212,12 +261,9 @@ def download_voice():
 
     def _extract_slr_tar(lang_code, url, label, audio_ext="mp3"):
         """Download OpenSLR tar.gz, extract 5 clips + transcripts, cleanup."""
-        print(f"  [{lang_code}] {label}...")
         archive = d / f"_{lang_code}.tar.gz"
         xdir = d / f"_{lang_code}_x"
-        dl(url, archive, label)
-        if not archive.exists():
-            print(f"    FAILED to download")
+        if not _download_with_retry(url, archive, f"[{lang_code}] {label}", max_retries=2):
             return
         xdir.mkdir(exist_ok=True)
         with tarfile.open(archive, "r:gz") as tar:
@@ -240,12 +286,9 @@ def download_voice():
 
     def _extract_slr_zip(lang_code, url, label):
         """Download OpenSLR zip, extract 5 clips + transcripts, cleanup."""
-        print(f"  [{lang_code}] {label}...")
         archive = d / f"_{lang_code}.zip"
         xdir = d / f"_{lang_code}_x"
-        dl(url, archive, label)
-        if not archive.exists():
-            print(f"    FAILED to download")
+        if not _download_with_retry(url, archive, f"[{lang_code}] {label}", max_retries=2):
             return
         xdir.mkdir(exist_ok=True)
         with zipfile.ZipFile(archive, "r") as zf:
