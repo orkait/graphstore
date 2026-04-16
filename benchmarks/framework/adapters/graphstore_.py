@@ -212,7 +212,7 @@ class GraphStoreAdapter:
                      "fusion_method", "rrf_k", "type_weights",
                      "nucleus_expansion", "nucleus_hops",
                      "nucleus_max_neighbors", "recency_mode",
-                     "sentence_query_expansion"):
+                     "sentence_query_expansion", "entity_extractor", "entity_model_dir"):
             val = self.config.get(key, _BENCHMARK_DEFAULTS.get(key))
             if val is not None:
                 gs_kwargs[key] = val
