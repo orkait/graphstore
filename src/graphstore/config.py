@@ -255,7 +255,7 @@ def load_config(path: str | Path | None = None) -> GraphStoreConfig:
 
     If a base tuned config exists alongside the path, it is loaded first and
     the main config overrides it. For example, if path is benchmarks/graphstore.json,
-    autoresearch/tuned_config.48.json is loaded first (if it exists).
+    tools/autoresearch/tuned_config.48.json is loaded first (if it exists).
     """
     if path is None:
         return GraphStoreConfig()
@@ -263,7 +263,7 @@ def load_config(path: str | Path | None = None) -> GraphStoreConfig:
 
     # Try to load tuned base config if it exists
     base_config = GraphStoreConfig()
-    tuned_path = p.parent.parent / "autoresearch" / "tuned_config.48.json"
+    tuned_path = p.parent.parent / "tools" / "autoresearch" / "tuned_config.48.json"
     if tuned_path.exists():
         raw_tuned = tuned_path.read_bytes().strip()
         if raw_tuned:
