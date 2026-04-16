@@ -6,15 +6,25 @@ Environment config: inlined below (Kaggle-specific paths, deps, GPU settings)
 import subprocess, sys, os
 
 # Use Kaggle secrets for authenticated HF Hub access (avoids rate limits)
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 try:
     from kaggle_secrets import UserSecretsClient
     user_secrets = UserSecretsClient()
-    HF_TOKEN = user_secrets.get_secret("HF_TOKEN")
+    # Try common names
+    for secret_name in ["HF_TOKEN", "huggingface_token", "HF_HUB_TOKEN"]:
+        try:
+            HF_TOKEN = user_secrets.get_secret(secret_name)
+            if HF_TOKEN: break
+        except Exception:
+            continue
 except Exception:
-    HF_TOKEN = os.environ.get("HF_TOKEN", "")
+    pass
 
 if HF_TOKEN:
     os.environ["HF_TOKEN"] = HF_TOKEN
+    print(f"HF Token detected (starts with {HF_TOKEN[:4]}...)")
+else:
+    print("WARNING: No HF_TOKEN found in Kaggle Secrets or Environment!")
 
 subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
     "numpy>=1.24", "scipy>=1.10", "lark>=1.1", "usearch>=2.0",
@@ -28,15 +38,19 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
 
 from huggingface_hub import snapshot_download, login
 if HF_TOKEN:
-    print("Logging into Hugging Face...")
+    print("Logging into Hugging Face Hub...")
     login(token=HF_TOKEN)
 
 print("Downloading Jina v5 Small ONNX...")
 snapshot_download("jinaai/jina-embeddings-v5-text-small-retrieval",
-    local_dir="/kaggle/working/jina-small")
+    local_dir="/kaggle/working/jina-small", token=HF_TOKEN)
 print("Downloading LongMemEval-S...")
 snapshot_download("xiaowu0162/longmemeval-cleaned",
-    repo_type="dataset", local_dir="/kaggle/working/longmemeval-data")
+    repo_type="dataset", local_dir="/kaggle/working/longmemeval-data", token=HF_TOKEN)
+
+print("Downloading TinyBERT NER...")
+snapshot_download("onnx-community/TinyBERT-finetuned-NER-ONNX",
+    local_dir="/kaggle/working/models/tinybert-ner", token=HF_TOKEN)
 
 print("Cloning graphstore (refactor/simplify-retrieval-pipeline)...")
 subprocess.check_call(["git", "clone", "--depth", "1",
