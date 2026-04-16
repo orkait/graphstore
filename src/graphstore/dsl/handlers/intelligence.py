@@ -335,7 +335,10 @@ class IntelligenceHandlers:
 
         n = self.store._next_slot
         if n == 0:
-            return Result(kind="nodes", data=[], count=0)
+            return Result(
+                kind="nodes", data=[], count=0,
+                meta={"debug": {"empty_result_reasons": ["no nodes in store"]}},
+            )
 
         live_mask = self._compute_live_mask(n)
         now_ms = int(time.time() * 1000)
@@ -416,13 +419,49 @@ class IntelligenceHandlers:
             early_meta: dict = {}
             anchor_ms_e = getattr(q, 'at', None) or getattr(self, '_temporal_anchor_ms', None)
             at_range_e = getattr(q, 'at_range', None)
+            warnings: list[str] = []
             if at_range_e is not None or anchor_ms_e is not None:
                 if self.store.columns.get_column("__event_at__", n) is None:
-                    early_meta["warnings"] = [
+                    warnings.append(
                         "AT clause ignored: no '__event_at__' column in store. "
                         "Use ASSERT ... EVENT_AT ... or CREATE NODE ... EVENT_AT ... "
                         "to populate it."
-                    ]
+                    )
+            # Diagnose why both channels returned nothing so users do not have
+            # to guess whether they need a schema, an embedder, or content.
+            vec_ready = bool(self._embedder and self._vector_store and self._vector_store.count() > 0)
+            fts_ready = False
+            if self._document_store is not None:
+                try:
+                    row = self._document_store._conn.execute(
+                        "SELECT 1 FROM doc_fts LIMIT 1"
+                    ).fetchone()
+                    fts_ready = row is not None
+                except Exception:
+                    fts_ready = False
+            reasons: list[str] = []
+            if not vec_ready:
+                if self._embedder is None:
+                    reasons.append("no embedder configured")
+                elif self._vector_store is None or self._vector_store.count() == 0:
+                    reasons.append(
+                        "no vectors indexed - register schema with "
+                        "'SYS REGISTER NODE KIND <kind> ... EMBED <field>' or "
+                        "pass explicit VECTOR [...] on CREATE NODE"
+                    )
+            if not fts_ready:
+                reasons.append(
+                    "no BM25 content - use 'CREATE NODE ... DOCUMENT \"text\"' or "
+                    "put_summary() so REMEMBER's keyword channel has data"
+                )
+            if not vec_ready and not fts_ready:
+                reasons.append(
+                    "neither vec nor BM25 is populated; REMEMBER has no channel to search"
+                )
+            if reasons:
+                early_meta["debug"] = {"empty_result_reasons": reasons}
+            if warnings:
+                early_meta["warnings"] = warnings
             return Result(kind="nodes", data=[], count=0, meta=early_meta)
 
         # Adaptive oversample cap
