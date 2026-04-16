@@ -346,7 +346,7 @@ class OnnxHFEmbedder(Embedder):
                 for p in self._providers
             ]
 
-        import os as _os
+        from graphstore.core.compute_profile import get_profile
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
@@ -355,8 +355,7 @@ class OnnxHFEmbedder(Embedder):
         if uses_gpu:
             sess_options.add_session_config_entry("session.disable_matmul_nbits", "1")
         else:
-            cpu_threads = int(_os.environ.get("GRAPHSTORE_EMBED_THREADS", "4"))
-            sess_options.intra_op_num_threads = cpu_threads
+            sess_options.intra_op_num_threads = get_profile().embed_threads
             sess_options.inter_op_num_threads = 1
             sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 

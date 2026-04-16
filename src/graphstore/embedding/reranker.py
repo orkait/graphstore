@@ -76,11 +76,10 @@ class OnnxReranker:
         self._tokenizer = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
         self._tokenizer.enable_truncation(max_length=max_length)
 
-        import os as _os
+        from graphstore.core.compute_profile import get_profile
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        cpu_threads = int(_os.environ.get("GRAPHSTORE_RERANK_THREADS", "4"))
-        sess_options.intra_op_num_threads = cpu_threads
+        sess_options.intra_op_num_threads = get_profile().rerank_threads
         sess_options.inter_op_num_threads = 1
         sess_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 

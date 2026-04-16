@@ -127,6 +127,9 @@ class GraphStore:
         # Layer 3: env var overrides (GRAPHSTORE_SECTION_FIELD)
         self._config = apply_env_overrides(self._config)
 
+        from graphstore.core.compute_profile import describe_profile
+        logger.info("graphstore compute: %s", describe_profile())
+
         # Layer 4: constructor kwargs (highest priority)
         overrides = {}
         if ceiling_mb is not self._UNSET:
@@ -531,8 +534,7 @@ class GraphStore:
         if self._optimizer.optimizing:
             raise OptimizationInProgress()
 
-        if self._config.dsl.auto_optimize:
-            self._optimizer.maybe_optimize()
+        self._optimizer.maybe_optimize()
 
         tag, phase, source, trace_id = "system", "system", getattr(self, '_current_source', 'user'), self._active_trace
 
