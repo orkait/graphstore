@@ -432,7 +432,6 @@ class OnnxHFEmbedder(Embedder):
         return self._encode(prefixed)
 
     def _encode(self, texts: list[str]) -> np.ndarray:
-        all_pooled = []
         # Process in a single batch to maximize GPU/CPU utilization.
         # Higher-level GraphStore layer already handles outer batching via 
         # deferred_embeddings(batch_size=...).
@@ -462,9 +461,7 @@ class OnnxHFEmbedder(Embedder):
         else:
             pooled = l2_normalize(pooled)
 
-        all_pooled.append(pooled.astype(np.float32))
-
-        return np.vstack(all_pooled) if all_pooled else np.empty((0, self._output_dims), dtype=np.float32)
+        return pooled.astype(np.float32)
 
     def _encode_feed_dict(self, input_ids: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
         feed = {
