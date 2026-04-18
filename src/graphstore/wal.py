@@ -81,44 +81,93 @@ class WALManager:
         if not rows:
             return
         self._replay_errors.clear()
-        
-        for seq, statement in rows:
-            try:
-                ast = parse(statement)
-                self._executor.execute(ast)
-            except NodeExists:
-                continue
-            except Exception as e:
-                if self._strict_recovery:
-                    logger.error(f"Fatal error during WAL replay (strict_recovery=True): {e}")
-                    raise GraphStoreError(f"Fatal recovery error on statement: {statement}") from e
-                    
-                err = {
-                    "statement": statement[:500],
-                    "error_type": type(e).__name__,
-                    "error": str(e)[:500],
-                }
-                if len(self._replay_errors) < 50:
-                    self._replay_errors.append(err)
-                logger.warning(
-                    "WAL replay statement failed: %s: %s - %s",
-                    err["error_type"], err["error"], err["statement"],
-                )
-                
-                # Insert into dead letter queue, then always remove from WAL.
+
+        # Wrap the entire replay loop in a single sqlite transaction. Pre-fix
+        # each failed-statement branch committed independently (bug #5). If
+        # the process crashed mid-replay, some WAL entries were deleted
+        # while others were retried on next boot — state drift was possible
+        # when later-in-replay statements depended on earlier ones. With a
+        # single enclosing transaction, a crash leaves the WAL exactly as it
+        # was before replay started, and the next boot re-runs from a clean
+        # starting point.
+        #
+        # We use an IMMEDIATE transaction rather than DEFERRED so the lock
+        # is acquired up-front; DEFERRED would silently upgrade on first
+        # write and risk SQLITE_BUSY under concurrent access.
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for seq, statement in rows:
                 try:
-                    conn.execute(
-                        "INSERT INTO failed_wal_entries (timestamp, statement, error_msg) VALUES (?, ?, ?)",
-                        (time.time(), statement, err["error"])
+                    ast = parse(statement)
+                    self._executor.execute(ast)
+                except NodeExists:
+                    # The node already exists. Re-applying the CREATE NODE is
+                    # a no-op; the right thing is to drop the WAL entry so the
+                    # next boot does not retry it indefinitely (bug #4).
+                    # Pre-fix this branch just ``continue``d, leaving the
+                    # offending entry in the WAL where it would fail the
+                    # same way on every subsequent replay.
+                    try:
+                        conn.execute("DELETE FROM wal WHERE seq = ?", (seq,))
+                    except Exception as del_e:
+                        logger.error(
+                            "Failed to delete NodeExists WAL entry seq=%s: %s",
+                            seq, del_e,
+                        )
+                    continue
+                except Exception as e:
+                    if self._strict_recovery:
+                        logger.error(
+                            "Fatal error during WAL replay (strict_recovery=True): %s", e,
+                        )
+                        # Undo any partial replay before re-raising; the outer
+                        # caller expects "either fully replayed or untouched".
+                        conn.execute("ROLLBACK")
+                        raise GraphStoreError(
+                            f"Fatal recovery error on statement: {statement}"
+                        ) from e
+
+                    err = {
+                        "statement": statement[:500],
+                        "error_type": type(e).__name__,
+                        "error": str(e)[:500],
+                    }
+                    if len(self._replay_errors) < 50:
+                        self._replay_errors.append(err)
+                    logger.warning(
+                        "WAL replay statement failed: %s: %s - %s",
+                        err["error_type"], err["error"], err["statement"],
                     )
-                except Exception as dlq_e:
-                    logger.error("Failed to log to dead letter queue: %s", dlq_e)
-                try:
-                    conn.execute("DELETE FROM wal WHERE seq = ?", (seq,))
-                    conn.commit()
-                except Exception as del_e:
-                    logger.error("Failed to delete failed WAL entry seq=%s: %s", seq, del_e)
-                    
+
+                    # Dead-letter queue + delete the failing WAL entry.
+                    # Both ops participate in the outer transaction; they
+                    # commit together at the end.
+                    try:
+                        conn.execute(
+                            "INSERT INTO failed_wal_entries (timestamp, statement, error_msg) VALUES (?, ?, ?)",
+                            (time.time(), statement, err["error"])
+                        )
+                    except Exception as dlq_e:
+                        logger.error("Failed to log to dead letter queue: %s", dlq_e)
+                    try:
+                        conn.execute("DELETE FROM wal WHERE seq = ?", (seq,))
+                    except Exception as del_e:
+                        logger.error(
+                            "Failed to delete failed WAL entry seq=%s: %s",
+                            seq, del_e,
+                        )
+            # Commit the whole replay atomically. Only reached if no branch
+            # raised and triggered the ROLLBACK above.
+            conn.execute("COMMIT")
+        except Exception:
+            # Any uncaught exception (strict-recovery fatal path re-raised,
+            # or sqlite IO error) leaves the WAL untouched.
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+
         if self._replay_errors:
             logger.warning(
                 "WAL replay completed with %d error(s). See SYS FAILED QUERIES for details.",

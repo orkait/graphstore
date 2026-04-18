@@ -266,15 +266,12 @@ class IntelligenceHandlers:
         if src_slot is None:
             raise NodeNotFound(q.node_id)
 
-        saved_columns = self.store.columns.snapshot_arrays()
-        saved_tombstones = set(self.store.node_tombstones)
-        saved_edges = {k: list(v) for k, v in self.store._edges_by_type.items()}
-        saved_edge_keys = set(self.store._edge_keys)
-        saved_id_to_slot = dict(self.store.id_to_slot)
-        saved_count = self.store._count
-        saved_next_slot = self.store._next_slot
-        saved_node_ids = self.store.node_ids[:self.store._next_slot].copy()
-        saved_node_kinds = self.store.node_kinds[:self.store._next_slot].copy()
+        # Centralized snapshot — captures the fields the old hand-rolled
+        # version missed (string_table, secondary_indices, _indexed_fields,
+        # _edge_data_idx). Matters here because WHAT IF RETRACT runs
+        # bfs_reach over the edge graph which indirectly pulls slots via
+        # materialize_slot → column interned lookups (bug #49).
+        snap = self.store.make_snapshot()
 
         try:
             from graphstore.algos.graph import bfs_reach
@@ -307,24 +304,25 @@ class IntelligenceHandlers:
                 count=len(affected_nodes),
             )
         finally:
-            self.store.columns.restore_arrays(saved_columns)
-            self.store.node_tombstones = saved_tombstones
-            self.store._edges_by_type = saved_edges
-            self.store._edge_keys = saved_edge_keys
-            self.store.id_to_slot = saved_id_to_slot
-            self.store._count = saved_count
-            self.store._next_slot = saved_next_slot
-            self.store.node_ids[:saved_next_slot] = saved_node_ids
-            self.store.node_kinds[:saved_next_slot] = saved_node_kinds
+            # Unconditional restore: WHAT IF RETRACT is explicitly a
+            # simulation, so we roll back even on the success path.
+            self.store.restore_snapshot(snap)
             self.store._rebuild_edges()
             self.store._invalidate_live_cache()
             self.store._tombstone_mask_cache = None
 
-    @handles(RememberQuery)
+    @handles(RememberQuery, write=True)
     def _remember(self, q: RememberQuery) -> Result:
         """REMEMBER: 3-signal fusion with optional reranker and nucleus.
 
         Pipeline: gather -> 3-signal fusion -> top-N -> reranker -> results
+
+        Marked ``write=True`` because the handler mutates per-slot columns
+        (``__recall_count__``, ``__last_recalled_at__``) as a side effect
+        of every call. Pre-fix, the query was read-only from the dispatch
+        layer's perspective so those column writes never reached the WAL
+        — a crash between the mutation and the next checkpoint lost the
+        recall-count increment (bug #50).
         """
         if getattr(self, '_embedder_dirty', False):
             from graphstore.core.errors import GraphStoreError

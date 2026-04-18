@@ -29,11 +29,27 @@ from graphstore.core.types import Result
 class MutationHandlers:
 
     def _generate_auto_id(self, kind: str, data: dict) -> str:
-        """Generate a deterministic content-hash ID from kind + sorted fields."""
+        """Generate a deterministic content-hash ID from kind + sorted fields.
+
+        Serializes each field value through ``json.dumps(..., sort_keys=True)``
+        so that nested dicts, lists, and scalar values all produce a stable
+        canonical form. Pre-fix, ``str(value)`` was used which produces
+        dict reprs whose key ordering depends on insertion order — two
+        callers building semantically-equal dicts via different code paths
+        could hash to different auto-IDs (bug #30). The ``default=str``
+        fallback catches non-JSON-serializable types (datetimes, sets) by
+        rendering them via their string repr, which is still deterministic
+        within a single process.
+        """
         import hashlib
+        import json
         parts = [f"kind={kind}"]
         for k in sorted(data.keys()):
-            parts.append(f"{k}={data[k]}")
+            v = data[k]
+            if isinstance(v, (str, int, float, bool)) or v is None:
+                parts.append(f"{k}={v}")
+            else:
+                parts.append(f"{k}={json.dumps(v, sort_keys=True, default=str)}")
         content = "|".join(parts)
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
@@ -493,7 +509,10 @@ class MutationHandlers:
 
         for fp in q.fields:
             if fp.name in self.store._indexed_fields:
-                self.store.add_index(fp.name)
+                # Incremental reindex of only the affected slots instead
+                # of a full table rescan. For a single-slot UPDATE on a
+                # 1M-row table this is 1M× faster (bug #32).
+                self.store.reindex_slots(fp.name, matching_slots)
 
         if self._embedder and self._vector_store is not None:
             updated_fields = {fp.name for fp in q.fields}
@@ -548,15 +567,10 @@ class MutationHandlers:
                 f"{q.source_id!r} == {q.target_id!r}"
             )
 
-        saved_edges = {k: list(v) for k, v in self.store._edges_by_type.items()}
-        saved_edge_keys = set(self.store._edge_keys)
-        saved_columns = self.store.columns.snapshot_arrays()
-        saved_tombstones = set(self.store.node_tombstones)
-        saved_id_to_slot = dict(self.store.id_to_slot)
-        saved_count = self.store._count
-        saved_next_slot = self.store._next_slot
-        saved_node_ids = self.store.node_ids[: self.store._next_slot].copy()
-        saved_node_kinds = self.store.node_kinds[: self.store._next_slot].copy()
+        # Centralized snapshot captures everything including the fields the
+        # pre-fix hand-rolled version missed: string_table, secondary_indices,
+        # _indexed_fields, _edge_data_idx (bug #36).
+        snap = self.store.make_snapshot()
 
         try:
             fields_merged = 0
@@ -601,16 +615,11 @@ class MutationHandlers:
                 count=1,
             )
         except Exception:
-            # Roll back every surface we touched - mirrors _batch.
-            self.store._edges_by_type = saved_edges
-            self.store._edge_keys = saved_edge_keys
-            self.store.node_tombstones = saved_tombstones
-            self.store.id_to_slot = saved_id_to_slot
-            self.store._count = saved_count
-            self.store._next_slot = saved_next_slot
-            self.store.node_ids[:saved_next_slot] = saved_node_ids
-            self.store.node_kinds[:saved_next_slot] = saved_node_kinds
-            self.store.columns.restore_arrays(saved_columns)
+            # Single restore undoes every field the centralized primitive
+            # captured, including the index structures the old rollback
+            # missed. _rebuild_edges still runs so the CSR matrices match
+            # the restored _edges_by_type.
+            self.store.restore_snapshot(snap)
             self.store._rebuild_edges()
             raise
 
@@ -659,26 +668,13 @@ class MutationHandlers:
         prev_record = self._batch_vector_record
         self._batch_vector_record = [] if enable_rollback else None
 
-        saved_edges = None
-        saved_edge_keys = None
-        saved_columns = None
-        saved_tombstones = None
-        saved_id_to_slot = None
-        saved_count = None
-        saved_next_slot = None
-        saved_node_ids = None
-        saved_node_kinds = None
-
-        if enable_rollback:
-            saved_edges = {k: list(v) for k, v in self.store._edges_by_type.items()}
-            saved_edge_keys = set(self.store._edge_keys)
-            saved_columns = self.store.columns.snapshot_arrays()
-            saved_tombstones = set(self.store.node_tombstones)
-            saved_id_to_slot = dict(self.store.id_to_slot)
-            saved_count = self.store._count
-            saved_next_slot = self.store._next_slot
-            saved_node_ids = self.store.node_ids[: self.store._next_slot].copy()
-            saved_node_kinds = self.store.node_kinds[: self.store._next_slot].copy()
+        # Only pay the snapshot cost when rollback is actually requested.
+        # This preserves the pre-fix behavior where BATCH ... NOROLLBACK
+        # (the non-transactional fast path) skipped the store-wide copy.
+        # Centralized primitive captures everything the 9-line hand-rolled
+        # version did, plus the fields it was missing — string_table,
+        # secondary_indices, _indexed_fields, _edge_data_idx (bug #8).
+        snap = self.store.make_snapshot() if enable_rollback else None
 
         try:
             variables: dict[str, str] = {}
@@ -706,6 +702,9 @@ class MutationHandlers:
             self.store._ensure_edges_built()
             return Result(kind="ok", data=None, count=0)
         except Exception as e:
+            # Vector state: BATCH tracks mid-batch VECTOR assignments so we
+            # can unwind them out-of-band. The centralized primitive doesn't
+            # touch runtime.vector_store on purpose.
             if enable_rollback and self._batch_vector_record:
                 vs = self._vector_store
                 if vs is not None:
@@ -714,17 +713,9 @@ class MutationHandlers:
                             vs.remove(slot)
                         except Exception:
                             pass
-            if enable_rollback:
-                self.store._edges_by_type = saved_edges
-                self.store._edge_keys = saved_edge_keys
-                self.store.node_tombstones = saved_tombstones
-                self.store.id_to_slot = saved_id_to_slot
-                self.store._count = saved_count
-                self.store._next_slot = saved_next_slot
-                self.store.node_ids[:saved_next_slot] = saved_node_ids
-                self.store.node_kinds[:saved_next_slot] = saved_node_kinds
+            if enable_rollback and snap is not None:
+                self.store.restore_snapshot(snap)
                 self.store._rebuild_edges()
-                self.store.columns.restore_arrays(saved_columns)
             raise BatchRollback(
                 failed_statement=str(type(e).__name__), error=str(e)
             )

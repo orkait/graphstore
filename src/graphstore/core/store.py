@@ -164,13 +164,20 @@ class CoreStore:
 
     def put_node(self, id: str, kind: str, data: dict) -> int:
         """Add a node. Returns slot index. Raises NodeExists if ID exists."""
-        str_id = self.string_table.intern(id)
-        if str_id in self.id_to_slot:
-            slot = self.id_to_slot[str_id]
-            if slot not in self.node_tombstones:
-                raise NodeExists(id)
+        # Fast path: if the id is already known, check for existing live
+        # slot BEFORE interning the kind. intern() is monotonic — once we
+        # mint a new ID there's no rolling back — so we defer interning of
+        # the ``kind`` string until after the ceiling check cannot fire.
+        # Pre-fix, a failed put_node (ceiling exceeded, allocation failure)
+        # left the kind string in the table forever, wasting an int32 slot
+        # per failure and inflating gc_strings pressure (bug #2).
+        if id in self.string_table:
+            str_id = self.string_table.intern(id)  # idempotent for existing ids
+            if str_id in self.id_to_slot:
+                slot = self.id_to_slot[str_id]
+                if slot not in self.node_tombstones:
+                    raise NodeExists(id)
 
-        # Check ceiling (use raw count to avoid triggering CSR rebuild)
         raw_edge_count = sum(len(v) for v in self._edges_by_type.values())
         check_ceiling(
             self._count, raw_edge_count, 1, 0, self._ceiling_bytes,
@@ -178,6 +185,9 @@ class CoreStore:
             bytes_per_edge=int(self._bytes_per_edge_estimate),
         )
 
+        # Ceiling passed — safe to intern both id and kind. Order matters:
+        # ``id`` might already be interned (lookup path above) or new.
+        str_id = self.string_table.intern(id)
         kind_id = self.string_table.intern(kind)
         slot = self._alloc_slot()
 
@@ -406,7 +416,27 @@ class CoreStore:
     def put_edge(
         self, source_id: str, target_id: str, kind: str, data: dict | None = None
     ):
-        """Add an edge. Both nodes must exist."""
+        """Add an edge. Both nodes must exist.
+
+        Semantics (simple directed graph with edge data):
+
+          - New (src, tgt, kind) triple: inserted.
+          - Existing triple with ``data`` equal to the stored value: raises
+            ``GraphStoreError("Duplicate edge: ...")`` — caller is asking
+            the store to do something it has already done.
+          - Existing triple with ``data`` that differs from the stored
+            value: **silently ignored**; the first write wins. Use
+            ``UpdateEdge`` / ``UPDATE EDGE`` DSL to modify edge fields on
+            an existing edge.
+
+        This last case is the fix for bug #13. Pre-fix, a second CREATE
+        EDGE with different data appended a duplicate row in
+        ``_edges_by_type``, clobbered ``_edge_data_idx`` with the newer
+        data, and let the dynamic edge buffer accumulate a second CSR
+        entry. That cascaded into scipy CSR summing duplicate weights
+        (#18), inflated COUNT EDGES (#19) and SYS STATS (#26), and
+        polluted traversal-matrix weight semantics. One place, six bugs.
+        """
         if source_id not in self.string_table:
             raise NodeNotFound(source_id)
         if target_id not in self.string_table:
@@ -423,7 +453,26 @@ class CoreStore:
         if tgt_slot is None or tgt_slot in self.node_tombstones:
             raise NodeNotFound(target_id)
 
-        # Check ceiling (use raw count to avoid triggering CSR rebuild)
+        # Duplicate detection — O(1) set lookup. Before doing any ceiling
+        # check or mutation, see if the (src, tgt, kind) triple is already
+        # known. The pre-existing behavior was to raise on exact-match and
+        # silently insert a duplicate on data-differs; the new behavior is
+        # to raise on exact-match and return early on data-differs.
+        edge_key = (src_slot, tgt_slot, kind)
+        edge_data = data or {}
+        if edge_key in self._edge_keys:
+            existing = self._edge_data_idx.get(kind, {}).get((src_slot, tgt_slot))
+            if existing == edge_data:
+                raise GraphStoreError(
+                    f"Duplicate edge: {source_id} -> {target_id} kind={kind}"
+                )
+            # Same endpoints, different data. First-write-wins; callers that
+            # need to mutate fields use UPDATE EDGE.
+            return
+
+        # New edge — proceed with insertion. Ceiling check happens here so
+        # the failure mode for "we hit the edge-count limit" doesn't pay the
+        # lookup cost on the duplicate hot path above.
         raw_edge_count = sum(len(v) for v in self._edges_by_type.values())
         check_ceiling(
             self._count, raw_edge_count, 0, 1, self._ceiling_bytes,
@@ -431,39 +480,40 @@ class CoreStore:
             bytes_per_edge=int(self._bytes_per_edge_estimate),
         )
 
-        # Check duplicate - O(1) set lookup
-        edge_key = (src_slot, tgt_slot, kind)
-        edge_data = data or {}
-        if edge_key in self._edge_keys:
-            # Only raise if data also matches (rare: same src/tgt/kind but different data)
-            for s, t, d in self._edges_by_type.get(kind, []):
-                if s == src_slot and t == tgt_slot and d == edge_data:
-                    raise GraphStoreError(
-                        f"Duplicate edge: {source_id} -> {target_id} kind={kind}"
-                    )
-
         self._edge_keys.add(edge_key)
         self._edges_by_type.setdefault(kind, []).append(
             (src_slot, tgt_slot, edge_data)
         )
         self._edge_data_idx.setdefault(kind, {})[(src_slot, tgt_slot)] = edge_data
-        
-        # Add to dynamic edge buffer (L0) instead of forcing full CSR rebuild
+
+        # Add to dynamic edge buffer (L0) instead of forcing full CSR rebuild.
+        # Only reached for genuinely-new edges (duplicate branch above returns
+        # early), so the buffer can't accumulate parallel entries for the
+        # same pair — fixes bug #15 as a consequence of fixing #13.
         weight = float(edge_data.get("weight", 1.0))
         self._edge_matrices.add_dynamic(src_slot, tgt_slot, kind, self._next_slot, weight)
         if self._edge_matrices._pending_edge_count > 10000:
             self._edges_dirty = True
-            
+
         self._dirty_edges = True
         self._dirty_strings = True
         self._invalidate_live_cache()
 
     def delete_edge(self, source_id: str, target_id: str, kind: str):
-        """Delete a specific edge."""
+        """Delete a specific edge. Triggers CSR rebuild — prefer ``delete_edges_bulk``
+        when dropping multiple edges of the same source/target pair (e.g.,
+        VAULT wikilink resync) to avoid N rebuilds."""
+        # Avoid interning unknown ids — both saves string_table entries on
+        # missing edges and short-circuits the work when either endpoint
+        # does not exist.
+        if source_id not in self.string_table or target_id not in self.string_table:
+            return
         src_str_id = self.string_table.intern(source_id)
         tgt_str_id = self.string_table.intern(target_id)
         src_slot = self.id_to_slot.get(src_str_id)
         tgt_slot = self.id_to_slot.get(tgt_str_id)
+        if src_slot is None or tgt_slot is None:
+            return
 
         if kind in self._edges_by_type:
             self._edges_by_type[kind] = [
@@ -480,6 +530,72 @@ class CoreStore:
         self._edge_keys.discard((src_slot, tgt_slot, kind))
         self._rebuild_edges()
         self._dirty_edges = True
+
+    def delete_edges_bulk(self, edges: list[tuple[str, str, str]]) -> int:
+        """Delete multiple edges, rebuilding CSR exactly once at the end.
+
+        Fixes the N-rebuild cost of iterating ``delete_edge`` in callers
+        that need to drop many edges at once (bugs #42, #57). Examples:
+
+        - ``DELETE EDGE "a" -> "b"`` with no kind: the DSL handler
+          previously called delete_edge once per edge-type, triggering
+          O(E) rebuilds for a single logical operation.
+        - Vault sync resyncing a note's outgoing wikilinks: one rebuild
+          per link instead of one rebuild for the whole resync.
+
+        Returns the number of edges actually removed. Missing edges are
+        skipped silently (they're a valid input to an idempotent sync
+        primitive).
+        """
+        if not edges:
+            return 0
+
+        # Resolve every endpoint up front so we can reject bad input
+        # without mutating state halfway through.
+        resolved: list[tuple[int, int, str]] = []
+        for source_id, target_id, kind in edges:
+            if source_id not in self.string_table or target_id not in self.string_table:
+                continue
+            src_slot = self.id_to_slot.get(self.string_table.intern(source_id))
+            tgt_slot = self.id_to_slot.get(self.string_table.intern(target_id))
+            if src_slot is None or tgt_slot is None:
+                continue
+            resolved.append((src_slot, tgt_slot, kind))
+
+        if not resolved:
+            return 0
+
+        # Group by kind so we filter each edge list exactly once.
+        by_kind: dict[str, set[tuple[int, int]]] = {}
+        for src_slot, tgt_slot, kind in resolved:
+            by_kind.setdefault(kind, set()).add((src_slot, tgt_slot))
+
+        removed = 0
+        for kind, pairs in by_kind.items():
+            if kind not in self._edges_by_type:
+                continue
+            before = len(self._edges_by_type[kind])
+            self._edges_by_type[kind] = [
+                (s, t, d)
+                for s, t, d in self._edges_by_type[kind]
+                if (s, t) not in pairs
+            ]
+            after = len(self._edges_by_type[kind])
+            removed += before - after
+            if not self._edges_by_type[kind]:
+                del self._edges_by_type[kind]
+            if kind in self._edge_data_idx:
+                for pair in pairs:
+                    self._edge_data_idx[kind].pop(pair, None)
+                if not self._edge_data_idx[kind]:
+                    del self._edge_data_idx[kind]
+            for pair in pairs:
+                self._edge_keys.discard((pair[0], pair[1], kind))
+
+        if removed > 0:
+            self._rebuild_edges()
+            self._dirty_edges = True
+        return removed
 
     def get_edges_from(self, id: str, kind: str | None = None) -> list[dict]:
         """Get outgoing edges from a node. Uses CSR for neighbor lookup."""
@@ -610,6 +726,54 @@ class CoreStore:
                     val = int(raw)
                 index.setdefault(val, []).append(slot)
         self.secondary_indices[field] = index
+
+    def reindex_slots(self, field: str, slots) -> None:
+        """Update the secondary index for ``field`` for a specific set of slots.
+
+        Used by bulk UpdateNodes so a field change to a small subset of
+        rows doesn't trigger a full-table re-scan of the secondary index
+        (bug #32). Caller guarantees every slot in ``slots`` is live.
+
+        The implementation removes the slots from whatever value buckets
+        they currently appear in (we don't know the old value), then
+        re-inserts them under their current column value.
+        """
+        if field not in self._indexed_fields:
+            return
+        if not self.columns.has_column(field):
+            return
+        idx = self.secondary_indices.setdefault(field, {})
+        slot_set = {int(s) for s in slots}
+
+        # Scan-and-drop: secondary indices store ``dict[value, list[slot]]``
+        # with no reverse map, so removing a slot requires walking each
+        # bucket. The cost is O(|indexed_values|) not O(N rows) — still
+        # cheaper than the full rebuild when |affected_slots| << N.
+        empty_vals: list = []
+        for val, slot_list in idx.items():
+            new_list = [s for s in slot_list if s not in slot_set]
+            if len(new_list) == len(slot_list):
+                continue
+            if new_list:
+                idx[val] = new_list
+            else:
+                empty_vals.append(val)
+        for v in empty_vals:
+            del idx[v]
+
+        # Re-insert under current values
+        dtype = self.columns._dtypes[field]
+        for slot in slot_set:
+            if not self.columns._presence[field][slot]:
+                continue
+            raw = self.columns._columns[field][slot]
+            if dtype == "int32_interned":
+                val = self.string_table.lookup(int(raw))
+            elif dtype == "float64":
+                val = float(raw)
+            else:
+                val = int(raw)
+            idx.setdefault(val, []).append(slot)
 
     def query_by_index(self, field: str, value) -> list[int]:
         """Query secondary index. Returns slot indices."""
@@ -864,3 +1028,169 @@ class CoreStore:
         self.columns.dirty = False
         self._dirty_edges = False
         self._dirty_strings = False
+
+    # -----------------------------------------------------------------
+    # Snapshot / restore primitive
+    # -----------------------------------------------------------------
+    #
+    # Centralizes the "save full mutable store state, do something, possibly
+    # restore" pattern that was previously hand-rolled at four sites:
+    # SYS SNAPSHOT (executor_system._snapshot/_rollback), MERGE rollback
+    # (mutations._merge), BATCH rollback (mutations._batch), and the
+    # counterfactual WHAT IF RETRACT (intelligence._counterfactual). Each of
+    # those sites missed the same fields — string_table, secondary_indices,
+    # _indexed_fields — so a SYS COMPACT STRINGS after a SYS ROLLBACK could
+    # leave the restored columns referencing string IDs that no longer
+    # existed (bug #29) and the identity-init in string_gc would silently
+    # remap them out of bounds (bug #101). Same root cause for the BATCH
+    # (#8), MERGE (#36), and counterfactual (#49) rollbacks.
+    #
+    # Anything the store itself owns belongs here. Vector state lives on
+    # runtime and is the caller's responsibility — the snapshot returned
+    # by ``make_snapshot`` is intentionally store-only so that callers can
+    # compose it with their own vector save/restore logic.
+
+    def make_snapshot(self) -> "StoreSnapshot":
+        """Capture a deep copy of every mutable store-owned field.
+
+        Cheap-ish: O(N) in node count + indexed-value count. Not free —
+        callers wrapping a single small mutation should consider whether a
+        narrower snapshot would do.
+        """
+        ns = self._next_slot
+        return StoreSnapshot(
+            # String table: capture both list and reverse map. Restoration
+            # rebuilds the StringTable from the list, regenerating the
+            # reverse map. We keep both copies so a future caller that wants
+            # to inspect the snapshot doesn't pay the rebuild cost.
+            strings=self.string_table.to_list(),
+            # Columns has its own snapshot machinery; we just hold the result
+            # opaquely and hand it back at restore time.
+            columns=self.columns.snapshot_arrays(),
+            # Per-slot arrays — slice + copy so the snapshot is independent
+            # of subsequent mutations to the underlying buffer.
+            node_ids=self.node_ids[:ns].copy(),
+            node_kinds=self.node_kinds[:ns].copy(),
+            # Sets and dicts: shallow copies are sufficient because the
+            # values inside (slot ints, tuple keys, edge-data dicts) are
+            # never mutated in place — they're replaced wholesale by the
+            # callers we care about. If that invariant breaks elsewhere,
+            # bump these to deep copies.
+            tombstones=set(self.node_tombstones),
+            edges_by_type={k: list(v) for k, v in self._edges_by_type.items()},
+            edge_keys=set(self._edge_keys),
+            edge_data_idx={
+                k: dict(v) for k, v in self._edge_data_idx.items()
+            },
+            id_to_slot=dict(self.id_to_slot),
+            # Index state. secondary_indices values are dicts of lists; we
+            # copy the lists since they're mutated in place by put_node.
+            secondary_indices={
+                field: {val: list(slots) for val, slots in idx.items()}
+                for field, idx in self.secondary_indices.items()
+            },
+            indexed_fields=set(self._indexed_fields),
+            # Scalar bookkeeping
+            next_slot=ns,
+            count=self._count,
+            capacity=self._capacity,
+            active_context=self._active_context,
+        )
+
+    def restore_snapshot(self, snap: "StoreSnapshot") -> None:
+        """Restore from a snapshot produced by ``make_snapshot``.
+
+        Re-allocates buffers as needed if the store has grown since the
+        snapshot. Does not touch vector store / runtime — caller handles
+        that separately because vector state lives outside this class.
+        """
+        # Grow capacity FIRST so column restore + node array assignment land
+        # in correctly-sized buffers. Pre-fix sites that grew between snap
+        # and restore would have to special-case this; centralizing here
+        # means everyone gets it right.
+        while self._capacity < snap.capacity:
+            self._grow()
+
+        # Rebuild StringTable from the captured list. This is the field the
+        # four hand-rolled sites missed. Without it, a SYS COMPACT STRINGS
+        # after a SYS ROLLBACK could compact away strings that the restored
+        # columns still reference, producing dangling string IDs (bugs #29,
+        # #101).
+        self.string_table = StringTable.from_list(list(snap.strings))
+        # Rewire ColumnStore to the new StringTable; ColumnStore holds a
+        # reference for value lookups and that reference must stay current.
+        self.columns._string_table = self.string_table
+
+        self.columns.restore_arrays(snap.columns)
+        self.columns.grow(self._capacity)
+
+        # Restore the per-slot arrays. Clear any slots the snapshot didn't
+        # cover so leftover bytes from later inserts don't survive the
+        # rollback.
+        ns_snap = snap.next_slot
+        self.node_ids[:ns_snap] = snap.node_ids
+        self.node_kinds[:ns_snap] = snap.node_kinds
+        if ns_snap < self._next_slot:
+            self.node_ids[ns_snap:self._next_slot] = -1
+            self.node_kinds[ns_snap:self._next_slot] = 0
+
+        self.node_tombstones = set(snap.tombstones)
+        self._edges_by_type = {k: list(v) for k, v in snap.edges_by_type.items()}
+        self._edge_keys = set(snap.edge_keys)
+        # Restore edge_data_idx directly so weighted lookups don't have to
+        # wait for _rebuild_edges. _rebuild_edges still re-derives this from
+        # _edges_by_type, but until that runs the in-flight lookups via
+        # get_edge_data are accurate.
+        self._edge_data_idx = {k: dict(v) for k, v in snap.edge_data_idx.items()}
+        self.id_to_slot = dict(snap.id_to_slot)
+        # Index state — also missed by all four hand-rolled sites. Without
+        # restoring these, a rollback that removed a node would leave its
+        # slot in the secondary index forever, producing phantom hits.
+        self.secondary_indices = {
+            field: {val: list(slots) for val, slots in idx.items()}
+            for field, idx in snap.secondary_indices.items()
+        }
+        self._indexed_fields = set(snap.indexed_fields)
+
+        self._next_slot = ns_snap
+        self._count = snap.count
+        self._active_context = snap.active_context
+
+        # Mark everything dirty + invalidate caches. Callers usually trigger
+        # _rebuild_edges as well, but we leave that to them so a no-op
+        # rollback (snap == current state) doesn't pay the cost.
+        self._dirty_nodes = True
+        self._dirty_edges = True
+        self._dirty_strings = True
+        self._invalidate_live_cache()
+
+
+# Module-level dataclass: out of the class so other code can import the type
+# for annotations without pulling in the heavy CoreStore import path.
+from dataclasses import dataclass, field as _field
+from typing import Any as _Any
+
+
+@dataclass(slots=True)
+class StoreSnapshot:
+    """Immutable-by-convention snapshot of CoreStore mutable state.
+
+    Returned by ``CoreStore.make_snapshot``. Restore with
+    ``CoreStore.restore_snapshot``. Does not include vector store state —
+    that lives on the runtime and is the caller's responsibility.
+    """
+    strings: list[str]
+    columns: _Any  # opaque dict from ColumnStore.snapshot_arrays()
+    node_ids: _Any  # np.ndarray
+    node_kinds: _Any  # np.ndarray
+    tombstones: set[int]
+    edges_by_type: dict[str, list[tuple]]
+    edge_keys: set[tuple[int, int, str]]
+    edge_data_idx: dict[str, dict[tuple[int, int], dict]]
+    id_to_slot: dict[int, int]
+    secondary_indices: dict[str, dict]
+    indexed_fields: set[str]
+    next_slot: int
+    count: int
+    capacity: int
+    active_context: str | None
