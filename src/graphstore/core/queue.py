@@ -28,23 +28,34 @@ class CommandQueue:
         self._execute_fn = execute_fn
         self._queue: queue.PriorityQueue = queue.PriorityQueue()
         self._seq = 0
-        self._seq_lock = threading.Lock()
+        # Single lock protects: the _running flag, the _seq counter, and
+        # the atomic check-and-enqueue critical section in submit*().
+        # Pre-fix, submit() checked _running and then put() as two separate
+        # operations, so shutdown() could interleave and leave a future
+        # sitting on a queue whose worker had already exited — blocking
+        # the caller's .result() forever (bug #103).
+        self._lock = threading.Lock()
         self._worker = threading.Thread(target=self._run, daemon=True, name="graphstore-worker")
         self._running = True
         self._worker.start()
 
-    def _next_seq(self) -> int:
-        with self._seq_lock:
-            seq = self._seq
-            self._seq += 1
-            return seq
+    def _next_seq_locked(self) -> int:
+        """Caller must hold self._lock."""
+        seq = self._seq
+        self._seq += 1
+        return seq
 
     def submit(self, query: str) -> Any:
         """Submit interactive query, block until result."""
-        if not self._running:
-            raise RuntimeError("CommandQueue is shut down")
         future: Future = Future()
-        self._queue.put((INTERACTIVE, self._next_seq(), query, future))
+        # Atomic: _running check + seq allocation + put. If shutdown()
+        # is waiting for the lock, it will run AFTER this put completes,
+        # so the worker is guaranteed to see this item before it sees
+        # the _SHUTDOWN sentinel.
+        with self._lock:
+            if not self._running:
+                raise RuntimeError("CommandQueue is shut down")
+            self._queue.put((INTERACTIVE, self._next_seq_locked(), query, future))
         return future.result()
 
     def submit_background(self, query: str) -> Future:
@@ -53,11 +64,12 @@ class CommandQueue:
         Failed background jobs are logged at WARNING level even if
         the caller never calls .result() on the returned Future.
         """
-        if not self._running:
-            raise RuntimeError("CommandQueue is shut down")
         future: Future = Future()
         future.add_done_callback(lambda f: self._on_background_done(f, query))
-        self._queue.put((BACKGROUND, self._next_seq(), query, future))
+        with self._lock:
+            if not self._running:
+                raise RuntimeError("CommandQueue is shut down")
+            self._queue.put((BACKGROUND, self._next_seq_locked(), query, future))
         return future
 
     @staticmethod
@@ -69,10 +81,16 @@ class CommandQueue:
 
     def shutdown(self) -> None:
         """Stop the worker thread. Idempotent."""
-        if not self._running:
-            return
-        self._running = False
-        self._queue.put((999, 0, _SHUTDOWN, None))
+        # Acquire lock before flipping _running so no submit() can race
+        # in between our check and our _SHUTDOWN sentinel put. Any
+        # submit() already inside the lock will complete its put first;
+        # any submit() that acquires the lock after us sees
+        # _running=False and raises RuntimeError.
+        with self._lock:
+            if not self._running:
+                return
+            self._running = False
+            self._queue.put((999, 0, _SHUTDOWN, None))
         self._worker.join(timeout=5)
 
     def _run(self) -> None:
