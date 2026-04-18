@@ -87,7 +87,11 @@ def load(conn, use_compression: bool = False, db_path: str | Path | None = None)
         "SELECT key, data FROM blobs WHERE key LIKE 'raw_edges:%'"
     ).fetchall()
     for key, data in edge_rows:
-        etype = key[len("raw_edges:"):]
+        # Symmetric unquote — see serializer for why etypes are URL-quoted
+        # on write (bug #7). Legacy databases that wrote unquoted etypes
+        # still decode correctly because alnum characters are unaffected
+        # by quote/unquote round-tripping.
+        etype = unquote(key[len("raw_edges:"):])
         edge_list = mjson.decode(data)
         store._edges_by_type[etype] = [(s, t, d) for s, t, d in edge_list]
 

@@ -116,6 +116,42 @@ class IngestHandlers:
             if isinstance(v, (str, int, float)) and k not in ("source",)
         })
 
+        # Snapshot before any mutation so a mid-INGEST failure (embedding
+        # crash, disk full, VLM timeout) can roll the graph back to the
+        # exact pre-INGEST state. Pre-fix, a failure after some chunks
+        # were created left the parent node, document-store row, and
+        # partial section/chunk nodes persisted with no indication of
+        # partial state (bug #48). DocumentStore writes are tracked
+        # separately since they live outside the StoreSnapshot primitive.
+        store_snap = self.store.make_snapshot()
+        doc_slots_written: list[int] = []
+        try:
+            return self._ingest_body(
+                q, result, chunks, parent_id, parent_kind,
+                metadata_fields, doc_slots_written,
+            )
+        except Exception:
+            # Roll back the store to its pre-INGEST state. Then unwind
+            # DocumentStore writes we tracked — restore_snapshot doesn't
+            # touch DocumentStore since documents live outside the store.
+            self.store.restore_snapshot(store_snap)
+            self.store._rebuild_edges()
+            if self._document_store:
+                for slot in doc_slots_written:
+                    try:
+                        self._document_store.delete_document(slot)
+                    except Exception:
+                        logger.debug(
+                            "INGEST rollback: doc delete for slot=%s failed",
+                            slot, exc_info=True,
+                        )
+            raise
+
+    def _ingest_body(self, q, result, chunks, parent_id, parent_kind,
+                     metadata_fields, doc_slots_written: list[int]) -> Result:
+        """Internal ingest body, extracted so the top-level _ingest can wrap
+        the whole thing in a StoreSnapshot + DocumentStore rollback (bug #48)."""
+        import time
         parent_slot = self.store.put_node(parent_id, parent_kind, metadata_fields)
         self.store.columns.set_reserved(parent_slot, "__blob_state__", "warm")
         event_at_ms = self._infer_event_at_from_metadata(result.metadata)
@@ -125,6 +161,7 @@ class IngestHandlers:
         if self._document_store:
             self._document_store.put_document(
                 parent_slot, result.markdown.encode("utf-8"), "text/markdown")
+            doc_slots_written.append(parent_slot)
             self._document_store.put_metadata(parent_slot, {
                 "source_path": q.file_path,
                 "pages": result.metadata.get("pages"),
