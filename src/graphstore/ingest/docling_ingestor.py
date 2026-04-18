@@ -13,11 +13,24 @@ class DoclingIngestor(Ingestor):
         "mp4", "avi", "mov",                                       # video (requires docling[asr] + ffmpeg)
     ]
 
-    def convert(self, file_path: str, **kwargs) -> IngestResult:
-        # Lazy import - docling is ~200MB, only loaded when explicitly requested
-        from docling.document_converter import DocumentConverter
+    def __init__(self) -> None:
+        # Lazy converter: constructing ``DocumentConverter`` costs ~200 MB of
+        # model weights and a few seconds of load time. Pre-fix, every
+        # convert() call reconstructed a fresh instance which made bulk PDF
+        # ingestion catastrophically slow (bug #67). We cache the instance on
+        # the ingestor itself and share across calls.
+        self._converter = None
 
-        converter = DocumentConverter()
+    def _get_converter(self):
+        if self._converter is None:
+            # Deferred import keeps the 200 MB dependency optional for users
+            # who only ingest via MarkItDown / PyMuPDF.
+            from docling.document_converter import DocumentConverter
+            self._converter = DocumentConverter()
+        return self._converter
+
+    def convert(self, file_path: str, **kwargs) -> IngestResult:
+        converter = self._get_converter()
         result = converter.convert(file_path)
         md_text = result.document.export_to_markdown()
         return IngestResult(

@@ -60,11 +60,15 @@ class CoReferenceResolver:
         return []
 
 
-_extractors: dict[str, Any] = {}
+_extractors: dict[tuple, Any] = {}
 
 
 def _get_extractor(model_dir: str | Path, max_length: int):
-    key = str(model_dir)
+    # Key includes max_length so two callers with the same model but
+    # different max_length don't share an extractor with the wrong
+    # tokenizer truncation limit (bug #61). Pre-fix, only the path was
+    # used, silently returning the first-initialized instance.
+    key = (str(model_dir), int(max_length))
     if key not in _extractors:
         try:
             import onnxruntime as ort

@@ -42,6 +42,17 @@ def _make_builtin_ingestor(name: str) -> Ingestor:
     if name == "docling":
         from graphstore.ingest.docling_ingestor import DoclingIngestor
         return DoclingIngestor()
+    if name == "audio":
+        # The built-in extension map routes wav/mp3/ogg/flac to "audio" so
+        # users see these formats as "supported" in the registry listing.
+        # Audio ingestion is actually handled by docling[asr], which is an
+        # optional extra. Pre-fix, a user with docling installed but without
+        # the ASR extra got "Unknown built-in ingestor: 'audio'" (bug #65).
+        # Raise a clear install hint instead.
+        raise ValueError(
+            "Audio ingestion requires docling with the ASR extra. "
+            "Install with: pip install 'graphstore[ingest]' 'docling[asr]'"
+        )
     raise ValueError(f"Unknown built-in ingestor: {name!r}")
 
 

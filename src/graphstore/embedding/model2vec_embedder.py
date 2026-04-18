@@ -27,21 +27,37 @@ class Model2VecEmbedder(Embedder):
             
             # If cache_dir is provided and model exists there, try loading from local
             if cache_dir:
-                import os
                 local_path = Path(cache_dir) / model_name.split("/")[-1]
                 if local_path.exists():
                     _model_cache[cache_key] = StaticModel.from_pretrained(str(local_path))
                 else:
-                    # Set HF_HOME to cache_dir temporarily
-                    old_hf_home = os.environ.get("HF_HOME")
-                    os.environ["HF_HOME"] = str(cache_dir)
+                    # Pass cache_dir as a kwarg so two threads constructing
+                    # Model2Vec instances with different cache_dirs don't
+                    # race through the shared HF_HOME env var (bug #68).
+                    # Pre-fix, the race window between set and restore
+                    # let thread B read thread A's temporary HF_HOME. The
+                    # underlying huggingface_hub.snapshot_download accepts
+                    # a cache_dir kwarg that bypasses env entirely; pass
+                    # it through where StaticModel supports it, otherwise
+                    # fall back to the env-based path.
                     try:
-                        _model_cache[cache_key] = StaticModel.from_pretrained(model_name)
-                    finally:
-                        if old_hf_home:
-                            os.environ["HF_HOME"] = old_hf_home
-                        else:
-                            del os.environ["HF_HOME"]
+                        _model_cache[cache_key] = StaticModel.from_pretrained(
+                            model_name, cache_dir=str(cache_dir),
+                        )
+                    except TypeError:
+                        # Older StaticModel without cache_dir kwarg —
+                        # preserve prior behavior but shrink the race
+                        # window to just the download call itself.
+                        import os
+                        old_hf_home = os.environ.get("HF_HOME")
+                        os.environ["HF_HOME"] = str(cache_dir)
+                        try:
+                            _model_cache[cache_key] = StaticModel.from_pretrained(model_name)
+                        finally:
+                            if old_hf_home is not None:
+                                os.environ["HF_HOME"] = old_hf_home
+                            else:
+                                os.environ.pop("HF_HOME", None)
             else:
                 _model_cache[cache_key] = StaticModel.from_pretrained(model_name)
                 

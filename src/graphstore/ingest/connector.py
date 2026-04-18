@@ -6,8 +6,19 @@ from graphstore.core.types import Result
 logger = logging.getLogger(__name__)
 
 
-def connect_all(store, vector_store, threshold=0.85, where_expr=None, executor=None):
-    """Find and wire similar chunks across documents."""
+def connect_all(store, vector_store, threshold=0.85, where_expr=None, executor=None,
+                cancel_event=None, progress_callback=None):
+    """Find and wire similar chunks across documents.
+
+    Runs an O(N * log N) scan: one k-NN query per live vector-bearing
+    slot. On a 100K-node graph, this means 100K HNSW queries — easily
+    multi-minute territory (bug #60). Callers should pass a ``cancel_event``
+    (a ``threading.Event``) to allow aborting via SYS CRON STOP or similar
+    lifecycle machinery. The check is cheap enough to run every iteration.
+
+    ``progress_callback`` receives ``(checked_count, total)`` every 100
+    iterations so long-running operations can report back to a status log.
+    """
     if vector_store is None or vector_store.count() == 0:
         return Result(kind="ok", data={"edges_created": 0}, count=0)
 
@@ -18,6 +29,20 @@ def connect_all(store, vector_store, threshold=0.85, where_expr=None, executor=N
     checked = set()
 
     for slot in range(n):
+        # Cancellation check — cheap boolean read.
+        if cancel_event is not None and cancel_event.is_set():
+            logger.info(
+                "connect_all cancelled at slot %d/%d, %d edges created",
+                slot, n, edges_created,
+            )
+            break
+
+        if progress_callback is not None and slot % 100 == 0:
+            try:
+                progress_callback(slot, n)
+            except Exception:
+                pass
+
         if not live[slot] or not vector_store.has_vector(slot):
             continue
 

@@ -87,7 +87,16 @@ def rewire_edges_source_target(
     for etype, edges in edges_by_type.items():
         new_list = []
         for s, t, d in edges:
-            if s == src_slot:
+            # Self-loop on the source: ``src → src`` would rewire to
+            # ``(tgt, src, d)`` under the old first-branch-wins logic,
+            # leaving ``src`` as a target after MERGE deletes it — a
+            # zombie edge pointing at a tombstoned slot (bug #100). Detect
+            # and rewrite to ``(tgt, tgt, d)`` so the self-loop survives
+            # MERGE pointing at the merged node.
+            if s == src_slot and t == src_slot:
+                new_list.append((tgt_slot, tgt_slot, d))
+                rewired += 1
+            elif s == src_slot:
                 new_list.append((tgt_slot, t, d))
                 rewired += 1
             elif t == src_slot:

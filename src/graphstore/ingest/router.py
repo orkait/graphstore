@@ -34,8 +34,29 @@ SUPPORTED_EXTENSIONS = set(EXTENSION_MAP.keys())
 _ingestor_cache = {}
 
 
+def _kwargs_cache_key(kwargs: dict) -> tuple:
+    """Produce a hashable, order-independent key from kwargs.
+
+    Used to distinguish cached ingestors with different configuration
+    (e.g., max_tokens=500 vs max_tokens=1000). Pre-fix, the cache keyed
+    by ingestor name only, so a second construction with different
+    kwargs silently returned the first instance with the ORIGINAL kwargs
+    still active (bug #59). Values must be hashable; non-hashable values
+    fall back to their repr.
+    """
+    items = []
+    for k in sorted(kwargs.keys()):
+        v = kwargs[k]
+        try:
+            hash(v)
+            items.append((k, v))
+        except TypeError:
+            items.append((k, repr(v)))
+    return tuple(items)
+
+
 def _get_ingestor(name: str, **kwargs):
-    cache_key = name
+    cache_key = (name, _kwargs_cache_key(kwargs))
     if cache_key not in _ingestor_cache:
         if name == "markitdown":
             from graphstore.ingest.markitdown_ingestor import MarkItDownIngestor
