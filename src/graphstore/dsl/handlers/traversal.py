@@ -1,5 +1,7 @@
 """Graph traversal handlers: TRAVERSE, PATH, SHORTEST PATH, ANCESTORS, DESCENDANTS, SUBGRAPH, COMMON NEIGHBORS, DISTANCE."""
 
+import numpy as np
+
 from graphstore.dsl.handlers._registry import handles
 from graphstore.dsl.ast_nodes import (
     AncestorsQuery, CommonNeighborsQuery, DescendantsQuery, DistanceQuery,
@@ -15,6 +17,38 @@ from graphstore.dsl.cost_estimator import estimate_traverse_cost
 
 
 class TraversalHandlers:
+
+    def _visibility_masked_matrix(self, matrix):
+        """Return a copy of ``matrix`` with rows+columns for invisible slots zeroed.
+
+        Pre-fix, PATH/SHORTEST PATH queries did BFS over the full matrix and
+        then discarded any returned path that touched an invisible node,
+        with no fallback to try an alternate route (bugs #39/#44). By
+        pre-masking the matrix, invisible nodes become unreachable from
+        the BFS's point of view — the algorithm naturally routes around
+        them and finds the shortest path among visible nodes.
+
+        Returns None if the matrix is None or fully empty.
+        """
+        if matrix is None:
+            return None
+        n = matrix.shape[0]
+        if n == 0:
+            return matrix
+        live_mask = self._compute_live_mask(n)
+        if live_mask.all():
+            # Fast path: no hidden nodes, original matrix is fine.
+            return matrix
+        # Build a diagonal selector: rows * diag * cols effectively keeps
+        # an entry only if BOTH its source and target are visible. For a
+        # CSR, the cheapest way is to element-multiply a mask column
+        # after a row-slice. scipy.sparse handles the broadcasting.
+        from scipy.sparse import csr_matrix, diags
+        d = diags(live_mask.astype(np.float32))
+        # d @ M @ d: rows filtered by visibility then cols filtered. Cast
+        # back to CSR since BFS expects the indices/indptr layout.
+        masked = (d @ matrix @ d).tocsr()
+        return masked
 
     @handles(TraverseQuery)
     def _traverse(self, q: TraverseQuery) -> Result:
@@ -80,6 +114,7 @@ class TraversalHandlers:
             return Result(kind="path", data=None, count=0)
         edge_type = self._extract_kind_from_where(q.where)
         matrix = self.store.edge_matrices.get({edge_type} if edge_type else None)
+        matrix = self._visibility_masked_matrix(matrix)
         if matrix is None:
             return Result(kind="path", data=None, count=0)
         matrix_t = matrix.T.tocsr()
@@ -87,7 +122,11 @@ class TraversalHandlers:
         if path is None:
             return Result(kind="path", data=None, count=0)
         path_ids = [self.store._slot_to_id(s) for s in path]
-        if any(pid is None or not self._is_visible_by_id(pid) for pid in path_ids):
+        # Pre-masked: if BFS returned a path, every hop is visible. But we
+        # still guard against _slot_to_id returning None for a tombstoned
+        # slot that appeared visible at mask-time but got deleted before
+        # materialization.
+        if any(pid is None for pid in path_ids):
             return Result(kind="path", data=None, count=0)
         return Result(kind="path", data=path_ids, count=len(path_ids))
 
@@ -99,13 +138,18 @@ class TraversalHandlers:
             return Result(kind="paths", data=[], count=0)
         edge_type = self._extract_kind_from_where(q.where)
         matrix = self.store.edge_matrices.get({edge_type} if edge_type else None)
+        # Visibility pre-filter: invisible nodes can't participate in any
+        # returned path since their edges are masked to zero. Pre-fix, the
+        # all-paths enumeration returned paths through invisible nodes
+        # and then discarded them post-hoc (bug #44).
+        matrix = self._visibility_masked_matrix(matrix)
         if matrix is None:
             return Result(kind="paths", data=[], count=0)
         paths = find_all_paths(matrix, src_slot, tgt_slot, q.max_depth)
         result = []
         for path in paths:
             path_ids = [self.store._slot_to_id(s) for s in path]
-            if all(pid is not None and self._is_visible_by_id(pid) for pid in path_ids):
+            if all(pid is not None for pid in path_ids):
                 result.append(path_ids)
         return Result(kind="paths", data=result, count=len(result))
 
@@ -117,14 +161,24 @@ class TraversalHandlers:
             return Result(kind="path", data=None, count=0)
         edge_type = self._extract_kind_from_where(q.where)
         matrix = self.store.edge_matrices.get({edge_type} if edge_type else None)
+        # Mask invisible nodes before BFS so the traversal routes around
+        # hidden (retracted/expired/out-of-context) nodes instead of
+        # returning None when the shortest candidate path happens to
+        # include one (bug #39).
+        matrix = self._visibility_masked_matrix(matrix)
         if matrix is None:
             return Result(kind="path", data=None, count=0)
         matrix_t = matrix.T.tocsr()
-        path = bidirectional_bfs(matrix, matrix_t, src_slot, tgt_slot)
+        # Pass q.max_depth through — None means unbounded. Previously this
+        # call omitted the kwarg and picked up the old hardcoded default of
+        # 10, silently capping shortest-path queries past 10 hops (bug #40).
+        path = bidirectional_bfs(
+            matrix, matrix_t, src_slot, tgt_slot, max_depth=q.max_depth,
+        )
         if path is None:
             return Result(kind="path", data=None, count=0)
         path_ids = [self.store._slot_to_id(s) for s in path]
-        if any(pid is None or not self._is_visible_by_id(pid) for pid in path_ids):
+        if any(pid is None for pid in path_ids):
             return Result(kind="path", data=None, count=0)
         return Result(kind="path", data=path_ids, count=len(path_ids))
 
@@ -139,11 +193,12 @@ class TraversalHandlers:
             if src_slot == tgt_slot:
                 return Result(kind="distance", data=0, count=1)
             return Result(kind="distance", data=-1, count=1)
+        matrix = self._visibility_masked_matrix(matrix)
         matrix_t = matrix.T.tocsr()
         path = bidirectional_bfs(matrix, matrix_t, src_slot, tgt_slot, q.max_depth)
         if path is not None:
             path_ids = [self.store._slot_to_id(s) for s in path]
-            if any(pid is None or not self._is_visible_by_id(pid) for pid in path_ids):
+            if any(pid is None for pid in path_ids):
                 path = None
         dist = len(path) - 1 if path else -1
         return Result(kind="distance", data=dist, count=1)
@@ -156,13 +211,17 @@ class TraversalHandlers:
             return Result(kind="path", data=None, count=0)
         edge_type = self._extract_kind_from_where(q.where)
         matrix = self.store.edge_matrices.get({edge_type} if edge_type else None)
+        # Pre-mask so dijkstra routes around hidden nodes (bug #39 for
+        # weighted variant).
+        matrix = self._visibility_masked_matrix(matrix)
         if matrix is None:
             return Result(kind="path", data=None, count=0)
-        path, cost = dijkstra(matrix, src_slot, tgt_slot)
+        max_cost = float(q.max_depth) if q.max_depth is not None else float("inf")
+        path, cost = dijkstra(matrix, src_slot, tgt_slot, max_cost=max_cost)
         if path is None:
             return Result(kind="path", data=None, count=0)
         path_ids = [self.store._slot_to_id(s) for s in path]
-        if any(pid is None or not self._is_visible_by_id(pid) for pid in path_ids):
+        if any(pid is None for pid in path_ids):
             return Result(kind="path", data=None, count=0)
         return Result(kind="path", data=path_ids, count=len(path_ids))
 
@@ -177,10 +236,12 @@ class TraversalHandlers:
             if src_slot == tgt_slot:
                 return Result(kind="distance", data=0.0, count=1)
             return Result(kind="distance", data=-1, count=1)
-        path, cost = dijkstra(matrix, src_slot, tgt_slot)
+        matrix = self._visibility_masked_matrix(matrix)
+        max_cost = float(q.max_depth) if q.max_depth is not None else float("inf")
+        path, cost = dijkstra(matrix, src_slot, tgt_slot, max_cost=max_cost)
         if path is not None:
             path_ids = [self.store._slot_to_id(s) for s in path]
-            if any(pid is None or not self._is_visible_by_id(pid) for pid in path_ids):
+            if any(pid is None for pid in path_ids):
                 path = None
         if path is None:
             return Result(kind="distance", data=-1, count=1)

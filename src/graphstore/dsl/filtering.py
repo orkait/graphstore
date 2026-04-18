@@ -1,5 +1,9 @@
 """WHERE evaluation, column acceleration, and index helpers."""
 
+import re
+import threading
+from functools import lru_cache
+
 import numpy as np
 
 from graphstore.dsl.ast_nodes import (
@@ -13,6 +17,26 @@ from graphstore.dsl.ast_nodes import (
     NotExpr,
     OrExpr,
 )
+
+
+# LIKE-pattern regex cache. Keyed by the raw pattern string so cache hits
+# survive across AST instances (PlanCache may give different call sites
+# distinct ast nodes for the same pattern). Pre-fix this memo lived on the
+# LikeCondition dataclass itself via ``expr._compiled_re``, which mutated
+# the PlanCache-shared AST object — fine single-threaded, a race once the
+# plan cache is read concurrently (bug #22). lru_cache is thread-safe in
+# CPython.
+@lru_cache(maxsize=1024)
+def _compile_like_regex(pattern: str):
+    parts = []
+    for ch in pattern:
+        if ch == '%':
+            parts.append('.*')
+        elif ch == '_':
+            parts.append('.')
+        else:
+            parts.append(re.escape(ch))
+    return re.compile(''.join(parts))
 
 
 class FilteringMixin:
@@ -30,18 +54,11 @@ class FilteringMixin:
             actual = data.get(expr.field)
             if actual is None:
                 return False
-            if expr._compiled_re is None:
-                import re
-                parts = []
-                for ch in expr.pattern:
-                    if ch == '%':
-                        parts.append('.*')
-                    elif ch == '_':
-                        parts.append('.')
-                    else:
-                        parts.append(re.escape(ch))
-                expr._compiled_re = re.compile(''.join(parts))
-            return bool(expr._compiled_re.fullmatch(str(actual)))
+            # Use the module-level lru_cache instead of stashing the compiled
+            # regex on the AST node. Fixes bug #22's thread-safety race by
+            # keeping the PlanCache-shared AST immutable.
+            regex = _compile_like_regex(expr.pattern)
+            return bool(regex.fullmatch(str(actual)))
         elif isinstance(expr, InCondition):
             actual = data.get(expr.field)
             return actual in expr.values

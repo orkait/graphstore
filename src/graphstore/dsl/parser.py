@@ -12,6 +12,61 @@ _parser = Lark(_grammar, parser="lalr", start="start")
 _TIME_KEYWORDS = {"NOW()", "TODAY", "YESTERDAY"}
 
 
+def _normalize_cache_key(query: str) -> str:
+    """Build a cache key that normalizes whitespace OUTSIDE quoted strings.
+
+    The naive ``" ".join(query.split())`` collapses runs of whitespace
+    globally, which corrupts multi-space payloads embedded in string
+    literals: ``msg="a  b"`` and ``msg="a b"`` would hash to the same key
+    and the first-cached AST wins regardless of the actual stored value
+    (bug #20).
+
+    This implementation walks the query tracking quote state and only
+    collapses whitespace outside a quoted region. It handles backslash
+    escaping inside quotes so ``"he said \"hi\""`` stays quoted. Both
+    ``"`` and ``'`` are recognized as quote characters.
+    """
+    out: list[str] = []
+    in_quote: str | None = None
+    prev_ws = False
+    i = 0
+    n = len(query)
+    while i < n:
+        ch = query[i]
+        if in_quote is None:
+            if ch in ('"', "'"):
+                in_quote = ch
+                out.append(ch)
+                prev_ws = False
+            elif ch.isspace():
+                # Collapse runs of whitespace into a single space, and skip
+                # leading whitespace so different indentation hashes identically.
+                if not prev_ws and out:
+                    out.append(" ")
+                    prev_ws = True
+            else:
+                out.append(ch)
+                prev_ws = False
+        else:
+            # Inside a quoted literal: preserve bytes verbatim including
+            # whitespace. Respect ``\"`` / ``\'`` escapes so the closing
+            # quote check does not fire on them.
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(query[i + 1])
+                i += 2
+                continue
+            if ch == in_quote:
+                in_quote = None
+        i += 1
+    # Trailing whitespace stripped by not appending it after the last
+    # non-space char; leading already skipped.
+    result = "".join(out)
+    if result.endswith(" "):
+        result = result[:-1]
+    return result
+
+
 class PlanCache:
     def __init__(self, maxsize: int = 256):
         self._cache: OrderedDict = OrderedDict()
@@ -21,7 +76,7 @@ class PlanCache:
         # Bypass cache for queries with time expressions so timestamps are fresh
         if any(kw in query for kw in _TIME_KEYWORDS):
             return _parse_internal(query)
-        key = " ".join(query.split())  # normalize whitespace
+        key = _normalize_cache_key(query)
         if key in self._cache:
             self._cache.move_to_end(key)
             return self._cache[key]

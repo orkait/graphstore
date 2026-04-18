@@ -98,9 +98,20 @@ class NodeHandlers:
                 fallback_predicate,
             )
             if col_sorted_slots is not None:
+                # When the predicate fallback is in play, `_order_slots_by_column`
+                # asked `topk_slot_order` for a FULL sort (full_sort=True) and
+                # returned the whole sorted slot array, unsliced. The caller
+                # must apply offset/limit AFTER the Python-side predicate filter
+                # so that "NODES WHERE x CONTAINS y ORDER BY z LIMIT N" returns
+                # at most N rows. Without this slicing the LIMIT clause was
+                # silently ignored under any non-column-filter WHERE — bug #90.
                 nodes = self.store._materialize_bulk(col_sorted_slots)
                 if fallback_predicate:
                     nodes = [n for n in nodes if fallback_predicate(n)]
+                    if q.offset:
+                        nodes = nodes[q.offset.value:]
+                    if q.limit:
+                        nodes = nodes[:q.limit.value]
                 return Result(kind="nodes", data=nodes, count=len(nodes))
             else:
                 nodes = self._materialize_slots_filtered(slots, fallback_predicate)

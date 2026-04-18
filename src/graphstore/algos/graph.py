@@ -31,44 +31,70 @@ def bidirectional_bfs(
     matrix_t: csr_matrix,
     source: int,
     target: int,
-    max_depth: int = 10,
+    max_depth: int | None = None,
 ) -> list[int] | None:
     """Shortest unweighted path via bidirectional BFS.
 
     Returns list of node indices including source and target, or None.
+
+    Args:
+        max_depth: per-direction expansion cap. ``None`` (default) means
+            unbounded - iterate until one frontier is empty or the two
+            frontiers meet. Prior versions defaulted to 10 which silently
+            truncated shortest-path queries on real-diameter graphs past
+            10 hops. Callers with a known cost ceiling should pass an
+            explicit integer to preserve the old behavior.
     """
     if source == target:
         return [source]
+
+    # Track distance from source/target so the meeting-point tiebreaker
+    # picks the actually-shortest path. Without distance tracking, pre-fix
+    # ``min(meeting)`` picked the numerically-smallest slot index among all
+    # meeting points in the current expansion step — arbitrary with respect
+    # to path length when the expansion produced multiple candidates in one
+    # step (bug #3).
+    fwd_dist: dict[int, int] = {source: 0}
+    bwd_dist: dict[int, int] = {target: 0}
 
     fwd_visited = {source: None}
     fwd_frontier = [source]
     bwd_visited = {target: None}
     bwd_frontier = [target]
 
-    for _ in range(max_depth):
+    # Unbounded mode: iterate while at least one frontier is non-empty. The
+    # graph is finite so the outer loop must terminate once both frontiers
+    # exhaust their reachable components. Explicit int cap takes precedence.
+    step = 0
+    while True:
+        if max_depth is not None and step >= max_depth:
+            return None
+        step += 1
+
         if not fwd_frontier and not bwd_frontier:
             return None
 
         if len(fwd_frontier) <= len(bwd_frontier):
             if fwd_frontier:
                 fwd_frontier, fwd_visited = _expand_frontier(
-                    matrix, fwd_frontier, fwd_visited
+                    matrix, fwd_frontier, fwd_visited, fwd_dist,
                 )
         else:
             if bwd_frontier:
                 bwd_frontier, bwd_visited = _expand_frontier(
-                    matrix_t, bwd_frontier, bwd_visited
+                    matrix_t, bwd_frontier, bwd_visited, bwd_dist,
                 )
 
         meeting = set(fwd_visited) & set(bwd_visited)
         if meeting:
-            mid = min(meeting)
+            # Tie-break by combined path length, not slot index. Falling
+            # back to slot only as a final ordering so the choice is
+            # deterministic across runs.
+            mid = min(meeting, key=lambda m: (fwd_dist[m] + bwd_dist[m], m))
             return _reconstruct_path(fwd_visited, bwd_visited, mid)
 
-    return None
 
-
-def _expand_frontier(matrix, frontier, visited):
+def _expand_frontier(matrix, frontier, visited, dist: dict | None = None):
     new_frontier = []
     for node in frontier:
         start = matrix.indptr[node]
@@ -79,6 +105,8 @@ def _expand_frontier(matrix, frontier, visited):
             if nb not in visited:
                 visited[nb] = node
                 new_frontier.append(nb)
+                if dist is not None:
+                    dist[nb] = dist[node] + 1
     return new_frontier, visited
 
 
