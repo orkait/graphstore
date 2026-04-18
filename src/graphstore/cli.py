@@ -48,6 +48,23 @@ def cmd_uninstall_embedder(args: argparse.Namespace) -> None:
     uninstall_embedder(args.name)
 
 
+def _is_loopback_host(host: str) -> bool:
+    """Return True iff the given bind host is a loopback-only address.
+
+    Accepts the common forms: ``127.0.0.1``, ``localhost``, ``::1``. Anything
+    else (``0.0.0.0``, ``::``, an explicit LAN IP, or a DNS name) is treated
+    as "potentially exposed to the network" and requires an auth token.
+    """
+    if not host:
+        return False
+    lo = host.strip().lower()
+    # IPv4 loopback: strict match. Technically 127.0.0.0/8 is all loopback,
+    # but we only accept the canonical form to keep the check conservative.
+    if lo in ("127.0.0.1", "localhost", "::1", "[::1]"):
+        return True
+    return False
+
+
 def cmd_playground(args: argparse.Namespace) -> None:
     """Run the playground web UI."""
     try:
@@ -59,6 +76,38 @@ def cmd_playground(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
+    import os
+
+    # Refuse to start without auth when binding to anything other than
+    # loopback. The playground execute endpoint accepts arbitrary DSL
+    # including VAULT READ, INGEST, and SYS *; exposing that to a LAN or the
+    # internet without a token is a remote-execute vulnerability.
+    # Escape hatch: GRAPHSTORE_ALLOW_UNAUTH_BIND=1 for users who know what
+    # they are doing (e.g. a segregated network).
+    auth_token_set = bool(os.environ.get("GRAPHSTORE_AUTH_TOKEN"))
+    allow_unauth = os.environ.get("GRAPHSTORE_ALLOW_UNAUTH_BIND") == "1"
+    if not _is_loopback_host(args.host) and not auth_token_set and not allow_unauth:
+        print(
+            f"Refusing to bind playground to {args.host!r} without authentication.\n"
+            "\n"
+            "The playground accepts arbitrary DSL including VAULT READ, INGEST,\n"
+            "and SYS commands. Exposing it to a non-loopback address without an\n"
+            "auth token lets anyone on the network execute queries against your\n"
+            "graphstore.\n"
+            "\n"
+            "Fix: set an auth token before starting\n"
+            "    export GRAPHSTORE_AUTH_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')\n"
+            "    graphstore playground --host 0.0.0.0\n"
+            "\n"
+            "Clients must then send ``Authorization: Bearer <token>`` on\n"
+            "every /api/* request.\n"
+            "\n"
+            "If you really need to disable this check (e.g. inside a private\n"
+            "network), set GRAPHSTORE_ALLOW_UNAUTH_BIND=1.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     from graphstore.server import app, mount_static
 
@@ -76,7 +125,6 @@ def cmd_playground(args: argparse.Namespace) -> None:
         url = f"http://{args.host}:{args.port}"
         threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
 
-    import os
     if args.db_path:
         os.environ["GRAPHSTORE_DB_PATH"] = args.db_path
 

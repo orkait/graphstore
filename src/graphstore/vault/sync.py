@@ -75,12 +75,45 @@ class VaultSync:
                 logger.debug("vault node sync failed for %r: %s", slug, e, exc_info=True)
                 errors += 1
 
-        # Pass 2: recreate edges for all synced notes
+        # Pass 2: recreate edges for all synced notes. A note whose body
+        # changed might have added or removed wikilinks, so its outgoing
+        # edges need to be fully rebuilt.
         for slug in synced_slugs:
             try:
                 self._sync_edges(slug)
             except Exception as e:
                 logger.debug("vault edge sync failed for %r: %s", slug, e, exc_info=True)
+
+        # Pass 3: re-sync edges for notes whose targets were
+        # created/deleted during this sync. Pre-fix, note A with a
+        # ``[[B]]`` link would have its target resolve to "nothing" if B
+        # didn't exist at the time A was first synced; after B is later
+        # added in the same sync_all call, A's edge to B would never
+        # materialize until A's mtime changed (bug #58).
+        #
+        # We detect this by rechecking synced_slugs against wikilinks they
+        # emit: if a target exists now that didn't exist during Pass 1,
+        # re-sync the referring note's edges once.
+        newly_created_nodes = set()
+        for slug in synced_slugs:
+            node_id = f"note:{slug}"
+            if node_id in self._store.string_table:
+                newly_created_nodes.add(slug)
+        if newly_created_nodes:
+            all_slugs = self._manager.list_files()
+            for slug in all_slugs:
+                if slug in synced_slugs:
+                    continue  # already resynced in pass 2
+                try:
+                    content = self._manager.read(slug)
+                    wikilinks = set(extract_wikilinks(content))
+                    if wikilinks & newly_created_nodes:
+                        self._sync_edges(slug)
+                except Exception as e:
+                    logger.debug(
+                        "vault pass-3 edge resync failed for %r: %s",
+                        slug, e, exc_info=True,
+                    )
 
         return {"synced": synced, "skipped": skipped, "errors": errors}
 
@@ -177,13 +210,19 @@ class VaultSync:
         if node_id not in self._store.string_table:
             return
 
-        # Delete old link edges from this node
+        # Delete old link edges from this node in a single pass so the
+        # CSR matrix gets rebuilt once instead of N times (bug #57). For a
+        # note with 20 outgoing wikilinks, this drops sync from ~20 full
+        # edge rebuilds to 1.
         existing_link_edges = self._store.get_edges_from(node_id, kind="links")
-        for edge in existing_link_edges:
+        if existing_link_edges:
             try:
-                self._store.delete_edge(edge["source"], edge["target"], "links")
+                self._store.delete_edges_bulk([
+                    (edge["source"], edge["target"], "links")
+                    for edge in existing_link_edges
+                ])
             except Exception as e:
-                logger.debug("vault link edge delete failed: %s", e, exc_info=True)
+                logger.debug("vault link edge bulk-delete failed: %s", e, exc_info=True)
 
         # Create new link edges
         for target_slug in wikilinks:
