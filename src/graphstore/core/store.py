@@ -313,29 +313,40 @@ class CoreStore:
         slot_set = set(slots_to_remove)
 
         if self._indexed_fields:
+            # Secondary-index cleanup. Per-bucket list filter is O(|bucket|)
+            # but we touch each bucket at most once per field, not once per
+            # slot. Previously: O(slots * bucket_size * fields) - `slot in
+            # list` + `list.remove` on each removed slot.
             lookup = self.string_table.lookup
+            slot_idx = np.asarray(slots_to_remove, dtype=np.int64)
             for field in self._indexed_fields:
                 if not self.columns.has_column(field):
+                    continue
+                bucket = self.secondary_indices.get(field)
+                if bucket is None:
                     continue
                 pres_col = self.columns._presence[field]
                 data_col = self.columns._columns[field]
                 dtype = self.columns._dtypes[field]
-                bucket = self.secondary_indices.get(field)
-                if bucket is None:
+                live = pres_col[slot_idx]
+                if not live.any():
                     continue
-                for slot in slots_to_remove:
-                    if not pres_col[slot]:
+                raws = data_col[slot_idx[live]]
+                if dtype == "int32_interned":
+                    vals = [lookup(int(r)) for r in raws]
+                elif dtype == "float64":
+                    vals = [float(r) for r in raws]
+                else:
+                    vals = [int(r) for r in raws]
+                # Group slots by val so we filter each bucket list once.
+                by_val: dict = {}
+                for s, v in zip(slot_idx[live].tolist(), vals):
+                    by_val.setdefault(v, set()).add(int(s))
+                for v, dead in by_val.items():
+                    lst = bucket.get(v)
+                    if lst is None:
                         continue
-                    raw = data_col[slot]
-                    if dtype == "int32_interned":
-                        val = lookup(int(raw))
-                    elif dtype == "float64":
-                        val = float(raw)
-                    else:
-                        val = int(raw)
-                    lst = bucket.get(val)
-                    if lst is not None and slot in lst:
-                        lst.remove(slot)
+                    bucket[v] = [s for s in lst if s not in dead]
 
         import logging as _logging
         _rm_log = _logging.getLogger(__name__)
