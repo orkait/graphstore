@@ -8,8 +8,13 @@ from graphstore.query.escape import dsl_identifier, dsl_literal, dsl_node_id, ds
 from graphstore.query.runtime import Query, register_compiler
 
 
-# Reserved clause keywords handled separately from arbitrary field kwargs.
-_CREATE_NODE_RESERVED = {"kind", "event_at", "expires_in", "expires_at", "document", "vector"}
+# No ``_RESERVED`` guard dict here: Python kwarg binding already enforces
+# that a named parameter (kind, event_at, expires_in, expires_at,
+# document, vector) cannot collide with a key inside ``**fields``. A
+# collision like ``create_node(..., kind="x", **{"kind": "y"})`` raises
+# ``TypeError`` at the call site before the function body runs. Removing
+# the previously-unreachable overlap check; kept here as a comment so
+# future refactors that change the signature remember to re-check.
 
 
 def _format_field(name: str, value: Any) -> str:
@@ -44,12 +49,6 @@ def create_node(
         raise ValueError("create_node() requires kind= as a non-empty str")
     if expires_in is not None and expires_at is not None:
         raise ValueError("create_node(): pass expires_in OR expires_at, not both")
-    overlap = _CREATE_NODE_RESERVED & set(fields)
-    if overlap:
-        raise TypeError(
-            f"create_node() got reserved kwarg(s) via **fields: {sorted(overlap)}. "
-            f"Use the dedicated parameter instead."
-        )
     params: dict = {
         "id": id,
         "kind": kind,
@@ -103,11 +102,6 @@ def create_node_auto(
         raise ValueError("create_node_auto() requires kind= as a non-empty str")
     if expires_in is not None and expires_at is not None:
         raise ValueError("create_node_auto(): pass expires_in OR expires_at, not both")
-    overlap = _CREATE_NODE_RESERVED & set(fields)
-    if overlap:
-        raise TypeError(
-            f"create_node_auto() got reserved kwarg(s) via **fields: {sorted(overlap)}"
-        )
     params: dict = {"kind": kind, "fields": dict(fields)}
     if event_at is not None: params["event_at"] = event_at
     if expires_in is not None: params["expires_in"] = expires_in
@@ -208,7 +202,7 @@ register_compiler("update_node", _compile_update_node)
 # ---------- UPSERT NODE ---------------------------------------------------
 # upsert_node: "UPSERT" "NODE" STRING field_pairs vector? expires? event_at?
 
-_UPSERT_RESERVED = {"vector", "expires_in", "expires_at", "event_at"}
+# No ``_UPSERT_RESERVED`` guard: see comment above _CREATE_NODE_RESERVED.
 
 
 def upsert_node(
@@ -223,11 +217,6 @@ def upsert_node(
 ) -> Query:
     if expires_in is not None and expires_at is not None:
         raise ValueError("upsert_node(): pass expires_in OR expires_at, not both")
-    overlap = _UPSERT_RESERVED & set(fields)
-    if overlap:
-        raise TypeError(
-            f"upsert_node() got reserved kwarg(s) via **fields: {sorted(overlap)}"
-        )
     fp: dict[str, Any] = {}
     if kind is not None:
         fp["kind"] = kind
@@ -395,7 +384,7 @@ register_compiler("increment", _compile_increment)
 # ---------- ASSERT --------------------------------------------------------
 # assert_stmt: "ASSERT" STRING field_pairs confidence? source? event_at?
 
-_ASSERT_RESERVED = {"confidence", "source", "event_at"}
+# No ``_ASSERT_RESERVED`` guard: see _CREATE_NODE_RESERVED note above.
 
 
 def assert_(
@@ -410,9 +399,6 @@ def assert_(
 ) -> Query:
     if not isinstance(kind, str) or not kind:
         raise ValueError("assert_() requires kind= as a non-empty str")
-    overlap = _ASSERT_RESERVED & set(fields)
-    if overlap:
-        raise TypeError(f"assert_() got reserved kwarg(s) via **fields: {sorted(overlap)}")
     fp: dict[str, Any] = {"kind": kind}
     if value is not None:
         fp["value"] = value
