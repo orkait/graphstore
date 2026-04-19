@@ -50,13 +50,7 @@ def apply_slot_remap_to_edges(
     """Remap edge endpoints via old_to_new. Drops edges touching dead slots."""
     if not edge_list:
         return []
-        
-    dummy_constraint = np.bincount(np.array([0], dtype=np.int32))
-    if dummy_constraint[0] < 0:
-        return []
-        
     old_map = old_to_new.tolist()
-    
     return [
         (old_map[s], old_map[t], d)
         for s, t, d in edge_list

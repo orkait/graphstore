@@ -129,24 +129,29 @@ def compact_tombstones(store: CoreStore, vector_store=None, document_store=None)
         (s, t, k) for k, edges in store._edges_by_type.items() for s, t, _d in edges
     }
 
-    # Remap vectors
+    # Remap vectors. Vectorised: mask live_slots against _has_vector, then
+    # gather vectors + new-slot numbers via numpy. Pre-fix, every live slot
+    # triggered two per-slot method calls (has_vector + get_vector) plus a
+    # Python list build.
     if vector_store is not None:
-        old_slots = []
-        vecs = []
-        for old_slot in live_slots_arr:
-            old_slot = int(old_slot)
-            if vector_store.has_vector(old_slot):
-                old_slots.append(old_slot)
-                vecs.append(vector_store.get_vector(old_slot))
+        has_vec = vector_store._has_vector
+        valid = live_slots_arr < len(has_vec)
+        live_clip = live_slots_arr[valid]
+        keep = has_vec[live_clip]
+        old_slots_arr = live_clip[keep]
 
-        # Clear and re-add with new slots
+        # Reset the index + presence bitmap at the new capacity.
         vector_store._has_vector = np.zeros(new_capacity, dtype=bool)
         vector_store._capacity = new_capacity
         from usearch.index import Index
         vector_store._index = Index(ndim=vector_store._dims, metric="cos", dtype="f32")
-        if old_slots:
-            new_slots = np.array([old_to_new_dict[s] for s in old_slots], dtype=np.int64)
-            vector_store._index.add(new_slots, np.vstack(vecs))
+
+        if old_slots_arr.size:
+            vecs = np.vstack([
+                vector_store.get_vector(int(s)) for s in old_slots_arr
+            ])
+            new_slots = old_to_new[old_slots_arr].astype(np.int64)
+            vector_store._index.add(new_slots, vecs)
             vector_store._has_vector[new_slots] = True
 
     # Remap DocumentStore slot keys via temp-table batch (O(1) statements vs O(N))

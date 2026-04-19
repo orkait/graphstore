@@ -82,13 +82,19 @@ def load(conn, use_compression: bool = False, db_path: str | Path | None = None)
 
     store.node_tombstones = set(mjson.decode(tomb_row[0]))
 
-    # Rebuild id_to_slot from node_ids array
-    store.id_to_slot = {}
-    for slot in range(store._next_slot):
-        if slot not in store.node_tombstones:
-            str_id = int(store.node_ids[slot])
-            if str_id >= 0:
-                store.id_to_slot[str_id] = slot
+    # Rebuild id_to_slot from node_ids array. Single vectorised filter
+    # instead of a Python loop over every slot.
+    n = store._next_slot
+    ids = store.node_ids[:n]
+    live = ids >= 0
+    if store.node_tombstones:
+        tomb_arr = np.fromiter(store.node_tombstones, dtype=np.int64)
+        tomb_arr = tomb_arr[tomb_arr < n]
+        if tomb_arr.size:
+            live[tomb_arr] = False
+    live_slots = np.nonzero(live)[0]
+    store.id_to_slot = dict(zip(ids[live_slots].astype(int).tolist(),
+                                live_slots.astype(int).tolist()))
 
     # Load raw edge lists
     store._edges_by_type = {}
@@ -101,8 +107,9 @@ def load(conn, use_compression: bool = False, db_path: str | Path | None = None)
         # still decode correctly because alnum characters are unaffected
         # by quote/unquote round-tripping.
         etype = unquote(key[len("raw_edges:"):])
-        edge_list = mjson.decode(data)
-        store._edges_by_type[etype] = [(s, t, d) for s, t, d in edge_list]
+        # mjson.decode returns tuples as lists; wrap to tuples in one shot.
+        # Previously did a per-edge generator + tuple repack.
+        store._edges_by_type[etype] = [tuple(e) for e in mjson.decode(data)]
 
     # Rebuild edge keys set and edge matrices
     store._edge_keys = {
