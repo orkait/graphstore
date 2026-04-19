@@ -146,46 +146,9 @@ pip install 'graphstore[ingest,vision,playground]'
 
 ---
 
-## 🚀 Quickstart
-
-```python
-from graphstore import GraphStore
-
-g = GraphStore(path="./brain")
-
-# Store memories. DOCUMENT "..." is the right clause for "this is the text
-# I want retrievable" - it populates the vector index AND BM25 in one shot.
-g.execute('CREATE NODE "mem:paris" kind = "memory" topic = "travel" '
-          'DOCUMENT "Paris is the capital of France, famous for the Eiffel Tower and Louvre."')
-g.execute('CREATE NODE "mem:rome" kind = "memory" topic = "travel" '
-          'DOCUMENT "Rome is the capital of Italy, home to the Colosseum and the Vatican."')
-g.execute('CREATE NODE "mem:tokyo" kind = "memory" topic = "travel" '
-          'DOCUMENT "Tokyo is the capital of Japan, known for the Shibuya crossing and sushi."')
-
-# Link related memories (graph edges for spreading activation)
-g.execute('CREATE EDGE "mem:paris" -> "mem:rome" kind = "both_european_capitals"')
-
-# Retrieve by meaning (hybrid: vector + BM25 + recency + graph fusion)
-r = g.execute('REMEMBER "European architecture and history" LIMIT 5')
-#  -> mem:paris, mem:rome  (tokyo drops out)
-
-# Retrieve by association (spreading activation through edges)
-r = g.execute('RECALL FROM "mem:paris" DEPTH 2 LIMIT 10')
-#  -> mem:rome  (via "both_european_capitals" edge)
-
-# Retrieve by keywords (pure BM25 over document text)
-r = g.execute('LEXICAL SEARCH "Eiffel Tower" LIMIT 5')
-#  -> mem:paris
-
-# Retrieve with a temporal anchor (recency-weighted)
-r = g.execute('REMEMBER "trip plans" AT "2024-03" LIMIT 10')
-
-g.close()
-```
-
-Everything persists to `./brain/` as SQLite. Reopen with the same path and all memories are back. Run the snippet verbatim and REMEMBER / RECALL / LEXICAL all return non-empty results (core install covers it, no extras needed).
-
 > **Heads up.** Plain `CREATE NODE "id" kind = "X" topic = "..."` without a `DOCUMENT` clause stores typed columns only - REMEMBER and LEXICAL will return zero for that node. Use `DOCUMENT "text"` whenever the node's *content* is what you want to retrieve on.
+
+Everything persists to `./brain/` as SQLite. Reopen with the same path and all memories are back.
 
 ---
 
@@ -221,139 +184,74 @@ INGEST "report.pdf" AS "doc:q3" KIND "report"
 SYS CONNECT    -- auto-wire similar chunks across documents
 ```
 
-Supports PDF, Word, Markdown, text, HTML, images (via local VLM sidecar under `[vision]`), and audio (via faster-whisper under `[audio]`). Parses, chunks, embeds, and wires into the graph automatically.
+Core install handles `txt / md / csv / json / html`. File formats that need extra machinery:
 
-### Ingest images with the local VLM sidecar
-
-The `[vision]` extra ships a local OpenAI-compatible sidecar (llama.cpp server + SmolVLM2-2.2B-Instruct Q4_K_M, ~1.5 GB on first use). Zero-config: first `INGEST ... USING VISION` call auto-starts it. Smaller presets (`smolvlm-500m` at ~400 MB) available via `GRAPHSTORE_VISION_MODEL` or `graphstore vision serve --model smolvlm-500m`.
-
-```bash
-pip install 'graphstore[vision]'
-graphstore vision serve --pull-only    # optional: pre-download weights
-```
+| Extra | Formats | How |
+|---|---|---|
+| `[ingest]` | `pdf / docx / xlsx / pptx / html` | markitdown → pymupdf4llm (PDFs) |
+| `[ingest-pro]` | same + `tex / adoc / tiff / bmp` + richer PDFs | docling (~1 GB, pulls torch) |
+| `[vision]` | `png / jpg / webp` + scanned PDF fallback | local llama.cpp sidecar + SmolVLM2-2.2B (~1.5 GB on first call); auto-starts on first `INGEST ... USING VISION` |
+| `[audio]` | `wav / mp3 / flac / m4a / opus / webm` | in-process faster-whisper (~150 MB on first call); timestamp-tagged chunks |
 
 ```sql
--- Scanned PDF caption + OCR fallback
-INGEST "scan.pdf" USING VISION "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
-
--- Standalone image ingest
-INGEST "chart.png" USING VISION "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf" AS "img:q3-chart"
+INGEST "scan.pdf"                                     -- whatever tier applies
+INGEST "chart.png" USING VISION "smolvlm2-2.2b"
+INGEST "interview.mp3"                                -- needs [audio]
 ```
 
-Sidecar lifecycle:
+Bring your own VLM endpoint (Ollama, vLLM, OpenAI) via `GRAPHSTORE_VISION_URL`. See `graphstore vision {serve|stop|status|logs|models}` for the local sidecar.
 
-```bash
-graphstore vision models     # list built-in presets (smolvlm-500m, smolvlm2-2.2b, qwen2.5-vl-3b)
-graphstore vision serve      # start (auto-download on first run)
-graphstore vision status     # PID + port + model in use
-graphstore vision logs       # tail the sidecar log
-graphstore vision stop       # SIGTERM the sidecar
-```
-
-Bring your own endpoint (Ollama, vLLM, OpenAI cloud) via env:
-
-```bash
-export GRAPHSTORE_VISION_URL=https://my-vllm.example.com/v1
-export GRAPHSTORE_VISION_MODEL=smolvlm2-2.2b  # preset override
-```
-
-### Ingest audio with the local Whisper backend
-
-The `[audio]` extra adds in-process speech-to-text via faster-whisper (CTranslate2). No sidecar needed - whisper calls are short enough that in-process beats IPC overhead. Small Whisper models (~40-150 MB) download from HuggingFace Hub on first use.
-
-```bash
-pip install 'graphstore[audio]'
-```
-
-```sql
-INGEST "interview.mp3"
-INGEST "voicememo.m4a" AS "mem:standup-2024-03-15"
-```
-
-Per-segment timestamps are preserved in the chunk heading (e.g. `[00:12-00:34]`) so cited chunks can be located in the source audio. Language is auto-detected; pass an explicit ISO code via `USING whisper` kwargs on the Python API if detection is flaky.
-
-### Track beliefs
+### Beliefs, time, consolidation, evolution
 
 ```sql
 ASSERT "fact:earth-radius" value = 6371 kind = "fact" CONFIDENCE 0.99 SOURCE "physics-tool"
 RETRACT "fact:old-preference" REASON "user corrected this"
 SYS CONTRADICTIONS WHERE kind = "belief" FIELD value GROUP BY topic
-WHAT IF RETRACT "belief:earth-is-flat"
-```
 
-### Temporal awareness
-
-```sql
--- Store when events happened (not just when ingested)
+-- When-it-happened, not just when-ingested
 CREATE NODE "event:trip" kind = "event" content = "visited Paris" EVENT_AT "2024-03-15"
-
--- Query with temporal anchoring
 REMEMBER "trip plans" AT "2024-03" LIMIT 10
 
--- Range queries on event time
-NODES WHERE __event_at__ > 1710000000000 LIMIT 10
-```
-
-### Memory consolidation
-
-```sql
--- Cluster episodic memories into observations (no LLM needed)
+-- Cluster episodic memories, no LLM needed
 SYS CONSOLIDATE THRESHOLD 0.7
 ```
 
 <details>
-<summary><strong>More features</strong></summary>
+<summary><strong>More features</strong> (TTL, snapshots, cron, evolution rules, vault, contexts, graph walks)</summary>
 
-**Memory lifecycle**
 ```sql
+-- TTL + hard delete
 CREATE NODE "scratch:temp" kind = "working" data = "..." EXPIRES IN 30m
 SYS EXPIRE WHERE kind = "working"
-FORGET NODE "mem:old"    -- hard delete (graph + vector + blob)
-```
+FORGET NODE "mem:old"
 
-**Snapshots**
-```sql
+-- Snapshot reasoning branches
 SYS SNAPSHOT "before-hypothesis"
--- ... reasoning branch ...
 SYS ROLLBACK TO "before-hypothesis"
-```
 
-**Scheduled maintenance**
-```python
-g = GraphStore(path="./brain", queued=True)
-g.execute('SYS CRON ADD "expire-ttl" SCHEDULE "@hourly" QUERY "SYS EXPIRE"')
-g.execute('SYS CRON ADD "nightly-opt" SCHEDULE "0 3 * * *" QUERY "SYS OPTIMIZE"')
-```
+-- Scheduled maintenance (needs queued=True)
+SYS CRON ADD "expire-ttl" SCHEDULE "@hourly" QUERY "SYS EXPIRE"
 
-**Self-healing rules**
-```sql
+-- Self-tuning rules
 SYS EVOLVE RULE "reindex-on-drift"
   WHEN recall_hit_rate <= 0.4
   THEN RUN SYS REEMBED
   COOLDOWN 86400
-```
 
-**Vault (markdown notes)**
-```python
-g = GraphStore(path="./brain", vault="./notes")
-g.execute('VAULT NEW "Project Requirements" KIND "context"')
-g.execute('VAULT SEARCH "deployment requirements" LIMIT 5')
-```
+-- Markdown vault
+-- python: GraphStore(path="./brain", vault="./notes")
+VAULT NEW "Project Requirements" KIND "context"
+VAULT SEARCH "deployment requirements" LIMIT 5
 
-**Context isolation**
-```sql
+-- Context isolation
 BIND CONTEXT "reasoning-session-42"
 CREATE NODE "hyp:1" kind = "hypothesis" content = "maybe X"
 DISCARD CONTEXT "reasoning-session-42"
-```
 
-**Graph queries**
-```sql
-TRAVERSE FROM "node_id" DEPTH 3
-SUBGRAPH FROM "node_id" DEPTH 2
+-- Graph walks
+TRAVERSE FROM "id" DEPTH 3
 PATH FROM "a" TO "b" MAX_DEPTH 5
-SHORTEST PATH FROM "a" TO "b"
-ANCESTORS OF "node_id" DEPTH 3
+ANCESTORS OF "id" DEPTH 3
 COMMON NEIGHBORS OF "a" AND "b"
 AGGREGATE NODES WHERE kind = "memory" GROUP BY topic SELECT COUNT(), AVG(importance)
 ```
