@@ -314,18 +314,26 @@ class GraphStoreAdapter:
                 dsl.append(f'CREATE EDGE "{sess_node_id}" -> "{msg_id}" kind = "has_message"')
 
                 if self._entity_extraction:
+                    # Dedupe per message. NER can emit the same entity
+                    # string multiple times (multi-span hits on repeated
+                    # mentions within a single message), which would
+                    # otherwise produce a duplicate mentions edge and
+                    # rollback the whole batch (Kaggle v29 failure mode).
+                    msg_ent_seen: set[str] = set()
                     for ent_name in entities:
                         ent_slug = _slug(ent_name)
                         if not ent_slug:
                             continue
                         ent_id = f"ent:{ent_slug}"
+                        if ent_id in msg_ent_seen:
+                            continue
+                        msg_ent_seen.add(ent_id)
                         if ent_id not in entity_seen:
                             dsl.append(
                                 f'UPSERT NODE "{ent_id}" kind = "entity" '
                                 f'name = "{_escape(ent_name)}"'
                             )
                             entity_seen.add(ent_id)
-                        
                         dsl.append(f'CREATE EDGE "{msg_id}" -> "{ent_id}" kind = "mentions"')
 
             for i in range(n - 1):
