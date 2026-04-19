@@ -16,9 +16,36 @@
 
 ---
 
-graphstore gives AI agents persistent, queryable memory. Store nodes and edges with a simple DSL, retrieve them by meaning, by association, by text search, or any combination - all from one call.
+graphstore gives AI agents persistent, queryable memory. Store nodes and edges with a simple DSL; retrieve by meaning, by association, by text, or any combination - one call. Runs in-process, persists to SQLite. No server, no infrastructure.
 
-It is designed for agent frameworks, LLM applications, and research tools that need more than a vector database but less than a full graph database. Everything runs in-process, persists to SQLite. No server, no infrastructure.
+## ⚡ 60-second start
+
+```bash
+pip install graphstore
+```
+
+```python
+from graphstore import GraphStore
+
+g = GraphStore(path="./brain")
+
+# Store: DOCUMENT populates vector + BM25 + blob in one shot
+g.execute('CREATE NODE "mem:paris" kind = "memory" '
+          'DOCUMENT "Paris is the capital of France, famous for the Eiffel Tower."')
+g.execute('CREATE NODE "mem:rome" kind = "memory" '
+          'DOCUMENT "Rome is the capital of Italy, home to the Colosseum."')
+g.execute('CREATE EDGE "mem:paris" -> "mem:rome" kind = "both_european_capitals"')
+
+# Retrieve - four primitives, all backed by the three storage engines
+g.execute('REMEMBER "European history" LIMIT 5')          # hybrid fusion
+g.execute('RECALL FROM "mem:paris" DEPTH 2 LIMIT 10')     # graph walk
+g.execute('LEXICAL SEARCH "Eiffel Tower" LIMIT 5')        # BM25
+g.execute('SIMILAR TO "capital city" LIMIT 5')            # cosine only
+
+g.close()
+```
+
+That's it. Core install covers REMEMBER / RECALL / LEXICAL / SIMILAR / SYS CRON / VAULT SYNC. Extras for PDF, image, audio, GPU, playground UI are all opt-in - see [Installation](#-installation).
 
 ---
 
@@ -337,17 +364,19 @@ AGGREGATE NODES WHERE kind = "memory" GROUP BY topic SELECT COUNT(), AVG(importa
 
 ## ⚡ Performance
 
-All numbers at 100k nodes, mid-range laptop, no GPU.
+Median latency over 30 iters, model2vec 256-dim embeddings, 16-core CPU @ 2-thread BLAS cap (graphstore's default). Reproduce on your box: `python benchmarks/micro_latency.py`. Last measured 2026-04-19.
 
-| Operation | Latency |
-|---|---|
-| Point lookup (`NODE "id"`) | 4 us |
-| Filtered scan (`NODES WHERE ... LIMIT 10`) | 68 us |
-| Semantic search (`SIMILAR TO` LIMIT 10) | 127 us |
-| Graph traversal (`RECALL` DEPTH 3) | 983 us |
-| Hybrid retrieval (`REMEMBER` LIMIT 10) | ~2 ms |
-| Assert / retract | 4-9 us |
-| Memory per node | 66 bytes (columns) + ~1 KB (vector) |
+| Operation | In-memory | On-disk | Notes |
+|---|---|---|---|
+| Point lookup `NODE "id"` | **5 us** | 11 us | hash → slot |
+| Filtered scan `NODES WHERE ... LIMIT 10` | **14 us** | 51 us | typed column filter |
+| Semantic search `SIMILAR TO "..." LIMIT 10` | **87 us** | 175 us | usearch HNSW ANN |
+| Graph traversal `RECALL DEPTH 3` | ~1 ms | ~1 ms | spreading activation |
+| Hybrid retrieval `REMEMBER LIMIT 10` | ~6 ms | ~50 ms | 4-signal fusion (scales with candidate set) |
+| `ASSERT` | 11 us | 4 ms | disk path pays WAL sync per call |
+| Memory per node | ~1.6 KB | ~1.6 KB | ~80 bytes typed columns + ~1 KB vector + overhead |
+
+Disk numbers at **100k nodes**, in-memory numbers at **10k nodes** (disk WAL sync dominates at small N, ANN tree depth dominates at large N). REMEMBER scales with the number of candidates the ANN + FTS leg return — realistic workloads have << 100 matches and the fused pipeline drops to single-digit ms.
 
 ### Benchmark results
 
