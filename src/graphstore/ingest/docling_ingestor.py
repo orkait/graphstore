@@ -9,9 +9,11 @@ class DoclingIngestor(Ingestor):
         "md", "html", "htm", "csv",                               # markup / structured
         "tex", "adoc",                                             # LaTeX, AsciiDoc
         "png", "jpg", "jpeg", "tiff", "tif", "bmp", "webp",       # images
-        "m4a", "aac",                                              # audio (requires docling[asr])
-        "mp4", "avi", "mov",                                       # video (requires docling[asr] + ffmpeg)
     ]
+    # Audio/video (m4a, aac, mp4, avi, mov) were advertised but graphstore has
+    # no test exercising docling[asr]. Removed to match tested surface.
+    # Users who need ASR can run ``pip install docling[asr]`` and call
+    # docling directly, then ``gs.execute(... DOCUMENT ...)`` with the result.
 
     def __init__(self) -> None:
         # Lazy converter: constructing ``DocumentConverter`` costs ~200 MB of
