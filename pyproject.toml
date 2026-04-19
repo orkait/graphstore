@@ -48,7 +48,15 @@ dev = [
     "pytest>=7.0",
     "pytest-benchmark>=4.0",
     "pytest-cov>=4.0",
+    "pytest-xdist>=3.8",
+    "pytest-timeout>=2.4",
+    # httpx is needed by starlette.testclient (used in test_server_endpoints)
     "httpx>=0.24",
+    # onnxruntime + tokenizers power the TinyBERT NER path exercised by the
+    # test suite. Users without `dev` still need to install them explicitly
+    # if they want entity extraction.
+    "onnxruntime>=1.17",
+    "tokenizers>=0.15",
 ]
 embed-default = [
     "model2vec>=0.4",
@@ -148,4 +156,5 @@ dev = [
     "pytest-benchmark>=5.2.3",
     "pytest-cov>=7.0.0",
     "pytest-timeout>=2.4.0",
+    "pytest-xdist>=3.8.0",
 ]

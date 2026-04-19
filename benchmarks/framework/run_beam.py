@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from openai import OpenAI
+# openai is only needed by _load_reader / _answer_question (reader-LLM path).
+# Keep the module import-safe without the SDK so tests that just exercise
+# chunking helpers don't require an optional dep.
 
 from graphstore import GraphStore
 from graphstore.registry.installer import load_installed_embedder, set_cache_dir
@@ -90,7 +92,9 @@ def build_answer_payload(probing_questions: dict, answers: dict[tuple[str, int],
     return payload
 
 
-def _load_reader(base_url: str | None, model_name: str, api_key: str | None) -> OpenAI:
+def _load_reader(base_url: str | None, model_name: str, api_key: str | None):
+    """Lazy import of openai - script path only, not needed for chunking tests."""
+    from openai import OpenAI
     kwargs: dict[str, Any] = {}
     if base_url:
         kwargs["base_url"] = base_url
@@ -98,7 +102,7 @@ def _load_reader(base_url: str | None, model_name: str, api_key: str | None) -> 
     return OpenAI(**kwargs)
 
 
-def _answer_question(client: OpenAI, model_name: str, question: str, context: str) -> str:
+def _answer_question(client, model_name: str, question: str, context: str) -> str:
     base_prompt = ANSWER_GENERATION_FOR_RAG.replace("<context>", context).replace("<question>", question)
     prompts = [
         base_prompt,
