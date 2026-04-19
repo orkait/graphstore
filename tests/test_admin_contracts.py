@@ -71,8 +71,12 @@ def test_config_semantics(tmp_path):
     assert res.data["core"]["ceiling_mb"] == 1024
     
     # New instance loading that config should start with 1024
+    # (close the first; single-owner lock prevents concurrent opens on the
+    # same path)
+    db.close()
     db2 = GraphStore(path=str(db_dir))
     assert db2.ceiling_mb == 1024
+    db2.close()
 
 
 # ============================================================

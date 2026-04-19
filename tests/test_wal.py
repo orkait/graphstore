@@ -15,10 +15,15 @@ def test_wal_replay_tolerates_duplicate_create(tmp_path):
         )
         gs._conn.commit()
     finally:
+        # Simulate crash: skip checkpoint (so the forged WAL row persists)
+        # but still drop the path lock so we can reopen.
         gs._wal = None
         if gs._conn is not None:
             gs._conn.close()
             gs._runtime.conn = None
+        if gs._path_lock is not None:
+            gs._path_lock.release()
+            gs._path_lock = None
 
     gs2 = GraphStore(path=str(path))
     try:
@@ -57,10 +62,15 @@ def test_wal_replay_moves_failing_statement_to_dlq(tmp_path):
         )
         gs._conn.commit()
     finally:
+        # Simulate crash: skip checkpoint (so the forged WAL row persists)
+        # but still drop the path lock so we can reopen.
         gs._wal = None
         if gs._conn is not None:
             gs._conn.close()
             gs._runtime.conn = None
+        if gs._path_lock is not None:
+            gs._path_lock.release()
+            gs._path_lock = None
 
     gs2 = GraphStore(path=str(path))
     try:
@@ -96,10 +106,15 @@ def test_wal_replay_dlq_insert_failure_does_not_wedge_wal(tmp_path, monkeypatch)
         gs._conn.execute("DROP TABLE failed_wal_entries")
         gs._conn.commit()
     finally:
+        # Simulate crash: skip checkpoint (so the forged WAL row persists)
+        # but still drop the path lock so we can reopen.
         gs._wal = None
         if gs._conn is not None:
             gs._conn.close()
             gs._runtime.conn = None
+        if gs._path_lock is not None:
+            gs._path_lock.release()
+            gs._path_lock = None
 
     gs2 = GraphStore(path=str(path))
     try:
