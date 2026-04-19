@@ -287,21 +287,25 @@ class CoreStore:
         if not ids:
             return []
 
-        slots_to_remove: list[int] = []
-        str_ids_to_remove: list[int] = []
-        deleted_ids: list[str] = []
+        # Filter + intern in one pass. Each iteration is O(1) against the
+        # string table and dict, so the loop body is already cheap; the
+        # win here is just list-comp construction over repeated .append.
         intern = self.string_table.intern
-
-        for id_ in ids:
-            if id_ not in self.string_table:
-                continue
-            str_id = intern(id_)
-            slot = self.id_to_slot.get(str_id)
-            if slot is None or slot in self.node_tombstones:
-                continue
-            slots_to_remove.append(slot)
-            str_ids_to_remove.append(str_id)
-            deleted_ids.append(id_)
+        id_to_slot = self.id_to_slot
+        tombstones = self.node_tombstones
+        triples = [
+            (id_, str_id, slot)
+            for id_ in ids
+            if id_ in self.string_table
+            for str_id in (intern(id_),)
+            for slot in (id_to_slot.get(str_id),)
+            if slot is not None and slot not in tombstones
+        ]
+        if not triples:
+            return []
+        deleted_ids = [t[0] for t in triples]
+        str_ids_to_remove = [t[1] for t in triples]
+        slots_to_remove = [t[2] for t in triples]
 
         if not slots_to_remove:
             return []
@@ -335,18 +339,20 @@ class CoreStore:
 
         import logging as _logging
         _rm_log = _logging.getLogger(__name__)
-        for slot in slots_to_remove:
-            if vector_store is not None:
+        # Batch-delete documents + FTS in one transaction (N queries -> 2).
+        if document_store is not None and slots_to_remove:
+            try:
+                document_store.delete_documents_batch(slots_to_remove)
+            except Exception as _ds_err:
+                _rm_log.debug("doc batch delete failed: %s", _ds_err)
+        # Vector store has no batch remove (usearch Index.remove is per-key).
+        if vector_store is not None:
+            for slot in slots_to_remove:
                 try:
                     vector_store.remove(slot)
                 except Exception as _vs_err:
                     _rm_log.debug("vector remove failed slot=%s: %s", slot, _vs_err)
-            if document_store is not None:
-                try:
-                    document_store.delete_document(slot)
-                except Exception as _ds_err:
-                    _rm_log.debug("doc delete failed slot=%s: %s", slot, _ds_err)
-            self.columns.clear(slot)
+        self.columns.clear_slots(slots_to_remove)
 
         self.node_tombstones.update(slot_set)
         self._tombstone_mask_cache = None
