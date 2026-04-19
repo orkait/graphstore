@@ -619,7 +619,7 @@ def test_run_action_status_in_history(tmp_path):
 
 def test_recall_misses_signal_exists():
     """recall_misses is a known signal and returned by compute_signals()."""
-    from graphstore.evolve import KNOWN_SIGNALS
+    from graphstore.core.evolve import KNOWN_SIGNALS
 
     assert "recall_misses" in KNOWN_SIGNALS
 
@@ -774,7 +774,7 @@ def test_persistence_across_restart(tmp_path):
 
 def test_starter_rules_disabled():
     """Test 27: Starter rules from evolve_defaults are present but disabled by default."""
-    from graphstore.evolve_defaults import STARTER_RULES
+    from graphstore.core.evolve import STARTER_RULES
 
     assert len(STARTER_RULES) >= 3
     for rule in STARTER_RULES:
@@ -803,7 +803,7 @@ def test_wal_pending_count_property(tmp_path):
 
 def test_known_signals_registry():
     """KNOWN_SIGNALS must contain all 12 spec-defined signals."""
-    from graphstore.evolve import KNOWN_SIGNALS
+    from graphstore.core.evolve import KNOWN_SIGNALS
 
     expected = {
         "memory_pct", "memory_mb", "node_count", "tombstone_ratio",
@@ -815,7 +815,7 @@ def test_known_signals_registry():
 
 def test_tunable_params_registry():
     """TUNABLE_PARAMS must contain all 10 spec-defined parameters."""
-    from graphstore.evolve import TUNABLE_PARAMS
+    from graphstore.core.evolve import TUNABLE_PARAMS
 
     expected = {
         "ceiling_mb", "eviction_target_ratio", "remember_weights",
