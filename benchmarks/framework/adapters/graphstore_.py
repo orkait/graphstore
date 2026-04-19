@@ -293,25 +293,24 @@ class GraphStoreAdapter:
             event_at_clause = f" EVENT_AT {sess_event_ms}" if sess_event_ms else ""
 
             entity_seen: set[str] = set()
-            fts_items: list[tuple[str, str]] = []
-            
+
             for i, msg in enumerate(session.messages):
                 entities = all_entities[i] if all_entities else []
                 msg_id = f"{session.session_id}:msg{i}"
-                content_raw = msg.content
-                content = _escape(content_raw)
+                content = _escape(msg.content)
                 role = _escape(msg.role)
-                
+
+                # DOCUMENT clause auto-populates doc_fts for plaintext bodies
+                # (PR #102), so the adapter no longer needs a separate
+                # index_text_batch call after the batch.
+                doc_clause = f' DOCUMENT "{content}"' if self._populate_fts else ""
                 dsl.append(
                     f'CREATE NODE "{msg_id}" kind = "message" '
                     f'session = "{sid}" role = "{role}" '
                     f'content = "{content}" '
-                    f'position = {i}{event_at_clause}'
+                    f'position = {i}{event_at_clause}{doc_clause}'
                 )
-                
-                if self._populate_fts:
-                    fts_items.append((msg_id, content_raw))
-                
+
                 dsl.append(f'CREATE EDGE "{sess_node_id}" -> "{msg_id}" kind = "has_message"')
 
                 if self._entity_extraction:
@@ -343,11 +342,9 @@ class GraphStoreAdapter:
                 self._gs.execute("\n".join(dsl))
             t_exec = time.time() - st
                 
-            # 4. Batch index FTS
-            st = time.time()
-            if fts_items:
-                self._gs.index_text_batch(fts_items)
-            t_fts = time.time() - st
+            # 4. FTS is populated inline via DOCUMENT clause above; no
+            #    separate pass needed.
+            t_fts = 0.0
 
         if t.elapsed_ms > 100:
             print(f"    [DEBUG] sess={session.session_id} msgs={n} ner={t_ner:.2f}s, exec={t_exec:.2f}s, fts={t_fts:.2f}s")
