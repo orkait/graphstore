@@ -124,3 +124,9 @@ def parse_uncached(query: str):
 def clear_cache():
     """Clear the plan cache."""
     _plan_cache.clear()
+
+
+# Register plan-cache accessors with core so optimizer can read/clear this
+# cache without importing dsl - enforces top-down layering.
+from graphstore.core import plan_cache as _core_plan_cache
+_core_plan_cache.register(lambda: len(_plan_cache), clear_cache)
