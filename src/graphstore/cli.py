@@ -145,16 +145,38 @@ def cmd_vision(args: argparse.Namespace) -> None:
 
     sub = args.vision_command
     if sub == "serve":
+        repo = getattr(args, "repo", None)
+        model_file = getattr(args, "model_file", None)
+        mmproj_file = getattr(args, "mmproj_file", None)
+        chat_format = getattr(args, "chat_format", None)
+        if repo or model_file or mmproj_file or chat_format:
+            if not (repo and model_file and mmproj_file):
+                print(
+                    "--repo, --model-file, --mmproj-file must all be set "
+                    "when overriding the preset",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            spec = vs.VLMModelSpec(
+                repo=repo,
+                model_file=model_file,
+                mmproj_file=mmproj_file,
+                chat_format=chat_format or "llava-1-5",
+            )
+        else:
+            spec = getattr(args, "model", None)
         if args.pull_only:
-            model_path, mmproj_path = vs.download_weights()
+            model_path, mmproj_path = vs.download_weights(spec)
             print(f"model:  {model_path}")
             print(f"mmproj: {mmproj_path}")
             return
         try:
             st = vs.start(
-                host=args.host,
-                port=args.port,
+                host=getattr(args, "host", None),
+                port=getattr(args, "port", None),
+                model=spec,
                 n_threads=args.threads,
+                n_ctx=args.n_ctx,
             )
         except (RuntimeError, TimeoutError) as e:
             print(f"sidecar failed to start: {e}", file=sys.stderr)
@@ -164,7 +186,7 @@ def cmd_vision(args: argparse.Namespace) -> None:
         ok = vs.stop()
         print("stopped" if ok else "no sidecar was running")
     elif sub == "status":
-        st = vs.status(host=args.host)
+        st = vs.status(host=getattr(args, "host", None))
         if st.running:
             print(f"running  pid={st.pid}  port={st.port}  model={st.model}  url={st.base_url}")
         else:
@@ -176,6 +198,12 @@ def cmd_vision(args: argparse.Namespace) -> None:
             sys.exit(1)
         with log.open("rb") as f:
             sys.stdout.buffer.write(f.read())
+    elif sub == "models":
+        print(f"{'NAME':<18} {'DISK':<8} REPO / FILE")
+        print("-" * 80)
+        for name, s in vs.VLM_MODELS.items():
+            size = f"{s.disk_mb} MB" if s.disk_mb else "-"
+            print(f"{name:<18} {size:<8} {s.repo}/{s.model_file}")
     else:
         print("unknown vision subcommand", file=sys.stderr)
         sys.exit(2)
@@ -245,14 +273,21 @@ def main(argv: list[str] | None = None) -> None:
     vis = sub.add_parser("vision", help="Manage the local vision sidecar (serve/stop/status/logs)")
     vis_sub = vis.add_subparsers(dest="vision_command", required=True)
     vis_serve = vis_sub.add_parser("serve", help="Start the sidecar (downloads weights on first run)")
-    vis_serve.add_argument("--host", default="127.0.0.1")
-    vis_serve.add_argument("--port", type=int, default=8418)
-    vis_serve.add_argument("--threads", type=int, default=8)
+    vis_serve.add_argument("--host", default=None, help="Bind host (env GRAPHSTORE_VISION_HOST, default 127.0.0.1)")
+    vis_serve.add_argument("--port", type=int, default=None, help="Bind port (env GRAPHSTORE_VISION_PORT, default 8418)")
+    vis_serve.add_argument("--threads", type=int, default=8, help="CPU threads for inference (default 8)")
+    vis_serve.add_argument("--n-ctx", type=int, default=4096, help="Context window tokens (default 4096)")
+    vis_serve.add_argument("--model", default=None, help="Preset name (see `vision models`); env GRAPHSTORE_VISION_MODEL. Ignored when --repo is given")
+    vis_serve.add_argument("--repo", default=None, help="Override: HF repo id (e.g. ggml-org/SmolVLM2-2.2B-Instruct-GGUF)")
+    vis_serve.add_argument("--model-file", default=None, help="Override: GGUF filename within repo")
+    vis_serve.add_argument("--mmproj-file", default=None, help="Override: mmproj GGUF filename within repo")
+    vis_serve.add_argument("--chat-format", default=None, help="Override: llama.cpp chat_format (e.g. llava-1-5, qwen)")
     vis_serve.add_argument("--pull-only", action="store_true", help="Download weights without starting the server")
     vis_sub.add_parser("stop", help="Stop the running sidecar")
     vis_status = vis_sub.add_parser("status", help="Show sidecar status")
-    vis_status.add_argument("--host", default="127.0.0.1")
+    vis_status.add_argument("--host", default=None)
     vis_sub.add_parser("logs", help="Print the sidecar log file to stdout")
+    vis_sub.add_parser("models", help="List built-in VLM presets")
     vis.set_defaults(func=cmd_vision)
 
     # config subcommand

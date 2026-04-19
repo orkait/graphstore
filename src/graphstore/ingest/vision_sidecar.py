@@ -23,14 +23,93 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass(frozen=True, slots=True)
+class VLMModelSpec:
+    """Declarative VLM preset: HF repo + GGUF files + llama.cpp chat format."""
+    repo: str
+    model_file: str
+    mmproj_file: str
+    chat_format: str = "llava-1-5"
+    disk_mb: int = 0
+
+    def __str__(self) -> str:
+        return f"{self.repo}/{self.model_file}"
+
+
+# Built-in presets. Users can register more via ``register_model`` or pass raw
+# repo/file overrides to ``start``. Keys are the short names accepted by
+# ``graphstore vision serve --model <name>`` and by VisionHandler's ``model``
+# kwarg when the `[vision]` extra is installed.
+VLM_MODELS: dict[str, VLMModelSpec] = {
+    "smolvlm-500m": VLMModelSpec(
+        repo="ggml-org/SmolVLM-500M-Instruct-GGUF",
+        model_file="SmolVLM-500M-Instruct-Q8_0.gguf",
+        mmproj_file="mmproj-SmolVLM-500M-Instruct-f16.gguf",
+        chat_format="llava-1-5",
+        disk_mb=400,
+    ),
+    "smolvlm2-2.2b": VLMModelSpec(
+        repo="ggml-org/SmolVLM2-2.2B-Instruct-GGUF",
+        model_file="SmolVLM2-2.2B-Instruct-Q4_K_M.gguf",
+        mmproj_file="mmproj-SmolVLM2-2.2B-Instruct-f16.gguf",
+        chat_format="llava-1-5",
+        disk_mb=1500,
+    ),
+    "qwen2.5-vl-3b": VLMModelSpec(
+        repo="unsloth/Qwen2.5-VL-3B-Instruct-GGUF",
+        model_file="Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+        mmproj_file="mmproj-F16.gguf",
+        chat_format="qwen",
+        disk_mb=2000,
+    ),
+}
+
+DEFAULT_MODEL_NAME = "smolvlm-500m"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8418
-DEFAULT_MODEL_REPO = "ggml-org/SmolVLM-500M-Instruct-GGUF"
-DEFAULT_MODEL_FILE = "SmolVLM-500M-Instruct-Q8_0.gguf"
-DEFAULT_MMPROJ_FILE = "mmproj-SmolVLM-500M-Instruct-f16.gguf"
-DEFAULT_CHAT_FORMAT = "llava-1-5"
 
 _CACHE_DIR_ENV = "GRAPHSTORE_VLM_CACHE_DIR"
+_URL_ENV = "GRAPHSTORE_VISION_URL"
+_MODEL_ENV = "GRAPHSTORE_VISION_MODEL"
+_HOST_ENV = "GRAPHSTORE_VISION_HOST"
+_PORT_ENV = "GRAPHSTORE_VISION_PORT"
+
+
+def register_model(name: str, spec: VLMModelSpec) -> None:
+    """Register a VLM preset. Users can add custom entries at import time."""
+    VLM_MODELS[name] = spec
+
+
+def resolve_spec(model: str | VLMModelSpec | None = None) -> VLMModelSpec:
+    """Return the VLMModelSpec for a preset name or pass-through a VLMModelSpec.
+
+    Lookup order: explicit arg -> ``GRAPHSTORE_VISION_MODEL`` env -> default.
+    """
+    if isinstance(model, VLMModelSpec):
+        return model
+    name = model or os.environ.get(_MODEL_ENV) or DEFAULT_MODEL_NAME
+    if name not in VLM_MODELS:
+        raise KeyError(
+            f"Unknown VLM preset {name!r}. "
+            f"Known: {sorted(VLM_MODELS)}. "
+            f"Register custom ones via vision_sidecar.register_model()."
+        )
+    return VLM_MODELS[name]
+
+
+def _env_host() -> str:
+    return os.environ.get(_HOST_ENV) or DEFAULT_HOST
+
+
+def _env_port() -> int:
+    raw = os.environ.get(_PORT_ENV)
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            logger.warning("invalid %s=%r, falling back to %d", _PORT_ENV, raw, DEFAULT_PORT)
+    return DEFAULT_PORT
 
 
 def _cache_dir() -> Path:
@@ -66,7 +145,7 @@ def _read_pid() -> tuple[int, int, str] | None:
         rec = json.loads(pf.read_text())
         pid = int(rec["pid"])
         port = int(rec["port"])
-        model = str(rec.get("model", DEFAULT_MODEL_FILE))
+        model = str(rec.get("model", "unknown"))
     except (ValueError, KeyError, json.JSONDecodeError):
         logger.debug("vision sidecar pid file corrupt, ignoring", exc_info=True)
         return None
@@ -100,15 +179,12 @@ def _probe(host: str, port: int, timeout: float = 1.0) -> bool:
 
 
 def download_weights(
-    repo: str = DEFAULT_MODEL_REPO,
-    model_file: str = DEFAULT_MODEL_FILE,
-    mmproj_file: str = DEFAULT_MMPROJ_FILE,
+    spec: VLMModelSpec | str | None = None,
 ) -> tuple[Path, Path]:
     """Download the GGUF model + mmproj. Returns (model_path, mmproj_path).
 
-    Uses huggingface_hub.hf_hub_download so the files land in the standard
-    HF snapshot layout under the graphstore cache dir. Idempotent - re-calling
-    after a successful download returns the existing paths without re-fetching.
+    Accepts a preset name (``"smolvlm-500m"``), a :class:`VLMModelSpec`, or
+    ``None`` to use the default. Idempotent - re-calling returns cached paths.
     """
     try:
         from huggingface_hub import hf_hub_download
@@ -118,27 +194,34 @@ def download_weights(
             "Install with: pip install 'graphstore[vision]'"
         ) from e
 
+    s = resolve_spec(spec)
     cache = _cache_dir()
     cache.mkdir(parents=True, exist_ok=True)
-    model_path = hf_hub_download(repo, filename=model_file, cache_dir=str(cache))
-    mmproj_path = hf_hub_download(repo, filename=mmproj_file, cache_dir=str(cache))
+    model_path = hf_hub_download(s.repo, filename=s.model_file, cache_dir=str(cache))
+    mmproj_path = hf_hub_download(s.repo, filename=s.mmproj_file, cache_dir=str(cache))
     return Path(model_path), Path(mmproj_path)
 
 
 def start(
     *,
-    host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
-    model_repo: str = DEFAULT_MODEL_REPO,
-    model_file: str = DEFAULT_MODEL_FILE,
-    mmproj_file: str = DEFAULT_MMPROJ_FILE,
-    chat_format: str = DEFAULT_CHAT_FORMAT,
+    host: str | None = None,
+    port: int | None = None,
+    model: VLMModelSpec | str | None = None,
     n_threads: int = 8,
     n_ctx: int = 4096,
     wait_ready: bool = True,
     ready_timeout: float = 90.0,
 ) -> SidecarStatus:
-    """Spawn the sidecar. If already running at ``host:port``, returns its status."""
+    """Spawn the sidecar. If already running at ``host:port``, returns its status.
+
+    All defaults respect the ``GRAPHSTORE_VISION_{HOST,PORT,MODEL}`` env vars
+    so the same binary can be run in different project contexts without
+    rewiring kwargs.
+    """
+    host = host or _env_host()
+    port = port if port is not None else _env_port()
+    spec = resolve_spec(model)
+
     existing = _read_pid()
     if existing is not None:
         pid, existing_port, existing_model = existing
@@ -161,14 +244,14 @@ def start(
             base_url=f"http://{host}:{port}/v1",
         )
 
-    model_path, mmproj_path = download_weights(model_repo, model_file, mmproj_file)
+    model_path, mmproj_path = download_weights(spec)
 
     log = _log_file().open("ab")
     cmd = [
         sys.executable, "-m", "llama_cpp.server",
         "--model", str(model_path),
         "--clip_model_path", str(mmproj_path),
-        "--chat_format", chat_format,
+        "--chat_format", spec.chat_format,
         "--host", host,
         "--port", str(port),
         "--n_threads", str(n_threads),
@@ -176,7 +259,7 @@ def start(
     ]
     logger.info("vision sidecar: spawning %s", " ".join(cmd))
     proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-    _write_pid(proc.pid, port, model_file)
+    _write_pid(proc.pid, port, spec.model_file)
 
     if wait_ready:
         deadline = time.monotonic() + ready_timeout
@@ -205,7 +288,7 @@ def start(
         running=True,
         pid=proc.pid,
         port=port,
-        model=model_file,
+        model=spec.model_file,
         base_url=f"http://{host}:{port}/v1",
     )
 
@@ -236,7 +319,8 @@ def stop() -> bool:
     return True
 
 
-def status(host: str = DEFAULT_HOST) -> SidecarStatus:
+def status(host: str | None = None) -> SidecarStatus:
+    host = host or _env_host()
     existing = _read_pid()
     if existing is None:
         return SidecarStatus(running=False, pid=None, port=None, model=None, base_url=None)
@@ -252,21 +336,23 @@ def status(host: str = DEFAULT_HOST) -> SidecarStatus:
 
 
 def resolve_base_url(
-    host: str = DEFAULT_HOST,
-    port: int = DEFAULT_PORT,
+    host: str | None = None,
+    port: int | None = None,
     auto_start: bool = True,
 ) -> str | None:
     """Return the URL to use for VisionHandler, or None if no endpoint available.
 
     Precedence:
       1. ``GRAPHSTORE_VISION_URL`` env var (user-configured remote endpoint)
-      2. Live sidecar from recorded PID file
-      3. Probe the default port (maybe the user ran ``gs vision serve`` manually)
-      4. ``auto_start`` -> spawn sidecar (requires ``[vision]`` extra) and return URL
+      2. Live sidecar recorded in the PID file
+      3. Probe ``host:port`` (defaults respect ``GRAPHSTORE_VISION_{HOST,PORT}``)
+      4. ``auto_start`` -> spawn sidecar (requires ``[vision]`` extra)
     """
-    env = os.environ.get("GRAPHSTORE_VISION_URL")
+    env = os.environ.get(_URL_ENV)
     if env:
         return env.rstrip("/")
+    host = host or _env_host()
+    port = port if port is not None else _env_port()
     st = status(host)
     if st.running:
         return st.base_url

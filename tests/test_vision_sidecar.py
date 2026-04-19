@@ -116,6 +116,60 @@ def test_stop_returns_false_when_not_running(vlm_cache):
     assert vs.stop() is False
 
 
+def test_resolve_spec_defaults_to_smolvlm_500m(vlm_cache, monkeypatch):
+    from graphstore.ingest import vision_sidecar as vs
+    monkeypatch.delenv("GRAPHSTORE_VISION_MODEL", raising=False)
+    spec = vs.resolve_spec(None)
+    assert spec.repo == "ggml-org/SmolVLM-500M-Instruct-GGUF"
+
+
+def test_resolve_spec_reads_env(vlm_cache, monkeypatch):
+    from graphstore.ingest import vision_sidecar as vs
+    monkeypatch.setenv("GRAPHSTORE_VISION_MODEL", "smolvlm2-2.2b")
+    spec = vs.resolve_spec(None)
+    assert spec.repo == "ggml-org/SmolVLM2-2.2B-Instruct-GGUF"
+
+
+def test_resolve_spec_passthrough_object(vlm_cache):
+    from graphstore.ingest import vision_sidecar as vs
+    custom = vs.VLMModelSpec(repo="x/y", model_file="m.gguf", mmproj_file="mm.gguf")
+    assert vs.resolve_spec(custom) is custom
+
+
+def test_resolve_spec_unknown_preset_raises(vlm_cache):
+    from graphstore.ingest import vision_sidecar as vs
+    with pytest.raises(KeyError, match="Unknown VLM preset"):
+        vs.resolve_spec("no-such-preset")
+
+
+def test_register_model_adds_preset(vlm_cache):
+    from graphstore.ingest import vision_sidecar as vs
+    spec = vs.VLMModelSpec(repo="a/b", model_file="c.gguf", mmproj_file="d.gguf")
+    vs.register_model("tmp-test", spec)
+    try:
+        assert vs.resolve_spec("tmp-test") is spec
+    finally:
+        vs.VLM_MODELS.pop("tmp-test", None)
+
+
+def test_env_port_override(vlm_cache, monkeypatch):
+    from graphstore.ingest import vision_sidecar as vs
+    monkeypatch.setenv("GRAPHSTORE_VISION_PORT", "9999")
+    assert vs._env_port() == 9999
+
+
+def test_env_port_invalid_falls_back(vlm_cache, monkeypatch):
+    from graphstore.ingest import vision_sidecar as vs
+    monkeypatch.setenv("GRAPHSTORE_VISION_PORT", "not-a-number")
+    assert vs._env_port() == vs.DEFAULT_PORT
+
+
+def test_env_host_override(vlm_cache, monkeypatch):
+    from graphstore.ingest import vision_sidecar as vs
+    monkeypatch.setenv("GRAPHSTORE_VISION_HOST", "0.0.0.0")
+    assert vs._env_host() == "0.0.0.0"
+
+
 def test_download_weights_surfaces_missing_extra(vlm_cache, monkeypatch):
     from graphstore.ingest import vision_sidecar as vs
     import builtins
