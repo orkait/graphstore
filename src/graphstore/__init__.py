@@ -27,6 +27,12 @@ from .config import (
     CoreConfig, VectorConfig, DocumentConfig, DslConfig,
     VaultConfig, PersistenceConfig, RetentionConfig, ServerConfig,
 )
+from .query import (
+    q, F, Query, Time, TimeExpr,
+    P, Pattern, agg, AggFunc, HavingExpr,
+    EvolveWhen, EvolveThen, EvolveCondition, EvolveAction,
+    register_verb,
+)
 
 __all__ = [
     "GraphStore", "CoreStore", "SchemaRegistry",
@@ -41,4 +47,8 @@ __all__ = [
     "GraphStoreConfig", "load_config", "save_config",
     "CoreConfig", "VectorConfig", "DocumentConfig", "DslConfig",
     "VaultConfig", "PersistenceConfig", "RetentionConfig", "ServerConfig",
+    "q", "F", "Query", "Time", "TimeExpr",
+    "P", "Pattern", "agg", "AggFunc", "HavingExpr",
+    "EvolveWhen", "EvolveThen", "EvolveCondition", "EvolveAction",
+    "register_verb",
 ]

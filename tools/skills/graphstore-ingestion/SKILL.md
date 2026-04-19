@@ -4,7 +4,7 @@ description: How to inject data into graphstore correctly. Covers the three stor
 compatibility: Requires a local graphstore install. Works against any graphstore >= 0.3.0.
 metadata:
   author: orkait
-  version: "2.1"
+  version: "2.3"
 ---
 
 # Graphstore ingestion
@@ -630,3 +630,91 @@ graphstore = three storage engines (graph + vector + document) behind one DSL. R
 7. Audio ingest = just `INGEST "clip.mp3"` under `[audio]`; in-process faster-whisper.
 
 When in doubt: Pattern A for conversations, Pattern B for documents, Pattern E for images, Pattern F for audio.
+
+## Query builder (v0.3.0+)
+
+**Use the typed builder for every adapter, ingest loop, and retrieval entry point.** String DSL is still supported for one-off experiments; for production code the builder eliminates entire classes of bugs.
+
+100% DSL coverage (87 verbs + 4 typed sub-DSLs), 100% line coverage, parser-roundtrip-verified in tests, injection-proof by construction.
+
+```python
+from graphstore import q, F, P, agg, Time, EvolveWhen as W, EvolveThen as A
+
+# Ingestion adapter using the builder end-to-end
+q.sys.register_node_kind("message",
+                         required={"session": "string", "role": "string"},
+                         optional={"position": "int"}).execute(gs)
+q.sys.register_node_kind("entity", required={"name": "string"}).execute(gs)
+
+# Batch-compose an entire session in one transaction. Variable refs
+# (``$msg0``) let later statements point at earlier auto-ids without
+# re-deriving the id on the Python side.
+stmts = []
+for i, msg in enumerate(session.messages):
+    msg_id = f"{session_id}:msg{i}"
+    stmts.append(q.create_node(msg_id, kind="message",
+                               session=session_id, role=msg.role,
+                               position=i, document=msg.content))
+    stmts.append(q.create_edge(f"sess:{session_id}", msg_id, kind="has_message"))
+    msg_ent_seen: set[str] = set()
+    for ent in extract_entities(msg.content):
+        ent_id = f"ent:{slug(ent)}"
+        if ent_id in msg_ent_seen:
+            continue
+        msg_ent_seen.add(ent_id)
+        stmts.append(q.upsert_node(ent_id, kind="entity", name=ent))
+        stmts.append(q.create_edge(msg_id, ent_id, kind="mentions"))
+
+q.batch(*stmts).execute(gs)
+
+# Retrieval
+q.remember(question, limit=20, where=F.eq("kind", "message")).execute(gs)
+
+# Cross-session walk
+q.recall(f"ent:{slug(entity)}", depth=2, limit=20).execute(gs)
+
+# Temporal queries via Time namespace
+q.nodes(where=F.eq("kind", "message")
+              & F.gte("__event_at__", Time.now_minus(7, "d")),
+        limit=100).execute(gs)
+
+# Aggregates with typed HAVING (comparison operators on agg builders
+# produce HavingExpr objects)
+q.aggregate_nodes(
+    select=[agg.count(), agg.avg("importance")],
+    where=F.eq("kind", "memory"),
+    group_by=["topic"],
+    having=agg.count() >= 10,
+).execute(gs)
+
+# Graph-shaped queries via typed pattern builder
+pattern = P.node("ent:paris").to(P.var("msg"), edge=F.eq("kind", "mentions"))
+q.match(pattern, limit=20).execute(gs)
+
+# Self-tuning rules
+q.sys.evolve.rule("r1",
+    when=[W.cond("recall_hit_rate", "<=", 0.4)],
+    then=[A.run("SYS", "REEMBED")],
+    cooldown=86400,
+).execute(gs)
+```
+
+Full reference: [docs/query-builder.md](../../../docs/query-builder.md).
+
+**Why prefer the builder for adapters:**
+- **Escape-safe by construction.** Every user string flows through the single ``dsl_literal`` helper. ``q.create_node(id, kind="memory", document=untrusted_text)`` is injection-proof regardless of what's in ``untrusted_text``.
+- **Clause ordering grammar-correct by construction.** Grammar requires EXPIRES before DOCUMENT in CREATE NODE; the builder emits them in the right order automatically. No more "works in one test, fails in prod because kwarg order changed."
+- **Typo / refactor safety.** ``q.create_node(id, kind="memory", contnt="...")`` is a mypy error. String DSL silently stores an extra column.
+- **Predicate algebra (`F`)** gives reusable filter libraries. Define ``recent = F.gte("__event_at__", Time.now_minus(30, "d"))`` once, reuse in every query.
+- **Immutable chains.** ``base = q.nodes(kind="memory"); top = base.limit(10); hot = base.where(F.gt(...))``. Base never mutates. No "did I accidentally share state?" bugs.
+- **Composable via ``|`` (BATCH) and ``.pipe(fn)`` (reusable transformations).** Functional, testable.
+- **PEP 561 `py.typed` marker.** Downstream mypy / pyright get full type checking on your adapter.
+
+**Adapter anti-patterns the builder eliminates:**
+
+| Old pattern | Builder equivalent |
+|---|---|
+| ``f'CREATE NODE "{id}" kind = "memory" DOCUMENT "{text}"'`` | ``q.create_node(id, kind="memory", document=text)`` |
+| Manual quote-escaping of user text | Automatic via ``dsl_literal`` |
+| Hand-emitting WHERE strings for bulk queries | ``F.eq(...) & F.gt(...) | F.eq(...)`` |
+| Duplicate ``CREATE EDGE mentions`` for same (msg, ent) pair | Python ``set`` of seen ent_ids + builder in batch |

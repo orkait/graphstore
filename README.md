@@ -47,6 +47,46 @@ g.close()
 
 That's it. Core install covers REMEMBER / RECALL / LEXICAL / SIMILAR / SYS CRON / VAULT SYNC. Extras for PDF, image, audio, GPU, playground UI are all opt-in - see [Installation](#-installation).
 
+### Prefer typed Python over DSL strings?
+
+Use the built-in query builder. Every DSL verb is a typed function - escape-safe, IDE-autocomplete-friendly, composable, 100% coverage, 100% tested.
+
+```python
+from graphstore import q, F, P, agg, Time
+
+# Same three queries as above, via the builder:
+q.create_node("mem:paris", kind="memory",
+              document="Paris is the capital of France.").execute(g)
+q.remember("European history", limit=5).execute(g)
+q.nodes(where=F.eq("kind", "memory") & F.gt("importance", 0.5), limit=10).execute(g)
+
+# Predicate algebra (Django-Q style, operators `&`, `|`, `~`)
+recent = F.gte("__event_at__", Time.now_minus(7, "d"))
+q.nodes(where=F.eq("kind", "memory") & recent & ~F.eq("__retracted__", True))
+
+# Typed MATCH pattern
+pattern = P.node("fn_main").to(P.var("callee"), edge=F.eq("kind", "calls"))
+q.match(pattern, limit=10).execute(g)
+
+# Typed aggregates + HAVING
+q.aggregate_nodes(
+    select=[agg.count(), agg.avg("importance")],
+    group_by=["topic"],
+    having=agg.avg("importance") > 0.5,
+).execute(g)
+
+# Batch with variable assignment
+q.batch(
+    q.var("x", q.create_node("n1", kind="memory", document="a")),
+    q.var("y", q.create_node("n2", kind="memory", document="b")),
+    q.create_edge("$x", "$y", kind="next"),
+).execute(g)
+```
+
+**100% DSL coverage** (87 typed verbs + 4 typed sub-DSLs) · **100% line coverage** on the builder (1880 / 1880) · **injection-proof** (every user string through the single `dsl_literal` helper) · **immutable** (modifiers return new Query, never mutate) · **parser-roundtrip-verified** (every emission fed through the real DSL parser in tests).
+
+Full reference: [docs/query-builder.md](docs/query-builder.md).
+
 ---
 
 ## Why graphstore?
