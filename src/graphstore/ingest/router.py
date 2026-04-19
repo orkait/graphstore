@@ -23,9 +23,29 @@ _DOCLING_EXCLUSIVE = {
     "bmp": "docling",           # BMP images
 }
 
+# Audio formats routed through the whisper ingestor when the `[audio]` extra
+# is installed. Added dynamically so users without the extra still get a
+# clear "Unsupported format" error (router default) rather than an
+# obscure faster-whisper ImportError at convert time.
+_AUDIO_EXTS = {
+    "wav": "whisper",
+    "mp3": "whisper",
+    "ogg": "whisper",
+    "flac": "whisper",
+    "m4a": "whisper",
+    "opus": "whisper",
+    "webm": "whisper",
+}
+
 try:
     import docling as _docling_check  # noqa
     EXTENSION_MAP.update(_DOCLING_EXCLUSIVE)
+except ImportError:
+    pass
+
+try:
+    import faster_whisper as _fw_check  # noqa
+    EXTENSION_MAP.update(_AUDIO_EXTS)
 except ImportError:
     pass
 
@@ -67,8 +87,11 @@ def _get_ingestor(name: str, **kwargs):
         elif name == "docling":
             from graphstore.ingest.docling_ingestor import DoclingIngestor
             _ingestor_cache[cache_key] = DoclingIngestor()
+        elif name == "whisper":
+            from graphstore.ingest.whisper_ingestor import WhisperIngestor
+            _ingestor_cache[cache_key] = WhisperIngestor()
         else:
-            raise ValueError(f"Unknown ingestor: {name!r}. Available: markitdown, pymupdf4llm, docling")
+            raise ValueError(f"Unknown ingestor: {name!r}. Available: markitdown, pymupdf4llm, docling, whisper")
     return _ingestor_cache[cache_key]
 
 
@@ -94,18 +117,40 @@ def ingest_file(file_path: str, using: str | None = None, **kwargs) -> IngestRes
 
 
 def list_ingestors() -> list[dict]:
+    """Report available ingestors + their registered extensions.
+
+    Tier stack:
+      1. markitdown   (always, part of [ingest])
+      2. pymupdf4llm  (PDF-only, part of [ingest])
+      3. docling      (heavier PDF + OCR + LaTeX/AsciiDoc, [ingest-pro])
+      4. vision       (image captioning via VLM sidecar, [vision])
+      4. whisper      (speech-to-text via faster-whisper, [audio])
+
+    Tiers 4 are modality-specific fallbacks, not a linear escalation.
+    """
     _docling_formats = ["pdf", "docx", "pptx", "xlsx", "md", "html", "csv",
                         "png", "jpg", "jpeg", "tiff", "tif", "bmp", "webp",
-                        "tex", "adoc", "m4a", "aac", "mp4", "avi", "mov"]
+                        "tex", "adoc"]
     try:
         import docling as _  # noqa
         docling_available = True
     except ImportError:
         docling_available = False
+    try:
+        import llama_cpp.server as _  # noqa
+        vision_available = True
+    except ImportError:
+        vision_available = False
+    try:
+        import faster_whisper as _  # noqa
+        stt_available = True
+    except ImportError:
+        stt_available = False
 
     return [
-        {"name": "markitdown", "formats": ["txt", "md", "html", "csv", "json", "xml", "docx", "pptx", "xlsx", "pdf", "zip", "png", "jpg"], "tier": 1},
-        {"name": "pymupdf4llm", "formats": ["pdf"], "tier": 2},
-        {"name": "docling", "formats": _docling_formats, "tier": 3, "available": docling_available},
-        {"name": "audio", "formats": ["wav", "mp3", "ogg", "flac"], "tier": 4, "opt_in": True},
+        {"name": "markitdown", "formats": ["txt", "md", "html", "csv", "json", "xml", "docx", "pptx", "xlsx", "pdf", "zip", "png", "jpg"], "tier": 1, "extra": "ingest"},
+        {"name": "pymupdf4llm", "formats": ["pdf"], "tier": 2, "extra": "ingest"},
+        {"name": "docling", "formats": _docling_formats, "tier": 3, "available": docling_available, "extra": "ingest-pro"},
+        {"name": "vision", "formats": ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff"], "tier": 4, "available": vision_available, "extra": "vision"},
+        {"name": "whisper", "formats": ["wav", "mp3", "ogg", "flac", "m4a", "opus", "webm"], "tier": 4, "available": stt_available, "extra": "audio"},
     ]

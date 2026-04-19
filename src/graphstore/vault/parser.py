@@ -2,13 +2,7 @@
 import re
 from datetime import datetime
 
-try:
-    import yaml
-except ImportError as e:
-    raise ImportError(
-        "graphstore.vault requires the `vault` extra. "
-        "Install with: pip install 'graphstore[vault]'"
-    ) from e
+import yaml
 
 _FRONTMATTER_RE = re.compile(r'^---\n(.*?\n)---\n', re.DOTALL)
 _FRONTMATTER_SUB_RE = re.compile(r'^---\n.*?\n---\n', re.DOTALL)

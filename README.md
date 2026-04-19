@@ -39,45 +39,71 @@ Most agent memory systems are wrappers around a vector database. That works for 
 Three storage engines, one typed DSL, and a hybrid retrieval pipeline that fuses all of them.
 
 ```text
-              ┌─────────────────────────────────────────┐
-              │        DSL - Lark LALR(1) grammar       │
-              │    one query language for everything    │
-              └────────────────────┬────────────────────┘
-                                   │
-              ┌────────────────────┼────────────────────┐
-              ▼                    ▼                    ▼
-        ┌──────────┐         ┌──────────┐         ┌──────────┐
-        │  Graph   │         │  Vector  │         │ Document │
-        ├──────────┤         ├──────────┤         ├──────────┤
-        │ numpy    │         │ usearch  │         │ SQLite   │
-        │ columns  │         │  HNSW    │         │ FTS5 BM25│
-        │ scipy CSR│         │  cosine  │         │ blobs    │
-        │ + indices│         │          │         │ + summary│
-        └──────────┘         └──────────┘         └──────────┘
+                   ┌──────────────────────────────────────┐
+                   │    DSL  -  Lark LALR(1) grammar      │
+                   │    one query language, 70+ commands  │
+                   └──────────────────┬───────────────────┘
+                                      │
+                ┌─────────────────────┼─────────────────────┐
+                ▼                     ▼                     ▼
+        ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+        │    Graph      │     │    Vector     │     │   Document    │
+        ├───────────────┤     ├───────────────┤     ├───────────────┤
+        │ numpy columns │     │ usearch HNSW  │     │ SQLite + FTS5 │
+        │ scipy CSR     │     │ cosine        │     │ BM25 + blobs  │
+        │ edge index    │     │ int8 / fp32   │     │ summaries     │
+        └───────────────┘     └───────────────┘     └───────────────┘
+                ▲                     ▲                     ▲
+                └─────────────────────┼─────────────────────┘
+                                      │
+                    ┌─────────────────┴─────────────────┐
+                    │    Ingest pipeline (tiered)       │
+                    │  txt/md  ─▶ direct                │
+                    │  html/docx/xlsx ─▶ markitdown     │
+                    │  pdf  ─▶ pymupdf4llm ─▶ docling   │
+                    │  png/jpg ─▶ vision sidecar (VLM)  │
+                    │  wav/mp3 ─▶ whisper (in-process)  │
+                    └───────────────────────────────────┘
 ```
 
 ### REMEMBER - the retrieval engine
 
-`REMEMBER` is the core command. It fuses five signals into a single ranked result set:
+`REMEMBER` is the core command. It runs a five-stage pipeline and fuses four signals into a single ranked result set.
 
+```text
+  REMEMBER "European architecture" LIMIT 10
+                                │
+     ┌──────────────────────────┴──────────────────────────┐
+     │                                                     │
+     ▼              Stage 1 — Gather                       │
+┌─────────────┐   union of top candidates                  │
+│  vec ANN    │   ─▶ sentence-level cosine over usearch    │
+│  BM25 FTS5  │   ─▶ chunk-level keyword match             │
+└─────────────┘                                            │
+                                                           │
+                  Stage 2 — Fuse  (weighted or RRF)        │
+  ┌─────────────────────────────────────────────────────┐  │
+  │  vec_signal      max sentence cosine         0.52   │  │
+  │  bm25_signal     FTS5 normalised              0.25   │  │
+  │  recency         exp(-age/half_life)         0.15   │  │
+  │  graph_signal    entity-degree (opt-in)      0.08   │  │
+  │  + co-occurrence boost  (found by both vec AND bm25) │  │
+  │  + recall-frequency nudge  (log-scaled)              │  │
+  └─────────────────────────────────────────────────────┘  │
+                                                           │
+                  Stage 3 — Temporal filter                │
+                  (hard zero outside AT window)            │
+                                                           │
+                  Stage 4 — Rerank  (optional)             │
+                  cross-encoder: GGUF or ONNX              │
+                                                           │
+                  Stage 5 — Nucleus walk  (optional)       │
+                  structural-edge context expansion        │
+                                                           │
+                  Ranked nodes  ◀──────────────────────────┘
 ```
-REMEMBER "European architecture" LIMIT 10
 
-  ┌─────────────────────────────────────────────────────────┐
-  │  vec_signal     cosine similarity (usearch ANN)         │  0.52
-  │  bm25_signal    keyword match (SQLite FTS5)             │  0.25
-  │  recency        decay from event time                   │  0.15
-  │  graph_signal   entity-degree boost (opt-in)            │  0.08
-  │                                                         │
-  │  + co-occurrence boost (found by both vec AND bm25)     │
-  │  + recall-frequency nudge (log-scaled)                  │
-  │  + temporal hard filter (when AT anchor present)        │
-  │  + optional reranker (GGUF / ONNX) after fusion         │
-  │  + optional nucleus expansion (structural edges only)   │
-  └─────────────────────────────────────────────────────────┘
-```
-
-Weights are configurable. The pipeline is 5 stages: gather → fuse → temporal → rerank → (optional nucleus).
+All weights, the fusion method (`weighted` / `rrf`), half-life, reranker, and nucleus expansion are configurable via `graphstore.json`, `GRAPHSTORE_DSL_*` env vars, or constructor kwargs.
 
 ---
 
@@ -87,20 +113,20 @@ Weights are configurable. The pipeline is 5 stages: gather → fuse → temporal
 pip install graphstore
 ```
 
-Lightweight core: numpy, scipy, usearch, lark, msgspec, psutil, threadpoolctl. No torch, no PDF parser, no HTTP server.
+Core install includes everything needed for the agentic DB contract out of the box: REMEMBER / RECALL (model2vec embedder), SYS CRON (croniter), VAULT SYNC (pyyaml), plus the numpy / scipy / usearch / lark / msgspec / psutil / threadpoolctl foundation. No torch, no PDF parser, no HTTP server.
 
 ```bash
-# Embedder (30 MB, CPU-only, zero-config)
-pip install 'graphstore[embed-default]'
-
-# PDF / DOCX / HTML ingestion
+# PDF / DOCX / HTML ingestion (+200 MB)
 pip install 'graphstore[ingest]'
 
-# GPU acceleration (Linux x86_64, CUDA 12)
+# Local VLM sidecar for scanned PDFs / image captioning (+80 MB wheel, ~1.5 GB weights on first use)
+pip install 'graphstore[vision]'
+
+# GPU acceleration for NER (Linux x86_64, CUDA 12)
 pip install 'graphstore[gpu]'
 
-# Everything
-pip install 'graphstore[embed-default,ingest,vault,scheduler]'
+# Everything heavy
+pip install 'graphstore[ingest,vision,playground]'
 ```
 
 <details>
@@ -108,16 +134,13 @@ pip install 'graphstore[embed-default,ingest,vault,scheduler]'
 
 | Extra | What it adds |
 |---|---|
-| `embed-default` | model2vec - zero-config CPU embedder |
-| `embed-fastembed` | fastembed - ~30 ONNX encoder models |
-| `embed-gguf` | llama-cpp-python - GGUF embedders + reranker |
-| `ingest` | markitdown + pymupdf + pymupdf4llm (PDF/DOCX/HTML -> markdown; VisionHandler uses stdlib urllib against any OpenAI-compatible endpoint - no extra dep) |
+| `ingest` | markitdown + pymupdf + pymupdf4llm (PDF/DOCX/HTML -> markdown) |
 | `ingest-pro` | docling (heavier PDF w/ tables + OCR; ~1 GB via torch. For CPU-only install: `pip install 'graphstore[ingest-pro]' --extra-index-url https://download.pytorch.org/whl/cpu`) |
-| `scheduler` | croniter (cron-expression parsing) |
-| `vault` | pyyaml (markdown vault sync) |
+| `vision` | llama-cpp-python[server] + huggingface-hub (local VLM sidecar, SmolVLM2-2.2B Q4_K_M ~1.5 GB on first use; see `graphstore vision serve`) |
+| `audio` | faster-whisper (in-process speech-to-text; tiny/base models ~40-150 MB on first use) |
+| `embedders-extra` | fastembed + llama-cpp-python (alternate embedder backends; model2vec is the default and lives in core) |
 | `playground` | fastapi + uvicorn (local web UI) |
-| `gpu` | onnxruntime-gpu + bundled nvidia-cu12 (Linux x86_64) |
-| `gpu-ort` | onnxruntime-gpu only (bring your own CUDA 12) |
+| `gpu` | onnxruntime-gpu only (bring your own CUDA 12 + cuDNN 9) |
 | `dev` | pytest + pytest-benchmark + pytest-xdist + pytest-timeout |
 
 </details>
@@ -131,25 +154,39 @@ from graphstore import GraphStore
 
 g = GraphStore(path="./brain")
 
-# Store memories
-g.execute('CREATE NODE "mem:paris" kind = "memory" topic = "travel" importance = 0.9')
-g.execute('CREATE NODE "mem:eiffel" kind = "memory" topic = "travel" importance = 0.8')
-g.execute('CREATE EDGE "mem:paris" -> "mem:eiffel" kind = "associated"')
+# Store memories. DOCUMENT "..." is the right clause for "this is the text
+# I want retrievable" - it populates the vector index AND BM25 in one shot.
+g.execute('CREATE NODE "mem:paris" kind = "memory" topic = "travel" '
+          'DOCUMENT "Paris is the capital of France, famous for the Eiffel Tower and Louvre."')
+g.execute('CREATE NODE "mem:rome" kind = "memory" topic = "travel" '
+          'DOCUMENT "Rome is the capital of Italy, home to the Colosseum and the Vatican."')
+g.execute('CREATE NODE "mem:tokyo" kind = "memory" topic = "travel" '
+          'DOCUMENT "Tokyo is the capital of Japan, known for the Shibuya crossing and sushi."')
 
-# Retrieve by meaning (fuses vector + BM25 + recency + graph)
-result = g.execute('REMEMBER "European architecture" TOKENS 4000')
+# Link related memories (graph edges for spreading activation)
+g.execute('CREATE EDGE "mem:paris" -> "mem:rome" kind = "both_european_capitals"')
+
+# Retrieve by meaning (hybrid: vector + BM25 + recency + graph fusion)
+r = g.execute('REMEMBER "European architecture and history" LIMIT 5')
+#  -> mem:paris, mem:rome  (tokyo drops out)
 
 # Retrieve by association (spreading activation through edges)
-result = g.execute('RECALL FROM "mem:paris" DEPTH 2 LIMIT 10')
+r = g.execute('RECALL FROM "mem:paris" DEPTH 2 LIMIT 10')
+#  -> mem:rome  (via "both_european_capitals" edge)
 
-# Retrieve by keywords
-result = g.execute('LEXICAL SEARCH "Eiffel Tower" LIMIT 5')
+# Retrieve by keywords (pure BM25 over document text)
+r = g.execute('LEXICAL SEARCH "Eiffel Tower" LIMIT 5')
+#  -> mem:paris
 
-# Retrieve with temporal anchor
-result = g.execute('REMEMBER "trip plans" AT "2024-03" LIMIT 10')
+# Retrieve with a temporal anchor (recency-weighted)
+r = g.execute('REMEMBER "trip plans" AT "2024-03" LIMIT 10')
+
+g.close()
 ```
 
-Everything persists to `./brain/` as SQLite. Reopen with the same path and all memories are back.
+Everything persists to `./brain/` as SQLite. Reopen with the same path and all memories are back. Run the snippet verbatim and REMEMBER / RECALL / LEXICAL all return non-empty results (core install covers it, no extras needed).
+
+> **Heads up.** Plain `CREATE NODE "id" kind = "X" topic = "..."` without a `DOCUMENT` clause stores typed columns only - REMEMBER and LEXICAL will return zero for that node. Use `DOCUMENT "text"` whenever the node's *content* is what you want to retrieve on.
 
 ---
 
@@ -158,21 +195,23 @@ Everything persists to `./brain/` as SQLite. Reopen with the same path and all m
 ### Store and recall memories
 
 ```sql
-CREATE NODE "mem:123" kind = "memory" topic = "finance" importance = 0.8
+-- Store a retrievable memory: DOCUMENT populates vector + BM25 + blob in one shot.
+CREATE NODE "mem:123" kind = "memory" topic = "finance"
+  DOCUMENT "Q3 revenue beat expectations driven by enterprise renewals."
 
--- Hybrid retrieval (5-signal fusion)
+-- Hybrid retrieval (5-signal fusion over vector + BM25 + recency + graph + confidence)
 REMEMBER "quarterly revenue trends" TOKENS 4000
 
--- Graph traversal (spreading activation)
+-- Graph traversal (spreading activation along edges)
 RECALL FROM "concept:finance" DEPTH 3 LIMIT 10
 
--- Keyword search (BM25)
+-- Keyword search (BM25 over FTS5)
 LEXICAL SEARCH "Q3 revenue" LIMIT 10
 
--- Vector similarity
+-- Vector similarity (pure cosine, no fusion)
 SIMILAR TO "budget forecasting" LIMIT 10
 
--- Temporal retrieval
+-- Temporal retrieval (recency-weighted + hard filter on AT window)
 REMEMBER "what happened in May" AT "2024-05" LIMIT 10
 ```
 
@@ -183,7 +222,56 @@ INGEST "report.pdf" AS "doc:q3" KIND "report"
 SYS CONNECT    -- auto-wire similar chunks across documents
 ```
 
-Supports PDF, Word, Markdown, text, images (via VLM), audio (via STT). Parses, chunks, embeds, and wires into the graph automatically.
+Supports PDF, Word, Markdown, text, HTML, images (via local VLM sidecar under `[vision]`), and audio (via faster-whisper under `[audio]`). Parses, chunks, embeds, and wires into the graph automatically.
+
+### Ingest images with the local VLM sidecar
+
+The `[vision]` extra ships a local OpenAI-compatible sidecar (llama.cpp server + SmolVLM2-2.2B-Instruct Q4_K_M, ~1.5 GB on first use). Zero-config: first `INGEST ... USING VISION` call auto-starts it. Smaller presets (`smolvlm-500m` at ~400 MB) available via `GRAPHSTORE_VISION_MODEL` or `graphstore vision serve --model smolvlm-500m`.
+
+```bash
+pip install 'graphstore[vision]'
+graphstore vision serve --pull-only    # optional: pre-download weights
+```
+
+```sql
+-- Scanned PDF caption + OCR fallback
+INGEST "scan.pdf" USING VISION "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
+
+-- Standalone image ingest
+INGEST "chart.png" USING VISION "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf" AS "img:q3-chart"
+```
+
+Sidecar lifecycle:
+
+```bash
+graphstore vision models     # list built-in presets (smolvlm-500m, smolvlm2-2.2b, qwen2.5-vl-3b)
+graphstore vision serve      # start (auto-download on first run)
+graphstore vision status     # PID + port + model in use
+graphstore vision logs       # tail the sidecar log
+graphstore vision stop       # SIGTERM the sidecar
+```
+
+Bring your own endpoint (Ollama, vLLM, OpenAI cloud) via env:
+
+```bash
+export GRAPHSTORE_VISION_URL=https://my-vllm.example.com/v1
+export GRAPHSTORE_VISION_MODEL=smolvlm2-2.2b  # preset override
+```
+
+### Ingest audio with the local Whisper backend
+
+The `[audio]` extra adds in-process speech-to-text via faster-whisper (CTranslate2). No sidecar needed - whisper calls are short enough that in-process beats IPC overhead. Small Whisper models (~40-150 MB) download from HuggingFace Hub on first use.
+
+```bash
+pip install 'graphstore[audio]'
+```
+
+```sql
+INGEST "interview.mp3"
+INGEST "voicememo.m4a" AS "mem:standup-2024-03-15"
+```
+
+Per-segment timestamps are preserved in the chunk heading (e.g. `[00:12-00:34]`) so cited chunks can be located in the source audio. Language is auto-detected; pass an explicit ISO code via `USING whisper` kwargs on the Python API if detection is flaky.
 
 ### Track beliefs
 
@@ -481,29 +569,26 @@ SYS EVOLVE LIST / SHOW / ENABLE / DISABLE / DELETE / HISTORY
 
 ```
 graphstore/
-  graphstore.py           # Main entry point
+  store.py                # Main GraphStore entry point
   config.py               # Typed config (msgspec Structs)
   wal.py                  # Write-ahead log
-  cron.py                 # Scheduled jobs
-  evolve.py               # Self-tuning rules
-  core/                   # Graph engine (numpy + CSR + columns)
+  cron.py                 # Scheduled jobs (croniter, now core)
+  core/                   # Graph engine (numpy + CSR + columns) + evolve/ self-tuning
   dsl/                    # Query language (grammar + parser + handlers)
-    handlers/
-      intelligence.py     # REMEMBER, RECALL, SIMILAR, LEXICAL SEARCH
-      mutations.py        # CREATE, UPDATE, DELETE, MERGE
-      traversal.py        # TRAVERSE, PATH, SUBGRAPH
-      beliefs.py          # ASSERT, RETRACT, PROPAGATE
-      ...
+    handlers/             # Sharded by domain (mutations, traversal, beliefs, intelligence, ...)
+    sys/                  # SYS command shards (lifecycle, pipeline, queries, schema, cron)
   algos/                  # Pure algorithms (fusion, spreading, consolidation)
-  embedding/              # Embedder backends (model2vec, ONNX, GGUF, fastembed)
+  embedding/              # model2vec (core default) + fastembed/GGUF/ONNX (extras)
   vector/                 # usearch ANN index
   document/               # SQLite FTS5 + blob storage
   ingest/                 # File -> graph pipeline
-  vault/                  # Markdown note system
+    vision.py             # OpenAI-compat HTTP client to VLM endpoint
+    vision_sidecar.py     # Local llama.cpp sidecar launcher (under [vision])
+  vault/                  # Markdown note system (pyyaml, now core)
   registry/               # Embedder download + cache
   persistence/            # SQLite serialization
-  server.py               # Playground web UI
-  cli.py                  # CLI
+  server.py               # Playground web UI (under [playground])
+  cli.py                  # CLI (install-embedder, playground, vision, config)
 benchmarks/
   framework/
     cli.py                # Unified benchmark CLI (longmemeval, locomo, beam)
@@ -526,13 +611,13 @@ benchmarks/
 git clone https://github.com/orkait/graphstore.git
 cd graphstore
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-pytest     # 1185 tests
+pip install -e ".[dev,ingest,vision,embedders-extra,playground]"
+pytest     # 1183+ tests, ~17s on 8-core CPU with -n 4
 ```
 
 ---
 
 ## 📄 License
 
-MIT
+AGPL-3.0 - see [LICENSE](LICENSE).
 </div>

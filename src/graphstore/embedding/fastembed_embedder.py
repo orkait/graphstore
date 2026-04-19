@@ -23,8 +23,8 @@ class FastEmbedEmbedder(Embedder):
             from fastembed import TextEmbedding
         except ImportError as e:
             raise ImportError(
-                "FastEmbedEmbedder requires the `embed-fastembed` extra. "
-                "Install with: pip install 'graphstore[embed-fastembed]'"
+                "FastEmbedEmbedder requires fastembed. "
+                "Install with: pip install 'graphstore[embedders-extra]'"
             ) from e
 
         kwargs: dict = dict(model_name=model_name)

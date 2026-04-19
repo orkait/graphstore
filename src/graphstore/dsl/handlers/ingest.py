@@ -280,8 +280,8 @@ class IngestHandlers:
                 from graphstore.ingest.vision import VisionHandler
                 vision_handler = VisionHandler(
                     model=q.vision_model,
-                    base_url=getattr(self, '_vision_base_url', 'http://localhost:11434/v1'),
-                    max_tokens=getattr(self, '_vision_max_tokens', 300),
+                    base_url=getattr(self, '_vision_base_url', None),
+                    max_tokens=getattr(self, '_vision_max_tokens', 512),
                 )
             except Exception as e:
                 logger.debug("vision handler init failed: %s", e, exc_info=True)
@@ -358,8 +358,8 @@ class IngestHandlers:
 
         vh = VisionHandler(
             model=q.vision_model,
-            base_url=getattr(self, '_vision_base_url', 'http://localhost:11434/v1'),
-            max_tokens=getattr(self, '_vision_max_tokens', 300),
+            base_url=getattr(self, '_vision_base_url', None),
+            max_tokens=getattr(self, '_vision_max_tokens', 512),
         )
         description = vh.describe(image_bytes, mime_type)
 

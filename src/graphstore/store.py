@@ -350,8 +350,6 @@ class GraphStore:
                     model_name=cfg.vector.model2vec_model,
                     cache_dir=cfg.vector.model_cache_dir,
                 )
-            except ImportError:
-                return None
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning("embedder init failed: %s", e)

@@ -146,7 +146,14 @@ class TestRouter:
         ingestors = list_ingestors()
         names = [i["name"] for i in ingestors]
         assert "markitdown" in names
-        assert "audio" in names
+        assert "pymupdf4llm" in names
+        assert "docling" in names
+        assert "vision" in names
+        # Audio tier was removed with voice subsystem (PR #104)
+        assert "audio" not in names
+        # All entries must declare their extra
+        for ing in ingestors:
+            assert "extra" in ing, f"{ing['name']} missing 'extra' field"
 
 
 class TestRouterDoclingExtensions:
@@ -222,15 +229,19 @@ class TestRouterDoclingExtensions:
 
 
 class TestVisionHandler:
-    def test_init_without_openai_raises(self):
-        """VisionHandler should work if openai is installed."""
-        try:
-            from graphstore.ingest.vision import VisionHandler
-            vh = VisionHandler()
-            # Just test initialization, not actual Ollama connection
-            assert vh.model == "smolvlm2:2.2b"
-        except ImportError:
-            pass  # openai not installed, skip
+    def test_init_with_explicit_base_url(self):
+        """VisionHandler with an explicit base_url skips sidecar resolution."""
+        from graphstore.ingest.vision import VisionHandler
+        vh = VisionHandler(base_url="http://example.invalid:9/v1")
+        assert vh.model == "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
+        assert vh._base_url == "http://example.invalid:9/v1"
+
+    def test_init_resolves_via_env(self, monkeypatch):
+        """GRAPHSTORE_VISION_URL env should short-circuit sidecar probing."""
+        from graphstore.ingest.vision import VisionHandler
+        monkeypatch.setenv("GRAPHSTORE_VISION_URL", "http://remote.invalid:1234/v1")
+        vh = VisionHandler()
+        assert vh._base_url == "http://remote.invalid:1234/v1"
 
 
 # ====================================================================
