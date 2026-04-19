@@ -49,8 +49,8 @@ def health_check(store: CoreStore, vector_store=None, document_store=None) -> di
     actual_edges = sum(len(v) for v in store._edges_by_type.values())
     stale_edge_keys = edge_keys_count - actual_edges
 
-    from graphstore.dsl.parser import _plan_cache
-    cache_size = len(_plan_cache)
+    from graphstore.core import plan_cache as _plan_cache_hook
+    cache_size = _plan_cache_hook.size()
 
     return {
         "tombstone_ratio": round(tombstone_ratio, 3),
@@ -317,8 +317,8 @@ def gc_strings(store: CoreStore) -> dict:
     store.string_table = new_table
     store.columns._string_table = new_table
 
-    from graphstore.dsl.parser import clear_cache
-    clear_cache()
+    from graphstore.core import plan_cache as _plan_cache_hook
+    _plan_cache_hook.clear()
 
     for field in list(store._indexed_fields):
         store.add_index(field)
@@ -366,8 +366,8 @@ def sweep_orphans(store: CoreStore, document_store) -> dict:
 
 def clear_caches(store: CoreStore) -> dict:
     """Clear plan cache and edge combination/transpose caches."""
-    from graphstore.dsl.parser import clear_cache
-    clear_cache()
+    from graphstore.core import plan_cache as _plan_cache_hook
+    _plan_cache_hook.clear()
     store.edge_matrices._cache.clear()
     store.edge_matrices._transpose_cache.clear()
     return {"cleared": True}
