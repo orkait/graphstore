@@ -2,7 +2,7 @@
 
 # graphstore
 
-**Agentic memory for AI agents. Not a database.**
+**A memory database for AI agents**
 
 [![CI](https://github.com/orkait/graphstore/actions/workflows/ci.yml/badge.svg)](https://github.com/orkait/graphstore/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/graphstore?color=f59e0b&logo=pypi&logoColor=white)](https://pypi.org/project/graphstore/)
@@ -33,9 +33,9 @@ g.execute('LEXICAL SEARCH "Eiffel Tower" LIMIT 5')        # BM25
 
 `pip install graphstore`. Runs in-process, persists to SQLite. No Docker, no server, no service account.
 
-## It is not a database
+## A different kind of database
 
-graphstore is not a vector DB, not a graph DB, not a relational DB. Call it any of those and you will be disappointed. There is no ACID, no query planner, no SQL. What there is: a memory store that behaves the way an agent actually uses memory. Facts get written with a confidence score. They expire. They get contradicted. They decay by recency. They get retrieved by meaning, by association, by keyword, by structure, or by all four fused together in one call.
+graphstore is a database. SQLite, usearch HNSW, scipy CSR, a Lark DSL, a WAL, an advisory lock. The boring parts are real. What it is not is a general-purpose one. Do not expect ACID or SQL or joins. Expect a store that behaves the way an agent actually uses memory: facts written with confidence scores, facts that expire, facts that get contradicted, facts that decay by recency, and retrieval that reaches for meaning, association, keyword, and structure in one call.
 
 The insight is simple. Most agent memory is a thin wrapper over a vector store. That wrapper survives demos and falls apart the moment an agent asks "what happened last May" and cosine similarity cheerfully returns something from 2022 that happens to be semantically close. Or the moment three tools write three contradictory facts about the same entity and nobody notices. Or the moment the agent needs to walk from a conversation to the entity it mentioned to every other conversation that entity appeared in. Vector similarity does not answer that. Neither does keyword search. And neither does a graph on its own.
 
@@ -242,15 +242,15 @@ Core is 8 deps: numpy, scipy, usearch, lark, msgspec, psutil, threadpoolctl, mod
 
 ## What graphstore is not
 
-It is not a relational DB. There is no SQL, no joins, no foreign keys, no transactions in the ACID sense. Use Postgres or SQLite directly if that is what you need.
+Not a relational DB. No SQL, no joins, no foreign keys, no multi-statement ACID transactions. If you want Postgres, use Postgres.
 
-It is not a graph DB. There is no Cypher, no openCypher, no gremlin. Graph ops are there because an agent's memory is a graph, not because graphstore wants to compete with Neo4j.
+Not a graph DB. No Cypher, no gremlin. Graph operations are in the box because an agent's memory is a graph, not because graphstore wants to compete with Neo4j.
 
-It is not a vector DB. Vector search is a leg of retrieval, not the product. If you only need ANN, use usearch or faiss directly and skip the rest.
+Not a general-purpose vector DB. Vector search is a leg of retrieval, not the product. If all you need is ANN over a billion rows, run usearch or faiss directly and skip the rest.
 
-It is not a service. It is a library. It runs in your process. One Python process holds the lock; a second `GraphStore(path=...)` against the same path raises `StoreInUse` rather than pretending it is safe. If you want multi-tenant, put it behind your own service layer.
+Not a service. It is an embedded database, not a server. It runs in your process. One Python process holds the path lock; a second `GraphStore(path=...)` against the same path raises `StoreInUse` rather than pretending concurrent writers are safe. If you want multi-tenant, wrap it in your own service layer.
 
-It is not finished. The benchmarks are decent, not state of the art in every category. Single-hop and temporal F1 on LoCoMo have room. Fusion weights are tuned by hand. Reranking is opt-in and off by default. Contributions, especially on retrieval quality, are welcome.
+Not finished. The benchmarks are decent, not state of the art in every category. Single-hop and temporal F1 on LoCoMo have room. Fusion weights are tuned by hand. Reranking is opt-in and off by default. Contributions, especially on retrieval quality, are welcome.
 
 ## Development
 
