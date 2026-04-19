@@ -16,7 +16,7 @@ from typing import Any
 from graphstore.query import plugins
 from graphstore.query.filters import F
 from graphstore.query.runtime import Query
-from graphstore.query.verbs import reads as _reads, writes as _writes
+from graphstore.query.verbs import reads as _reads, writes as _writes, traversal as _traversal
 
 register_verb = plugins.register_verb
 
@@ -38,6 +38,23 @@ class _QNamespace:
     lexical        = staticmethod(_reads.lexical)
     edges          = staticmethod(_reads.edges)
     count_nodes    = staticmethod(_reads.count_nodes)
+
+    # --- Traversal ---
+    traverse       = staticmethod(_traversal.traverse)
+    subgraph       = staticmethod(_traversal.subgraph)
+    path           = staticmethod(_traversal.path)
+    paths          = staticmethod(_traversal.paths)
+    shortest_path  = staticmethod(_traversal.shortest_path)
+    distance       = staticmethod(_traversal.distance)
+    weighted_shortest_path = staticmethod(_traversal.weighted_shortest_path)
+    weighted_distance      = staticmethod(_traversal.weighted_distance)
+    ancestors      = staticmethod(_traversal.ancestors)
+    descendants    = staticmethod(_traversal.descendants)
+    common_neighbors = staticmethod(_traversal.common_neighbors)
+    match          = staticmethod(_traversal.match)
+    what_if_retract = staticmethod(_traversal.what_if_retract)
+    aggregate_nodes = staticmethod(_traversal.aggregate_nodes)
+    count_edges    = staticmethod(_traversal.count_edges)
 
     # --- Writes ---
     create_node    = staticmethod(_writes.create_node)
