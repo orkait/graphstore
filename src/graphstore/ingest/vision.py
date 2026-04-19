@@ -39,7 +39,22 @@ class VisionHandler:
             }],
             max_tokens=self._max_tokens,
         )
-        return response.choices[0].message.content
+        # Defensive unpacking. Ollama/OpenAI-compatible servers occasionally
+        # return a response with no choices or with ``content=None`` (e.g.,
+        # safety-filter blocks, model timeouts, or partial streams that
+        # finalized with nothing). Returning None silently at the call site
+        # cascades into "image with no description" at the ingest layer,
+        # which then propagates as an empty string for embedding — bug #64.
+        # We instead return an empty string and log, so callers can treat
+        # missing descriptions as "nothing generated" rather than success.
+        if not response.choices:
+            logger.warning("VisionHandler: VLM returned no choices for %d bytes", len(image_bytes))
+            return ""
+        content = response.choices[0].message.content
+        if content is None or not content.strip():
+            logger.warning("VisionHandler: VLM returned empty content for %d bytes", len(image_bytes))
+            return ""
+        return content
 
     def is_available(self) -> bool:
         try:

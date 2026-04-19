@@ -42,8 +42,12 @@ def load(conn, use_compression: bool = False, db_path: str | Path | None = None)
 
     string_table = StringTable.from_list(mjson.decode(strings_row[0]))
 
-    # Load store metadata
+    # Load store metadata. Missing row means corrupted / partially-written
+    # database - fall back to empty store rather than surfacing
+    # `TypeError: 'NoneType' object is not subscriptable`.
     meta_row = conn.execute("SELECT data FROM blobs WHERE key='store_meta'").fetchone()
+    if meta_row is None:
+        return CoreStore(use_compression=use_compression), SchemaRegistry()
     meta = mjson.decode(meta_row[0])
 
     # Create store and set its internals
@@ -58,19 +62,24 @@ def load(conn, use_compression: bool = False, db_path: str | Path | None = None)
     store._capacity = capacity
     store.columns._capacity = capacity
 
-    # Load node arrays
+    # Load node arrays. Each blob is required once store_meta exists - a
+    # checkpoint writes them in a single transaction. If any are missing we
+    # refuse to half-load: bail to empty so the caller hits NodeNotFound
+    # instead of a silent zero-length array shadowing real data.
     ids_row = conn.execute("SELECT data, dtype FROM blobs WHERE key='node_ids'").fetchone()
+    kinds_row = conn.execute("SELECT data, dtype FROM blobs WHERE key='node_kinds'").fetchone()
+    tomb_row = conn.execute("SELECT data FROM blobs WHERE key='tombstones'").fetchone()
+    if ids_row is None or kinds_row is None or tomb_row is None:
+        return CoreStore(use_compression=use_compression), SchemaRegistry()
+
     loaded_ids = np.frombuffer(ids_row[0], dtype=np.dtype(ids_row[1])).copy()
     store.node_ids = np.full(capacity, -1, dtype=np.int32)
     store.node_ids[:len(loaded_ids)] = loaded_ids
 
-    kinds_row = conn.execute("SELECT data, dtype FROM blobs WHERE key='node_kinds'").fetchone()
     loaded_kinds = np.frombuffer(kinds_row[0], dtype=np.dtype(kinds_row[1])).copy()
     store.node_kinds = np.zeros(capacity, dtype=np.int32)
     store.node_kinds[:len(loaded_kinds)] = loaded_kinds
 
-    # Load tombstones
-    tomb_row = conn.execute("SELECT data FROM blobs WHERE key='tombstones'").fetchone()
     store.node_tombstones = set(mjson.decode(tomb_row[0]))
 
     # Rebuild id_to_slot from node_ids array
@@ -87,7 +96,11 @@ def load(conn, use_compression: bool = False, db_path: str | Path | None = None)
         "SELECT key, data FROM blobs WHERE key LIKE 'raw_edges:%'"
     ).fetchall()
     for key, data in edge_rows:
-        etype = key[len("raw_edges:"):]
+        # Symmetric unquote — see serializer for why etypes are URL-quoted
+        # on write (bug #7). Legacy databases that wrote unquoted etypes
+        # still decode correctly because alnum characters are unaffected
+        # by quote/unquote round-tripping.
+        etype = unquote(key[len("raw_edges:"):])
         edge_list = mjson.decode(data)
         store._edges_by_type[etype] = [(s, t, d) for s, t, d in edge_list]
 

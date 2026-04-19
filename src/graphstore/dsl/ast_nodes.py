@@ -63,6 +63,17 @@ class OffsetClause:
     value: int
 
 @dataclass(slots=True)
+class MaxDepthClause:
+    """Optional MAX_DEPTH N clause on SHORTEST PATH / WEIGHTED variants.
+
+    A sentinel container the transformer emits when the grammar's optional
+    ``max_depth_clause?`` branch matches, letting query-site helpers pluck
+    the value from ``args`` the same way they pluck WhereClause/LimitClause
+    instead of positional index arithmetic.
+    """
+    value: int
+
+@dataclass(slots=True)
 class OrderClause:
     field: str
     direction: str = "ASC"  # "ASC" or "DESC"
@@ -143,6 +154,10 @@ class ShortestPathQuery:
     from_id: str
     to_id: str
     where: WhereClause | None = None
+    # Optional per-direction expansion cap. None means unbounded. Prior
+    # behavior was a hardcoded 10 inside algos.graph.bidirectional_bfs which
+    # silently truncated long paths — see bug #40.
+    max_depth: int | None = None
 
 @dataclass(slots=True)
 class DistanceQuery:
@@ -155,11 +170,15 @@ class WeightedShortestPathQuery:
     from_id: str
     to_id: str
     where: WhereClause | None = None
+    # Optional cap passed to Dijkstra's early-termination check. None means
+    # unbounded; caller gets whatever Dijkstra finds or None if unreachable.
+    max_depth: int | None = None
 
 @dataclass(slots=True)
 class WeightedDistanceQuery:
     from_id: str
     to_id: str
+    max_depth: int | None = None
 
 @dataclass(slots=True)
 class AncestorsQuery:

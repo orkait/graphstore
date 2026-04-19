@@ -443,10 +443,21 @@ class OnnxHFEmbedder(Embedder):
         return self._encode(prefixed)
 
     def _encode(self, texts: list[str]) -> np.ndarray:
+        # Reject zero-length inputs up front. An empty string tokenizes to
+        # an all-zero attention mask; mean-pooling then divides by
+        # ``mask.sum() == 0`` which produces a NaN-filled vector. l2_normalize
+        # preserves NaN, which then poisons the HNSW index and corrupts all
+        # downstream SIMILAR/REMEMBER results for the affected slot (bug #70).
+        # Substitute a single-space placeholder so the tokenizer produces at
+        # least one real token; the resulting embedding is meaningless but
+        # finite, and the caller that fed us an empty string explicitly asked
+        # for an embedding rather than an exception.
+        safe_texts = [t if (t and not t.isspace()) else " " for t in texts]
+
         # Process in a single batch to maximize GPU/CPU utilization.
         # Higher-level GraphStore layer already handles outer batching via 
         # deferred_embeddings(batch_size=...).
-        encoded = self._tokenizer.encode_batch(texts)
+        encoded = self._tokenizer.encode_batch(safe_texts)
         input_ids = np.array([e.ids for e in encoded], dtype=np.int64)
         attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
 

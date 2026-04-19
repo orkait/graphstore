@@ -27,10 +27,10 @@ traverse_q:    "TRAVERSE" "FROM" STRING "DEPTH" NUMBER where_clause? limit_claus
 subgraph_q:    "SUBGRAPH" "FROM" STRING "DEPTH" NUMBER
 path_q:        "PATH" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER where_clause?
 paths_q:       "PATHS" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER where_clause?
-shortest_q:    "SHORTEST" "PATH" "FROM" STRING "TO" STRING where_clause?
+shortest_q:    "SHORTEST" "PATH" "FROM" STRING "TO" STRING max_depth_clause? where_clause?
 distance_q:    "DISTANCE" "FROM" STRING "TO" STRING "MAX_DEPTH" NUMBER
-weighted_sp_q: "WEIGHTED" "SHORTEST" "PATH" "FROM" STRING "TO" STRING where_clause?
-weighted_dist_q: "WEIGHTED" "DISTANCE" "FROM" STRING "TO" STRING
+weighted_sp_q: "WEIGHTED" "SHORTEST" "PATH" "FROM" STRING "TO" STRING max_depth_clause? where_clause?
+weighted_dist_q: "WEIGHTED" "DISTANCE" "FROM" STRING "TO" STRING max_depth_clause?
 ancestors_q:   "ANCESTORS" "OF" STRING "DEPTH" NUMBER where_clause?
 descendants_q: "DESCENDANTS" "OF" STRING "DEPTH" NUMBER where_clause?
 common_q:      "COMMON" "NEIGHBORS" "OF" STRING "AND" STRING where_clause?
@@ -182,6 +182,7 @@ time_expr: "NOW" "(" ")" "-" NUMBER TIME_UNIT -> time_offset
 TIME_UNIT: /[smhd]/
 limit_clause: "LIMIT" NUMBER
 offset_clause: "OFFSET" NUMBER
+max_depth_clause: "MAX_DEPTH" NUMBER
 order_clause: "ORDER" "BY" IDENTIFIER order_dir?
 order_dir: "ASC" -> order_asc
           | "DESC" -> order_desc

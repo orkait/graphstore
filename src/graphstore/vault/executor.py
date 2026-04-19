@@ -49,7 +49,14 @@ class VaultExecutor:
         handler = handlers.get(type(ast))
         if handler is None:
             raise GraphStoreError(f"Unknown vault command: {type(ast).__name__}")
-        return handler(ast)
+        # Translate ValueError (raised by VaultManager when a title/slug fails
+        # path-safety validation) into GraphStoreError so clients catching the
+        # common DSL error surface handle it gracefully. ValueError is preserved
+        # as the ``__cause__`` chain for debugging.
+        try:
+            return handler(ast)
+        except ValueError as e:
+            raise GraphStoreError(f"invalid vault operation: {e}") from e
 
     def _new(self, q) -> Result:
         tags = q.tags.split(",") if q.tags else []

@@ -27,10 +27,19 @@ class PyMuPDF4LLMIngestor(Ingestor):
         if doc.metadata:
             metadata.update({k: v for k, v in doc.metadata.items() if v})
 
+        # Deduplicate by PDF xref. A single image (e.g. a header logo) used on
+        # every page appears in every page's get_images() list with the same
+        # xref. Pre-fix, a 50-page PDF with one logo stored 50 copies and
+        # re-embedded the same image 50 times — bug #66. We record the first
+        # page each unique image appears on.
+        seen_xrefs: set[int] = set()
         for page_num, page in enumerate(doc):
             for img_info in page.get_images(full=True):
                 try:
                     xref = img_info[0]
+                    if xref in seen_xrefs:
+                        continue
+                    seen_xrefs.add(xref)
                     base_image = doc.extract_image(xref)
                     if base_image:
                         images.append(ExtractedImage(

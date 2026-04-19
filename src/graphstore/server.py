@@ -180,10 +180,23 @@ def execute(req: ExecuteRequest):
     store = _get_store()
     try:
         result = store.execute(req.query)
-    except GraphStoreError as exc:
-        # Return soft errors (NodeExists, duplicate edge) as 200 so the
-        # frontend can continue executing subsequent queries in a batch.
-        return _json_bytes_response({"kind": "error", "data": str(exc), "count": 0, "elapsed_us": 0})
+    except Exception as exc:
+        # Catch all exceptions (including ValueError, KeyError, etc.) and
+        # return them as soft 200 errors. Pre-fix only GraphStoreError was
+        # caught, so a programmer bug anywhere in the executor surfaced as
+        # an HTTP 500 with a stack trace leaked to the client, and in
+        # batch mode caused the whole batch to abort (bug #80). Logging
+        # here gives us the observability we used to get from the 500.
+        import logging
+        logging.getLogger(__name__).warning(
+            "execute: %s: %s", type(exc).__name__, exc,
+        )
+        return _json_bytes_response({
+            "kind": "error",
+            "data": f"{type(exc).__name__}: {exc}",
+            "count": 0,
+            "elapsed_us": 0,
+        })
     return _json_bytes_response(_result_payload(result))
 
 
@@ -193,6 +206,7 @@ def execute_batch(req: BatchRequest):
         return _json_bytes_response([{"kind": "error", "data": f"Batch exceeds {_MAX_BATCH_SIZE} queries", "count": 0, "elapsed_us": 0}])
     store = _get_store()
     results = []
+    import logging as _logging
     for q in req.queries:
         err = _validate_query(q)
         if err:
@@ -201,8 +215,18 @@ def execute_batch(req: BatchRequest):
         try:
             r = store.execute(q)
             results.append(_result_payload(r))
-        except GraphStoreError as exc:
-            results.append({"kind": "error", "data": str(exc), "count": 0, "elapsed_us": 0})
+        except Exception as exc:
+            # Same widening as /api/execute — a single unexpected error
+            # shouldn't abort the remaining queries in the batch.
+            _logging.getLogger(__name__).warning(
+                "execute-batch: %s: %s", type(exc).__name__, exc,
+            )
+            results.append({
+                "kind": "error",
+                "data": f"{type(exc).__name__}: {exc}",
+                "count": 0,
+                "elapsed_us": 0,
+            })
     return _json_bytes_response(results)
 
 

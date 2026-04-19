@@ -89,6 +89,11 @@ class DocumentStore:
         self._conn.execute(
             "INSERT OR REPLACE INTO documents (slot, content, content_type, size) VALUES (?, ?, ?, ?)",
             (slot, content, content_type, len(content)))
+        # Always clear any prior FTS row first. Without this, overwriting a
+        # text document with a binary one left the old text indexed in doc_fts
+        # pointing at the now-binary slot (bug #51). A subsequent BM25 query
+        # would return the slot for content it no longer contains.
+        self._conn.execute("DELETE FROM doc_fts WHERE rowid = ?", (slot,))
         # Plaintext documents also land in the BM25 index so REMEMBER can find
         # them without a separate put_summary() call. Binary/PDF content stays
         # out of FTS (indexing garbled bytes hurts ranking).
@@ -99,7 +104,7 @@ class DocumentStore:
                 text = None
             if text:
                 self._conn.execute(
-                    "INSERT OR REPLACE INTO doc_fts (rowid, summary) VALUES (?, ?)",
+                    "INSERT INTO doc_fts (rowid, summary) VALUES (?, ?)",
                     (slot, text))
         self._conn.commit()
 
@@ -293,8 +298,11 @@ class DocumentStore:
         for s in all_meta_slots - live_slots:
             self._conn.execute("DELETE FROM doc_metadata WHERE doc_slot = ?", (s,))
 
-        # Clean FTS for orphaned summaries
-        for s in orphan_sums:
+        # Clean FTS for orphaned summaries AND orphaned documents.
+        # put_document auto-writes plaintext bodies to doc_fts (PR #102),
+        # so orphaned documents can leave stale BM25 rows behind -
+        # REMEMBER would then return matches pointing at tombstoned slots.
+        for s in orphan_sums | orphan_docs:
             self._conn.execute("DELETE FROM doc_fts WHERE rowid = ?", (s,))
 
         self._conn.commit()

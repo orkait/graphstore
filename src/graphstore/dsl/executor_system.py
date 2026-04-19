@@ -507,6 +507,18 @@ class SystemExecutor:
                     for k, edges in self.store._edges_by_type.items()
                     for s, t, _d in edges
                 }
+                # Rebuild _edge_data_idx too — it's keyed by (src, tgt)
+                # pairs and expired slots would otherwise leak their edge
+                # data through get_edge_data until the next mutation that
+                # happens to trigger _rebuild_edges (bug #28). We already
+                # hold the canonical data in _edges_by_type, so recompute.
+                self.store._edge_data_idx = {}
+                for k, edges in self.store._edges_by_type.items():
+                    kind_idx = {}
+                    for s, t, d in edges:
+                        kind_idx[(s, t)] = d
+                    if kind_idx:
+                        self.store._edge_data_idx[k] = kind_idx
             self.store._edges_dirty = True
             self.store._ensure_edges_built()
 
@@ -581,29 +593,28 @@ class SystemExecutor:
     def _snapshot(self, q: SysSnapshot) -> Result:
         """SYS SNAPSHOT: save full graph state to a named snapshot."""
         store = self.store
-        ns = store._next_slot
-        snap = {
-            "columns": store.columns.snapshot_arrays(),
-            "node_ids": store.node_ids[:ns].copy(),
-            "node_kinds": store.node_kinds[:ns].copy(),
-            "tombstones": set(store.node_tombstones),
-            "edges_by_type": {k: list(v) for k, v in store._edges_by_type.items()},
-            "edge_keys": set(store._edge_keys),
-            "id_to_slot": dict(store.id_to_slot),
-            "next_slot": ns,
-            "count": store._count,
-            "capacity": store._capacity,
-            "active_context": store._active_context,
-        }
-        # Snapshot vector state
+        # Centralized store snapshot captures every mutable store-owned
+        # field. Pre-fix, the hand-rolled dict here missed string_table,
+        # secondary_indices, _indexed_fields, and _edge_data_idx — which
+        # meant a SYS COMPACT STRINGS after a SYS ROLLBACK could corrupt
+        # column values into dangling string IDs (bugs #29, #101).
+        store_snap = store.make_snapshot()
+        ns = store_snap.next_slot
+        # Vector state lives on the runtime, not the Store — capture it
+        # alongside the store snapshot so SYS ROLLBACK can restore the
+        # whole picture. VectorStore.save serializes the HNSW index.
+        vector_payload = None
         vs = self._vector_store
         if vs is not None and vs.count() > 0:
-            snap["vector_index"] = vs.save()
-            snap["vector_presence"] = vs._has_vector[:ns].copy()
-            snap["vector_dims"] = vs.dims
-        else:
-            snap["vector_index"] = None
-        store._snapshots[q.name] = snap
+            vector_payload = {
+                "index": vs.save(),
+                "presence": vs._has_vector[:ns].copy(),
+                "dims": vs.dims,
+            }
+        store._snapshots[q.name] = {
+            "store": store_snap,
+            "vector": vector_payload,
+        }
         return Result(kind="ok", data={"snapshot": q.name}, count=1)
 
     def _rollback(self, q: SysRollback) -> Result:
@@ -614,46 +625,32 @@ class SystemExecutor:
 
         snap = store._snapshots[q.name]
 
-        saved_next_slot = snap["next_slot"]
-        saved_capacity = snap.get("capacity", saved_next_slot)
-        while store._capacity < saved_capacity:
-            store._grow()
+        # The centralized restore handles capacity growth, string_table
+        # rebuild, column restore, secondary index restore, and all the
+        # bookkeeping that the four hand-rolled sites used to get wrong.
+        store.restore_snapshot(snap["store"])
 
-        store.columns.restore_arrays(snap["columns"])
-        store.columns.grow(store._capacity)
-
-        # Restore node arrays
-        store.node_ids[:saved_next_slot] = snap["node_ids"]
-        store.node_kinds[:saved_next_slot] = snap["node_kinds"]
-
-        # Clear any slots beyond the saved state
-        if saved_next_slot < store._next_slot:
-            store.node_ids[saved_next_slot:store._next_slot] = -1
-            store.node_kinds[saved_next_slot:store._next_slot] = 0
-
-        store.node_tombstones = set(snap["tombstones"])
-        store._edges_by_type = {k: list(v) for k, v in snap["edges_by_type"].items()}
-        store._edge_keys = set(snap["edge_keys"])
-        store.id_to_slot = dict(snap["id_to_slot"])
-        store._next_slot = saved_next_slot
-        store._count = snap["count"]
-        store._active_context = snap.get("active_context")
-
-        # Restore vector state - mutate the runtime container so every
-        # component sees the new VectorStore through their shared ref.
-        if snap.get("vector_index") is not None:
+        # Vector store is runtime-level; restore by replacing the whole
+        # instance so every component holding a ref through runtime sees
+        # the rolled-back vectors.
+        vector_payload = snap.get("vector")
+        if vector_payload is not None:
             from graphstore.vector.store import VectorStore
-            vs = VectorStore(dims=snap["vector_dims"], capacity=store._capacity)
-            vs.load(snap["vector_index"])
-            vs._has_vector[:len(snap["vector_presence"])] = snap["vector_presence"]
-            self._runtime.vector_store = vs
+            new_vs = VectorStore(dims=vector_payload["dims"], capacity=store._capacity)
+            new_vs.load(vector_payload["index"])
+            presence = vector_payload["presence"]
+            new_vs._has_vector[:len(presence)] = presence
+            self._runtime.vector_store = new_vs
         else:
             self._runtime.vector_store = None
 
-        # Rebuild derived state
+        # Rebuild derived state (CSR matrices) now that the primitives
+        # are all back in place.
         store._rebuild_edges()
 
-        # Orphan cleanup in DocumentStore
+        # Orphan cleanup in DocumentStore — documents whose slots were
+        # reused post-snapshot would otherwise surface in DOCUMENT queries
+        # as ghosts.
         if self._document_store:
             live = store.compute_live_mask(store._next_slot)
             live_slots = set(int(s) for s in np.nonzero(live)[0])

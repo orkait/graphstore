@@ -35,6 +35,7 @@ def cluster_by_entity(
     event_times: Optional[Dict[int, int]] = None,
     similarity_threshold: float = 0.7,
     min_cluster_size: int = 1,
+    cancel_event=None,
 ) -> List[Observation]:
     """Cluster messages by entity, then by semantic similarity.
 
@@ -46,6 +47,8 @@ def cluster_by_entity(
         event_times: slot -> __event_at__ epoch ms (optional)
         similarity_threshold: cosine sim threshold for same-cluster
         min_cluster_size: minimum messages to form an observation
+        cancel_event: optional threading.Event; checked between entity
+            groups so long consolidation runs can be aborted (bug #85).
 
     Returns list of Observation objects, one per cluster.
     """
@@ -94,28 +97,57 @@ def cluster_by_entity(
         norms[norms == 0] = 1.0
         slot_vecs_norm = slot_vecs / norms
 
-        assigned = [False] * len(vec_slots)
+        # Optional cancellation check — cheap read, coarse granularity.
+        # Checked per entity group so a 100K-entity consolidation can abort
+        # in bounded time (bug #85).
+        if cancel_event is not None and cancel_event.is_set():
+            break
+
+        assigned = np.zeros(len(vec_slots), dtype=bool)
         clusters: list[list[int]] = []
 
+        # Vectorized single-linkage-ish clustering. For each unassigned
+        # seed, compute similarity to every other unassigned vector in
+        # one matrix-vector multiply, then greedily merge above-threshold
+        # matches. Pre-fix this loop was an O(N²) Python-level double
+        # for-loop with per-pair np.dot calls (bug #85); on a 10K-entity
+        # group that cost ~100M Python function calls.
         for i in range(len(vec_slots)):
             if assigned[i]:
                 continue
+            # Running SUM of cluster vectors (not mean). We keep the sum
+            # until the cluster is closed, then normalize once. Pre-fix,
+            # the code tried to maintain a running normalized mean by
+            # renormalizing after every add, which broke the invariant
+            # that ``centroid == mean(members)`` for clusters >2 (bug
+            # #86). Any subsequent similarity test used a distorted
+            # centroid and mis-assigned downstream members.
+            cluster_sum = slot_vecs_norm[i].copy()
             cluster = [i]
             assigned[i] = True
-            centroid = slot_vecs_norm[i].copy()
 
-            for j in range(i + 1, len(vec_slots)):
-                if assigned[j]:
-                    continue
-                sim = float(np.dot(centroid, slot_vecs_norm[j]))
-                if sim >= similarity_threshold:
-                    cluster.append(j)
-                    assigned[j] = True
-                    # Update centroid (running mean)
-                    centroid = centroid * (len(cluster) - 1) / len(cluster) + slot_vecs_norm[j] / len(cluster)
-                    norm = np.linalg.norm(centroid)
-                    if norm > 0:
-                        centroid /= norm
+            while True:
+                # Similarity of normalized cluster mean to every remaining
+                # unassigned candidate. ``cluster_sum / len(cluster)`` is
+                # the arithmetic mean; we skip an explicit mean computation
+                # since cosine similarity is scale-invariant — dot with
+                # the sum and divide by its norm at the end.
+                centroid = cluster_sum / np.linalg.norm(cluster_sum)
+                candidates = np.where(~assigned)[0]
+                if len(candidates) == 0:
+                    break
+                sims = slot_vecs_norm[candidates] @ centroid
+                # Find the highest-similarity above-threshold candidate.
+                above = np.where(sims >= similarity_threshold)[0]
+                if len(above) == 0:
+                    break
+                # Add all above-threshold candidates in this round so the
+                # loop converges in O(log N) rounds rather than N.
+                new_indices = candidates[above]
+                for idx in new_indices:
+                    assigned[idx] = True
+                    cluster.append(int(idx))
+                    cluster_sum = cluster_sum + slot_vecs_norm[idx]
 
             clusters.append(cluster)
 

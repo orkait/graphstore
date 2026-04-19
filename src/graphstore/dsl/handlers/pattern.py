@@ -1,5 +1,7 @@
 """MATCH pattern handlers."""
 
+import logging
+
 import numpy as np
 
 from graphstore.dsl.handlers._registry import handles
@@ -7,6 +9,14 @@ from graphstore.dsl.ast_nodes import MatchQuery, MatchPattern
 from graphstore.core.types import Result
 from graphstore.core.errors import CostThresholdExceeded
 from graphstore.dsl.cost_estimator import estimate_match_cost
+
+logger = logging.getLogger(__name__)
+
+# Default per-hop frontier ceiling applied when the query has no explicit
+# LIMIT. Previous behavior was a hardcoded 1000 that silently dropped bindings
+# past the cap (bug #43). 10_000 is conservative enough to avoid runaway
+# expansion while being 10x the previous silent cap.
+_DEFAULT_MATCH_FRONTIER_CAP = 10_000
 
 
 class PatternHandlers:
@@ -19,7 +29,19 @@ class PatternHandlers:
         if cost.rejected:
             raise CostThresholdExceeded(cost.estimated_frontier, self.cost_threshold)
 
-        bindings, edges = self._execute_match_pattern(pattern)
+        # Propagate the user's LIMIT down into expansion so the per-hop
+        # frontier cap is at least as generous. Callers that want more
+        # results get more results; callers that ask for few get expansion
+        # cut short early (saves work). When absent, fall back to the
+        # configured default.
+        frontier_cap = (
+            max(q.limit.value, _DEFAULT_MATCH_FRONTIER_CAP)
+            if q.limit is not None
+            else _DEFAULT_MATCH_FRONTIER_CAP
+        )
+        bindings, edges = self._execute_match_pattern(
+            pattern, frontier_cap=frontier_cap,
+        )
 
         bindings = [
             b for b in bindings
@@ -39,8 +61,19 @@ class PatternHandlers:
             count=len(bindings),
         )
 
-    def _execute_match_pattern(self, pattern: MatchPattern) -> tuple[list[dict], list[dict]]:
-        """Execute a MATCH pattern. Returns (bindings, edges)."""
+    def _execute_match_pattern(
+        self,
+        pattern: MatchPattern,
+        frontier_cap: int = _DEFAULT_MATCH_FRONTIER_CAP,
+    ) -> tuple[list[dict], list[dict]]:
+        """Execute a MATCH pattern. Returns (bindings, edges).
+
+        Args:
+            frontier_cap: per-hop truncation threshold for the working
+                frontier. When exceeded, the frontier is trimmed to cap and
+                a warning is logged so callers aren't silently short-changed
+                on results (bug #43).
+        """
         steps = pattern.steps
         arrows = pattern.arrows
 
@@ -137,10 +170,15 @@ class PatternHandlers:
             if not current_slots:
                 return [], []
 
-            if len(current_slots) > 1000:
-                current_slots = current_slots[:1000]
-                paths = paths[:1000]
-                edge_trails = edge_trails[:1000]
+            if len(current_slots) > frontier_cap:
+                logger.warning(
+                    "MATCH expansion hit frontier cap %d (have %d bindings) — "
+                    "truncating. Increase LIMIT or cost_threshold to see more.",
+                    frontier_cap, len(current_slots),
+                )
+                current_slots = current_slots[:frontier_cap]
+                paths = paths[:frontier_cap]
+                edge_trails = edge_trails[:frontier_cap]
 
         bindings = []
         for path in paths:

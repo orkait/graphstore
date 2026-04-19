@@ -52,3 +52,4 @@ tests/fixtures/pdf/*.pdf
 tests/fixtures/voice/*.wav
 tests/fixtures/voice/*.mp3
 hf_token_dataset/
+bug_fixes/

@@ -37,10 +37,37 @@ def get_model_dir(name: str) -> Path:
 
 
 def is_installed(name: str) -> bool:
+    """Report True only for usable installs.
+
+    Pre-fix, the check short-circuited on any ``.onnx`` or ``.gguf`` file
+    in the model directory. An interrupted download could leave the weight
+    file present but the tokenizer and manifest missing, leaving
+    ``load_installed_embedder`` to crash on first use (bug #75). We now
+    verify the directory is self-consistent by family:
+
+      - GGUF family: at least one ``.gguf`` + a ``manifest.json``.
+      - ONNX family: at least one ``.onnx`` + a ``manifest.json`` +
+        ``tokenizer.json`` (loader needs both).
+
+    Users can run ``graphstore install-embedder <name>`` to heal partial
+    installs: the existing install path is idempotent on HF side thanks to
+    hf_hub_download's content-hash check.
+    """
     model_dir = get_model_dir(name)
     if not model_dir.exists():
         return False
-    return any(model_dir.rglob("*.onnx")) or any(model_dir.rglob("*.gguf"))
+    manifest = model_dir / "manifest.json"
+    if not manifest.exists():
+        return False
+    has_gguf = any(model_dir.rglob("*.gguf"))
+    has_onnx = any(model_dir.rglob("*.onnx"))
+    if has_gguf:
+        # GGUF self-contains tokenization, so manifest + weight is enough.
+        return True
+    if has_onnx:
+        # ONNX models need the HF tokenizer side-by-side.
+        return (model_dir / "tokenizer.json").exists()
+    return False
 
 
 def install_embedder(name: str, variant: str | None = None) -> Path:
@@ -60,17 +87,31 @@ def install_embedder(name: str, variant: str | None = None) -> Path:
     model_dir = get_model_dir(name)
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Install missing deps
+    # 1. Install missing deps. Library-code pip invocation is dangerous —
+    # it can mutate the active Python environment in ways the caller did
+    # not ask for, and in notebooks / shared envs this is particularly
+    # surprising (bug #73). Require explicit opt-in via env var; otherwise
+    # raise with a clear install hint so the user runs pip themselves.
+    import os as _os
+    allow_install = _os.environ.get("GRAPHSTORE_AUTO_PIP_INSTALL") == "1"
     for dep in info["deps"]:
         try:
             __import__(dep.replace("-", "_"))
         except ImportError:
-            print(f"Installing {dep}...")
-            # Check for GPU
             if dep == "onnxruntime":
                 dep_name = _detect_onnx_package()
             else:
                 dep_name = dep
+            if not allow_install:
+                raise RuntimeError(
+                    f"Model {name!r} requires the {dep_name!r} Python package which is "
+                    f"not installed. Install it first:\n"
+                    f"    pip install {dep_name}\n"
+                    f"or set GRAPHSTORE_AUTO_PIP_INSTALL=1 to let graphstore "
+                    f"install missing deps automatically (not recommended outside "
+                    f"development environments)."
+                )
+            print(f"Installing {dep_name}...")
             subprocess.check_call([sys.executable, "-m", "pip", "install", dep_name, "-q"])
 
     # 2. Download model files

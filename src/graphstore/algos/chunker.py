@@ -44,6 +44,21 @@ def chunk_fixed(
     summary_max_len: int = 200,
 ) -> list[Chunk]:
     """Fixed-size sliding window chunks with overlap."""
+    # Guard against infinite loops. ``pos += chunk_size - overlap`` never
+    # advances when chunk_size == overlap (step of 0) and regresses when
+    # overlap > chunk_size (negative step), making the outer while-loop
+    # infinite on any non-empty input. Pre-fix, a caller with a bad config
+    # (e.g. chunk_max_size=50, chunk_overlap=50 from a misconfigured JSON)
+    # could wedge ingest indefinitely — bug #83. Reject at entry.
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+    if overlap < 0:
+        raise ValueError(f"overlap must be non-negative, got {overlap}")
+    if chunk_size <= overlap:
+        raise ValueError(
+            f"chunk_size must exceed overlap "
+            f"(got chunk_size={chunk_size}, overlap={overlap})"
+        )
     chunks: list[Chunk] = []
     pos = 0
     while pos < len(text):
@@ -72,13 +87,25 @@ def chunk_by_paragraph(
     paragraphs = _PARA_SPLIT_RE.split(text)
     chunks: list[Chunk] = []
     current = ""
-    start = 0
+    # Track where the current chunk starts in the ORIGINAL text, not where
+    # the accumulator thinks it is. Pre-fix, start_char advanced by
+    # len(current) which excluded the whitespace eaten by _PARA_SPLIT_RE
+    # and the .strip() calls, drifting a few characters per chunk (bug
+    # #84). We use str.find() from the previous chunk's end so the offset
+    # is always the real byte position of the chunk's first non-whitespace
+    # character.
+    search_pos = 0
+    current_start: int | None = None
     for para in paragraphs:
-        para = para.strip()
-        if not para:
+        para_stripped = para.strip()
+        if not para_stripped:
             continue
+        if current_start is None:
+            # Locate the start of this paragraph in the original text.
+            loc = text.find(para_stripped, search_pos)
+            current_start = loc if loc >= 0 else search_pos
         if current and (
-            len(current) + len(para) > max_chunk_size
+            len(current) + len(para_stripped) > max_chunk_size
             or len(current.strip()) >= max_chunk_size // 2
         ):
             chunks.append(
@@ -86,19 +113,25 @@ def chunk_by_paragraph(
                     text=current.strip(),
                     summary=make_summary(current.strip(), summary_max_len),
                     index=len(chunks),
-                    start_char=start,
+                    start_char=current_start,
                 )
             )
-            start += len(current)
+            # Advance search_pos so the next find() starts after the chunk
+            # we just emitted, and reset current_start so the next iteration
+            # locates the new chunk's real start.
+            search_pos = current_start + len(current.strip())
             current = ""
-        current += para + "\n\n"
+            # Locate THIS paragraph's start for the new chunk.
+            loc = text.find(para_stripped, search_pos)
+            current_start = loc if loc >= 0 else search_pos
+        current += para_stripped + "\n\n"
     if current.strip():
         chunks.append(
             Chunk(
                 text=current.strip(),
                 summary=make_summary(current.strip(), summary_max_len),
                 index=len(chunks),
-                start_char=start,
+                start_char=current_start if current_start is not None else 0,
             )
         )
     if not chunks:

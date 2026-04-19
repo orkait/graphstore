@@ -50,7 +50,13 @@ class FlashRankReranker:
         passages = [{"id": i, "text": doc} for i, doc in enumerate(documents)]
         request = RerankRequest(query=query, passages=passages)
         results = self._ranker.rerank(request)
-        scores = np.zeros(len(documents), dtype=np.float64)
+        # Initialize with -inf so any doc flashrank filters (e.g. empty text
+        # after internal normalization) ranks strictly below legitimate hits.
+        # Pre-fix, dropped docs stayed at 0.0, which for a cross-encoder that
+        # produces small positive relevance scores is indistinguishable from
+        # "just not very relevant" (bug #72). Caller code downstream can now
+        # filter scores > -inf to identify the rerankable subset.
+        scores = np.full(len(documents), -np.inf, dtype=np.float64)
         for r in results:
             scores[r["id"]] = r["score"]
         return scores

@@ -50,7 +50,16 @@ class VisibilityMixin:
         if self.store._active_context is not None:
             if self.store.columns.has_column("__context__"):
                 if self.store.columns._presence["__context__"][slot]:
-                    ctx_id = self.store.string_table.intern(self.store._active_context)
+                    # Look up the interned id without creating one. Pre-fix,
+                    # intern() was called on every visibility check; an
+                    # active context that's never been used as a column
+                    # value leaked a new string entry on every call (bug
+                    # #23). When the context name isn't interned, the slot
+                    # can't possibly match — short-circuit to invisible.
+                    active_ctx = self.store._active_context
+                    if active_ctx not in self.store.string_table:
+                        return False
+                    ctx_id = self.store.string_table.intern(active_ctx)
                     if int(self.store.columns._columns["__context__"][slot]) != ctx_id:
                         return False
                 else:

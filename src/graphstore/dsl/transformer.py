@@ -14,6 +14,7 @@ from graphstore.dsl.ast_nodes import (
     OrExpr,
     WhereClause,
     LimitClause,
+    MaxDepthClause,
     NodeQuery,
     NodesQuery,
     EdgesQuery,
@@ -241,10 +242,12 @@ class DSLTransformer(Transformer):
         )
 
     def shortest_q(self, args):
+        md = self._find(args[2:], MaxDepthClause)
         return ShortestPathQuery(
             from_id=self._str(args[0]),
             to_id=self._str(args[1]),
             where=self._find(args[2:], WhereClause),
+            max_depth=md.value if md is not None else None,
         )
 
     def distance_q(self, args):
@@ -255,16 +258,20 @@ class DSLTransformer(Transformer):
         )
 
     def weighted_sp_q(self, args):
+        md = self._find(args[2:], MaxDepthClause)
         return WeightedShortestPathQuery(
             from_id=self._str(args[0]),
             to_id=self._str(args[1]),
             where=self._find(args[2:], WhereClause),
+            max_depth=md.value if md is not None else None,
         )
 
     def weighted_dist_q(self, args):
+        md = self._find(args[2:], MaxDepthClause)
         return WeightedDistanceQuery(
             from_id=self._str(args[0]),
             to_id=self._str(args[1]),
+            max_depth=md.value if md is not None else None,
         )
 
     def ancestors_q(self, args):
@@ -595,6 +602,9 @@ class DSLTransformer(Transformer):
 
     def offset_clause(self, args):
         return OffsetClause(value=self._num(args[0]))
+
+    def max_depth_clause(self, args):
+        return MaxDepthClause(value=self._num(args[0]))
 
     def order_clause(self, args):
         field = str(args[0])

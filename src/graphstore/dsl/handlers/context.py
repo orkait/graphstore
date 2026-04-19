@@ -25,6 +25,20 @@ class ContextHandlers:
             ctx_col = self.store.columns.get_column("__context__", n)
             if ctx_col is not None:
                 col_data, col_pres, _ = ctx_col
+                # Don't intern the context name unconditionally. If the
+                # name was never bound, no column value references it and
+                # interning just pollutes the string table with a dead
+                # entry that later gc_strings must walk past. Pre-fix,
+                # repeated ``DISCARD CONTEXT "never-bound"`` leaked one
+                # string per call (bug #23).
+                if q.name not in self.store.string_table:
+                    # Nothing references this context — skip the sweep.
+                    self.store._active_context = None
+                    return Result(
+                        kind="ok",
+                        data={"discarded": q.name, "deleted": 0},
+                        count=0,
+                    )
                 ctx_id = self.store.string_table.intern(q.name)
                 ctx_mask = col_pres & (col_data == ctx_id)
                 slots_to_delete = np.nonzero(ctx_mask)[0]

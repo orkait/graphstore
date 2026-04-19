@@ -18,14 +18,36 @@ class CronScheduler:
     """Persistent cron scheduler with daemon timer thread."""
 
     def __init__(self, conn: sqlite3.Connection | None, submit_fn):
+        # Main-thread connection. Used for add/remove/list operations that
+        # run synchronously from DSL dispatch.
         self._conn = conn
+        # Dedicated connection for the cron tick thread. Pre-fix, the tick
+        # thread shared self._conn with the main thread, which meant a
+        # cron UPDATE could finalize or abort an in-flight main-thread
+        # transaction because sqlite transaction state is per-connection,
+        # not per-thread (bug #76). We lazily open a separate connection
+        # when start() is called so the two threads never interleave
+        # writes on the same handle.
+        self._tick_conn: sqlite3.Connection | None = None
+        self._tick_db_path: str | None = None
         self._submit = submit_fn
         self._thread: threading.Thread | None = None
         self._running = False
+        # Capture the sqlite path now so the tick thread can open its own
+        # handle to the same database without having to share ``self._conn``.
+        if conn is not None:
+            try:
+                row = conn.execute("PRAGMA database_list").fetchone()
+                if row and len(row) >= 3:
+                    self._tick_db_path = row[2]
+            except Exception as e:
+                logger.debug("CronScheduler: could not resolve db path: %s", e)
 
     def start(self) -> None:
-        """Start the cron timer thread."""
+        """Start the cron timer thread. Idempotent - no-op if already running."""
         if self._conn is None:
+            return
+        if self._thread is not None and self._thread.is_alive():
             return
         self._running = True
         self._thread = threading.Thread(
@@ -39,6 +61,13 @@ class CronScheduler:
         if self._thread is not None:
             self._thread.join(timeout=5)
             self._thread = None
+            self._thread = None
+        if self._tick_conn is not None:
+            try:
+                self._tick_conn.close()
+            except Exception:
+                pass
+            self._tick_conn = None
 
     def add(self, name: str, schedule: str, query: str) -> dict:
         """Register a cron job. Validates cron expression."""
@@ -132,6 +161,22 @@ class CronScheduler:
 
     def _tick_loop(self) -> None:
         """Check every 60s for due jobs."""
+        # Open the dedicated tick-thread connection inside the thread body
+        # (sqlite3 connections are tied to the thread that opened them
+        # unless check_same_thread=False, which we pass explicitly). If we
+        # can't resolve the db path, fall back to the shared connection;
+        # the pre-fix behavior is preserved but logged.
+        if self._tick_db_path is not None:
+            try:
+                self._tick_conn = sqlite3.connect(
+                    self._tick_db_path, check_same_thread=False,
+                )
+            except Exception as e:
+                logger.warning(
+                    "CronScheduler: failed to open dedicated connection to %s: %s",
+                    self._tick_db_path, e,
+                )
+                self._tick_conn = None
         while self._running:
             try:
                 self._tick()
@@ -144,7 +189,9 @@ class CronScheduler:
 
     def _tick(self) -> None:
         """Find and submit all due jobs."""
-        conn = self._conn
+        # Prefer the dedicated tick connection so cron's transactions
+        # don't interleave with main-thread writes on the same handle.
+        conn = self._tick_conn if self._tick_conn is not None else self._conn
         if conn is None:
             return
         now = time.time()
