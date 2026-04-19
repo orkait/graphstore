@@ -38,84 +38,36 @@ Most agent memory systems are wrappers around a vector database. That works for 
 
 Three storage engines, one typed DSL, a tiered ingest pipeline, and a hybrid retrieval engine that fuses all of them.
 
-```mermaid
-flowchart TD
-    User([User / Agent])
-    DSL["<b>DSL</b><br/>Lark LALR(1), 70+ commands"]
+<p align="center">
+  <img src="docs/img/architecture.svg" alt="graphstore architecture: DSL + three storage engines fed by the tiered ingest pipeline" width="780">
+</p>
 
-    subgraph Engines [" "]
-        direction LR
-        Graph["<b>Graph</b><br/>numpy columns<br/>scipy CSR edges<br/>edge index"]
-        Vector["<b>Vector</b><br/>usearch HNSW<br/>cosine<br/>int8 / fp32"]
-        Document["<b>Document</b><br/>SQLite + FTS5<br/>BM25 + blobs<br/>summaries"]
-    end
+**Ingest tiers:** `txt/md` → direct · `html/docx/xlsx` → markitdown · `pdf` → pymupdf4llm → docling · `png/jpg` → vision sidecar (VLM, `[vision]`) · `wav/mp3/flac` → whisper in-process (`[audio]`).
 
-    subgraph Ingest ["Ingest pipeline (tiered, modality-aware)"]
-        direction LR
-        TxtMd[txt / md<br/>direct]
-        Mit[html / docx / xlsx<br/>markitdown]
-        Pdf[pdf<br/>pymupdf4llm → docling]
-        Vis[png / jpg<br/>vision sidecar VLM]
-        Aud[wav / mp3 / flac<br/>whisper in-process]
-    end
-
-    User --> DSL
-    DSL --> Graph
-    DSL --> Vector
-    DSL --> Document
-    Ingest --> Graph
-    Ingest --> Vector
-    Ingest --> Document
-
-    classDef engine fill:#1e3a8a,stroke:#60a5fa,color:#e0e7ff,stroke-width:1px
-    classDef ingest fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px
-    class Graph,Vector,Document engine
-    class TxtMd,Mit,Pdf,Vis,Aud ingest
-```
+<sub>Source: [`docs/img/architecture.dot`](docs/img/architecture.dot) — re-render with <code>dot -Tsvg architecture.dot -o architecture.svg</code>.</sub>
 
 ### REMEMBER - the retrieval engine
 
 `REMEMBER` is the core command. Five-stage pipeline, four weighted signals, optional rerank + nucleus walk.
 
-```mermaid
-flowchart TD
-    Q["REMEMBER &quot;European architecture&quot; LIMIT 10"]
+<p align="center">
+  <img src="docs/img/remember.svg" alt="REMEMBER pipeline: gather -> fuse -> temporal -> rerank -> nucleus -> ranked" width="780">
+</p>
 
-    subgraph S1 ["Stage 1 · Gather (union, capped adaptively)"]
-        V[vector ANN<br/>sentence-level cosine<br/>usearch HNSW]
-        B[BM25 FTS5<br/>chunk-level keyword<br/>SQLite FTS5]
-    end
+<sub>Source: [`docs/img/remember.dot`](docs/img/remember.dot) — re-render with <code>dot -Tsvg remember.dot -o remember.svg</code>.</sub>
 
-    subgraph S2 ["Stage 2 · Fuse (weighted | rrf)"]
-        direction LR
-        F1[vec_signal · 0.52]
-        F2[bm25_signal · 0.25]
-        F3[recency · 0.15]
-        F4[graph_signal · 0.08]
-        F5[+ co-occurrence boost<br/>+ recall-frequency nudge]
-    end
+**Signals fused at stage 2** (defaults; weights are configurable):
 
-    S3[Stage 3 · Temporal filter<br/>hard-zero outside AT window]
-    S4[Stage 4 · Rerank <br/>optional cross-encoder GGUF / ONNX]
-    S5[Stage 5 · Nucleus walk<br/>optional structural-edge expansion]
-    R([Ranked nodes])
+| Signal | Weight | Source |
+|---|---|---|
+| `vec_signal` | 0.52 | max sentence cosine over usearch ANN |
+| `bm25_signal` | 0.25 | SQLite FTS5 over `doc_fts` |
+| `recency` | 0.15 | `exp(-age / half_life)` from `__event_at__` or `__updated_at__` |
+| `graph_signal` | 0.08 | entity-degree sum over mentioned entities (opt-in) |
+| `+ co-occurrence` | bonus | `min(vec, bm25) * 0.10` when a candidate is found by both |
+| `+ recall-frequency` | nudge | `log1p(recall_count) * 0.05` |
 
-    Q --> V
-    Q --> B
-    V --> S2
-    B --> S2
-    S2 --> S3
-    S3 --> S4
-    S4 --> S5
-    S5 --> R
-
-    classDef stage fill:#1e293b,stroke:#64748b,color:#f1f5f9,stroke-width:1px
-    classDef signal fill:#312e81,stroke:#818cf8,color:#e0e7ff,stroke-width:1px
-    class S3,S4,S5 stage
-    class F1,F2,F3,F4,F5 signal
-```
-
-All weights, fusion method, half-life, reranker, and nucleus expansion are configurable via `graphstore.json`, `GRAPHSTORE_DSL_*` env, or constructor kwargs.
+Everything above is configurable via `graphstore.json`, `GRAPHSTORE_DSL_*` env vars, or constructor kwargs.
 
 ---
 
