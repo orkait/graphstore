@@ -396,15 +396,26 @@ def _rebuild_config(
     config: GraphStoreConfig,
     updates: dict[str, dict[str, object]],
 ) -> GraphStoreConfig:
-    """Rebuild a frozen config with section-level field overrides."""
+    """Rebuild a frozen config with section-level field overrides.
+
+    Unknown keys (e.g. fields from older graphstore versions that have
+    since been removed) are silently dropped + logged, so loading an old
+    tuned_config.json does not crash with ``TypeError: Unexpected
+    keyword argument``. Config forward-compat > config fidelity.
+    """
     sections = {}
     for section_name in GraphStoreConfig.__struct_fields__:
         current = getattr(config, section_name)
         if section_name not in updates:
             sections[section_name] = current
             continue
+        known = set(current.__struct_fields__)
         field_overrides = updates[section_name]
-        current_dict = {f: getattr(current, f) for f in current.__struct_fields__}
+        for k in list(field_overrides):
+            if k not in known:
+                _log.warning("config: dropping unknown key %s.%s", section_name, k)
+                field_overrides.pop(k)
+        current_dict = {f: getattr(current, f) for f in known}
         current_dict.update(field_overrides)
         if section_name == "dsl" and "remember_weights" in current_dict:
             current_dict["remember_weights"] = _coerce_remember_weights(current_dict["remember_weights"])
