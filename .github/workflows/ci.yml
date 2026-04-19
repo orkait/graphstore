@@ -10,40 +10,38 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
+        # No LFS - repo tracks nothing via LFS and the org budget is capped.
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            pip-${{ runner.os }}-${{ matrix.python-version }}-
-
-      - name: Cache model weights
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/huggingface
-          key: hf-models-${{ runner.os }}
-          restore-keys: |
-            hf-models-${{ runner.os }}-
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
-        run: pip install -e ".[dev,playground,ingest-pro,embed-default]"
+        # dev pulls onnxruntime + tokenizers + pytest-xdist/timeout.
+        # embed-default pulls model2vec. ingest pulls markitdown + pymupdf.
+        # Skipping ingest-pro on CI - docling drags in torch (~1 GB) and the
+        # DoclingIngestor is lazy-imported; nothing in the test suite
+        # actually exercises it, so omitting it saves 5+ minutes per run.
+        run: |
+          pip install -e ".[dev,playground,ingest,embed-default,vault,scheduler]"
 
       - name: Run tests
-        run: pytest --tb=short -q --ignore=tests/test_server.py
+        # Fast suite only (slow tests marked via pytest.mark.slow).
+        # Server tests rely on live ports and are excluded (test_server.py),
+        # e2e embedder test downloads real models and is excluded.
+        run: |
+          pytest --tb=short -q \
+            --ignore=tests/test_server.py \
+            --ignore=tests/test_e2e_real_embedder.py
 
   publish:
     needs: test
