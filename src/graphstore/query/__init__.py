@@ -7,7 +7,7 @@ Public surface:
   q.remember("European history", limit=10)
   q.nodes(where=F.eq("kind", "memory") & F.gt("importance", 0.5))
 
-Spec: docs/specs/query-builder.md
+User guide: docs/query-builder.md
 """
 from __future__ import annotations
 

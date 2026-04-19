@@ -49,10 +49,10 @@ q.create_node(id, kind="memory", document=untrusted_text).execute(gs)
 from graphstore import q, F, Query, register_verb
 ```
 
-- `q` — namespace holding every built-in verb. `q.nodes(...)`, `q.sys.status()`, `q.vault.search(...)`.
-- `F` — predicate algebra for WHERE clauses.
-- `Query` — return type of every builder. Has `.dsl()`, `.execute(gs)`, modifiers, `.pipe()`, `|` compose.
-- `register_verb` — decorator for third-party packages to register custom verbs under `q.<name>`.
+- `q` - namespace holding every built-in verb. `q.nodes(...)`, `q.sys.status()`, `q.vault.search(...)`.
+- `F` - predicate algebra for WHERE clauses.
+- `Query` - return type of every builder. Has `.dsl()`, `.execute(gs)`, modifiers, `.pipe()`, `|` compose.
+- `register_verb` - decorator for third-party packages to register custom verbs under `q.<name>`.
 
 ## Composability primitives
 
@@ -229,6 +229,5 @@ def test_my_adapter_emits_right_query():
 
 ## Related docs
 
-- [Design spec](specs/query-builder.md) — full design decisions, locked choices, PR plan.
-- [Grammar](../src/graphstore/dsl/grammar.lark) — source of truth for DSL syntax.
-- [Ingestion skill](../tools/skills/graphstore-ingestion/SKILL.md) — when you're writing an adapter.
+- [Grammar](../src/graphstore/dsl/grammar.lark) - source of truth for DSL syntax.
+- [Ingestion skill](../tools/skills/graphstore-ingestion/SKILL.md) - when you're writing an adapter.
