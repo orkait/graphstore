@@ -26,13 +26,15 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
-        # dev pulls onnxruntime + tokenizers + pytest-xdist/timeout.
-        # embed-default pulls model2vec. ingest pulls markitdown + pymupdf.
-        # Skipping ingest-pro on CI - docling drags in torch (~1 GB) and the
-        # DoclingIngestor is lazy-imported; nothing in the test suite
-        # actually exercises it, so omitting it saves 5+ minutes per run.
+        # dev pulls onnxruntime + tokenizers + pytest-xdist/timeout/cov.
+        # model2vec / croniter / pyyaml are core deps (v0.3.0 consolidation).
+        # ingest pulls markitdown + pymupdf.
+        # Skipping ingest-pro (docling = torch ~1 GB), audio (faster-whisper),
+        # vision (llama-cpp-python + weight download), gpu (onnxruntime-gpu)
+        # since they are opt-in extras. Tests for those extras skip when
+        # their import is unavailable.
         run: |
-          pip install -e ".[dev,playground,ingest,embed-default,vault,scheduler]"
+          pip install -e ".[dev,playground,ingest]"
 
       - name: Run tests
         # Fast suite only (slow tests marked via pytest.mark.slow).

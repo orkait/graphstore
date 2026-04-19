@@ -84,11 +84,29 @@ def test_whisper_ingestor_low_language_prob_warning(tmp_path):
 
 
 def test_router_routes_audio_exts_when_audio_installed():
+    """Router populates wav/mp3/... -> whisper only when ``faster_whisper``
+    importable. Skip when the ``[audio]`` extra is not installed so CI
+    without the optional dep doesn't trip this assertion."""
+    pytest.importorskip("faster_whisper")
     from graphstore.ingest.router import EXTENSION_MAP
     assert EXTENSION_MAP.get("wav") == "whisper"
     assert EXTENSION_MAP.get("mp3") == "whisper"
     assert EXTENSION_MAP.get("m4a") == "whisper"
     assert EXTENSION_MAP.get("flac") == "whisper"
+
+
+def test_router_skips_audio_exts_when_audio_missing():
+    """Complementary guarantee: when faster_whisper is absent, audio extensions
+    must NOT be registered (graphstore core stays lean). Skip when the extra IS
+    installed locally. This test plus the one above together cover both states."""
+    try:
+        import faster_whisper  # noqa: F401
+        pytest.skip("faster_whisper installed; this test checks absence behaviour")
+    except ImportError:
+        from graphstore.ingest.router import EXTENSION_MAP
+        # When missing, wav/mp3/... are not in EXTENSION_MAP at all
+        assert EXTENSION_MAP.get("wav") is None
+        assert EXTENSION_MAP.get("mp3") is None
 
 
 def test_list_ingestors_includes_whisper_with_audio_extra():
