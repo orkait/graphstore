@@ -38,55 +38,23 @@ Most agent memory systems are wrappers around a vector database. That works for 
 
 Three storage engines, one typed DSL, a tiered ingest pipeline, and a hybrid retrieval engine that fuses all of them.
 
-<details>
-<summary><strong>Architecture diagram</strong></summary>
-
-```mermaid
-flowchart LR
-    DSL[DSL<br/>Lark LALR 1]
-    G[Graph<br/>numpy + CSR]
-    V[Vector<br/>usearch HNSW]
-    D[Document<br/>SQLite FTS5]
-    I[Ingest<br/>tiered + modality]
-
-    DSL --> G
-    DSL --> V
-    DSL --> D
-    I --> G
-    I --> V
-    I --> D
-
-    classDef eng fill:#1e3a8a,stroke:#60a5fa,color:#e0e7ff
-    classDef ing fill:#064e3b,stroke:#34d399,color:#d1fae5
-    class G,V,D eng
-    class I ing
-```
+<p align="center">
+  <img src="docs/img/architecture.svg" alt="graphstore architecture: DSL + three storage engines fed by the tiered ingest pipeline" width="780">
+</p>
 
 **Ingest tiers:** `txt/md` → direct · `html/docx/xlsx` → markitdown · `pdf` → pymupdf4llm → docling · `png/jpg` → vision sidecar (VLM, `[vision]`) · `wav/mp3/flac` → whisper in-process (`[audio]`).
 
-</details>
+<sub>Source: [`docs/img/architecture.dot`](docs/img/architecture.dot) — re-render with <code>dot -Tsvg architecture.dot -o architecture.svg</code>.</sub>
 
 ### REMEMBER - the retrieval engine
 
 `REMEMBER` is the core command. Five-stage pipeline, four weighted signals, optional rerank + nucleus walk.
 
-<details>
-<summary><strong>REMEMBER pipeline diagram</strong></summary>
+<p align="center">
+  <img src="docs/img/remember.svg" alt="REMEMBER pipeline: gather -> fuse -> temporal -> rerank -> nucleus -> ranked" width="780">
+</p>
 
-```mermaid
-flowchart LR
-    Q[Query] --> G[Gather<br/>vec + BM25]
-    G --> F[Fuse<br/>weighted / rrf]
-    F --> T[Temporal<br/>filter]
-    T --> R[Rerank<br/>optional]
-    R --> N[Nucleus<br/>optional]
-    N --> O([Ranked])
-
-    classDef stage fill:#1e293b,stroke:#64748b,color:#f1f5f9
-    class G,F,T,R,N stage
-```
-
-</details>
+<sub>Source: [`docs/img/remember.dot`](docs/img/remember.dot) — re-render with <code>dot -Tsvg remember.dot -o remember.svg</code>.</sub>
 
 **Signals fused at stage 2** (defaults; weights are configurable):
 
