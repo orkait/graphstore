@@ -29,7 +29,7 @@
   <text x="480" y="50" text-anchor="middle" class="title">REMEMBER "European architecture" LIMIT 10</text>
 
   <!-- Stage 1 header -->
-  <text x="480" y="98" text-anchor="middle" class="rolelabel">stage 1 — gather (union, capped adaptively)</text>
+  <text x="480" y="98" text-anchor="middle" class="rolelabel">stage 1 - gather (union, capped adaptively)</text>
 
   <!-- Gather sources -->
   <rect x="80"  y="112" width="200" height="70" rx="10" class="node src"/>
@@ -42,7 +42,7 @@
 
   <!-- Stage 2: Fuse -->
   <rect x="250" y="225" width="460" height="70" rx="10" class="node fuse"/>
-  <text x="480" y="250" text-anchor="middle" class="title">Stage 2 — Fuse (weighted | rrf)</text>
+  <text x="480" y="250" text-anchor="middle" class="title">Stage 2 - Fuse (weighted | rrf)</text>
   <text x="290" y="275" class="wlbl">vec</text>
   <text x="315" y="275" class="wval">0.52</text>
   <text x="380" y="275" class="wlbl">bm25</text>
@@ -54,17 +54,17 @@
 
   <!-- Stage 3 -->
   <rect x="60"  y="335" width="200" height="60" rx="10" class="node stage"/>
-  <text x="160" y="361" text-anchor="middle" class="title">Stage 3 — Temporal</text>
+  <text x="160" y="361" text-anchor="middle" class="title">Stage 3 - Temporal</text>
   <text x="160" y="380" text-anchor="middle" class="sub">AT-window filter</text>
 
   <!-- Stage 4 (optional) -->
   <rect x="300" y="335" width="200" height="60" rx="10" class="node stage dash"/>
-  <text x="400" y="361" text-anchor="middle" class="title">Stage 4 — Rerank</text>
+  <text x="400" y="361" text-anchor="middle" class="title">Stage 4 - Rerank</text>
   <text x="400" y="380" text-anchor="middle" class="sub">optional · GGUF / ONNX</text>
 
   <!-- Stage 5 (optional) -->
   <rect x="540" y="335" width="200" height="60" rx="10" class="node stage dash"/>
-  <text x="640" y="361" text-anchor="middle" class="title">Stage 5 — Nucleus</text>
+  <text x="640" y="361" text-anchor="middle" class="title">Stage 5 - Nucleus</text>
   <text x="640" y="380" text-anchor="middle" class="sub">optional · edge walk</text>
 
   <!-- Out -->

@@ -73,13 +73,13 @@ Three storage engines, one typed DSL, a tiered ingest pipeline, and a hybrid ret
 
 - The **DSL** (Lark LALR(1), ~70 verbs) is the only way in. Every `CREATE`, `UPDATE`, `DELETE`, `ASSERT`, `RETRACT`, `INGEST`, `SYS *` goes through it.
 - **Direct writes** (`CREATE NODE`, `ASSERT`, `UPDATE`, `CREATE EDGE`, …) land straight in the three engines:
-  - **Graph** — typed numpy columns + scipy CSR edges. Reserved columns like `__event_at__`, `__confidence__`, `__retracted__` live here.
-  - **Vector** — usearch HNSW with cosine. Auto-populated via schema `EMBED content` or the `DOCUMENT "..."` clause.
-  - **Document** — SQLite + FTS5 virtual table. BM25 + blob storage + single-owner path lock.
+  - **Graph** - typed numpy columns + scipy CSR edges. Reserved columns like `__event_at__`, `__confidence__`, `__retracted__` live here.
+  - **Vector** - usearch HNSW with cosine. Auto-populated via schema `EMBED content` or the `DOCUMENT "..."` clause.
+  - **Document** - SQLite + FTS5 virtual table. BM25 + blob storage + single-owner path lock.
 - **`INGEST "file.ext"`** is itself a DSL verb. It dispatches to the ingest pipeline, which is tiered and modality-aware: `txt/md` → direct · `html/docx/xlsx` → markitdown · `pdf` → pymupdf4llm → docling · `png/jpg` → vision sidecar (local llama.cpp + SmolVLM2-2.2B default, `[vision]` extra) · `wav/mp3/flac/m4a` → whisper in-process (faster-whisper, `[audio]` extra). The pipeline's output flows into the same three engines.
-- **Retrieval** (REMEMBER / RECALL / SIMILAR TO / LEXICAL SEARCH / TRAVERSE) reads from all three engines and fuses the signals — see the pipeline diagram below.
+- **Retrieval** (REMEMBER / RECALL / SIMILAR TO / LEXICAL SEARCH / TRAVERSE) reads from all three engines and fuses the signals - see the pipeline diagram below.
 
-<sub>Source: [`docs/img/architecture.svg`](docs/img/architecture.svg) — hand-authored, edit directly.</sub>
+<sub>Source: [`docs/img/architecture.svg`](docs/img/architecture.svg) - hand-authored, edit directly.</sub>
 
 ### REMEMBER - the retrieval engine
 
@@ -89,7 +89,7 @@ Three storage engines, one typed DSL, a tiered ingest pipeline, and a hybrid ret
   <img src="docs/img/remember.svg" alt="REMEMBER 5-stage retrieval pipeline: gather -> fuse -> temporal -> rerank -> nucleus" width="620">
 </p>
 
-<sub>Source: [`docs/img/remember.svg`](docs/img/remember.svg) — hand-authored, edit directly.</sub>
+<sub>Source: [`docs/img/remember.svg`](docs/img/remember.svg) - hand-authored, edit directly.</sub>
 
 **Signals fused at stage 2** (defaults; weights are configurable):
 
@@ -274,7 +274,7 @@ Median latency over 30 iters, model2vec 256-dim embeddings, 16-core CPU @ 2-thre
 | `ASSERT` | 11 us | 4 ms | disk path pays WAL sync per call |
 | Memory per node | ~1.6 KB | ~1.6 KB | ~80 bytes typed columns + ~1 KB vector + overhead |
 
-Disk numbers at **100k nodes**, in-memory numbers at **10k nodes** (disk WAL sync dominates at small N, ANN tree depth dominates at large N). REMEMBER scales with the number of candidates the ANN + FTS leg return — realistic workloads have << 100 matches and the fused pipeline drops to single-digit ms.
+Disk numbers at **100k nodes**, in-memory numbers at **10k nodes** (disk WAL sync dominates at small N, ANN tree depth dominates at large N). REMEMBER scales with the number of candidates the ANN + FTS leg return - realistic workloads have << 100 matches and the fused pipeline drops to single-digit ms.
 
 ### Benchmark results
 
@@ -351,7 +351,7 @@ g = GraphStore(
 
 Config is loaded in layers: `config.py` defaults → `graphstore.json` overrides → `GRAPHSTORE_*` env vars → constructor kwargs.
 
-**Single-owner per path.** Persistent stores take an advisory lock on `<path>/.graphstore.lock`. A second `GraphStore(path=...)` against the same path raises `StoreInUse` — WAL replay + compact + checkpoint are not safe across processes. In-memory stores are unlocked. OS reclaims the lock on process exit.
+**Single-owner per path.** Persistent stores take an advisory lock on `<path>/.graphstore.lock`. A second `GraphStore(path=...)` against the same path raises `StoreInUse` - WAL replay + compact + checkpoint are not safe across processes. In-memory stores are unlocked. OS reclaims the lock on process exit.
 
 **Thread safety.** Default is single-threaded. `queued=True` installs a worker thread that serialises writes from multiple callers. BLAS thread count is capped at import time (`OMP_NUM_THREADS=2` by default; override with `GRAPHSTORE_BLAS_CAP=N`) so importing graphstore doesn't saturate all cores.
 
