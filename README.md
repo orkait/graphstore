@@ -16,9 +16,36 @@
 
 ---
 
-graphstore gives AI agents persistent, queryable memory. Store nodes and edges with a simple DSL, retrieve them by meaning, by association, by text search, or any combination - all from one call.
+graphstore gives AI agents persistent, queryable memory. Store nodes and edges with a simple DSL; retrieve by meaning, by association, by text, or any combination - one call. Runs in-process, persists to SQLite. No server, no infrastructure.
 
-It is designed for agent frameworks, LLM applications, and research tools that need more than a vector database but less than a full graph database. Everything runs in-process, persists to SQLite. No server, no infrastructure.
+## ⚡ 60-second start
+
+```bash
+pip install graphstore
+```
+
+```python
+from graphstore import GraphStore
+
+g = GraphStore(path="./brain")
+
+# Store: DOCUMENT populates vector + BM25 + blob in one shot
+g.execute('CREATE NODE "mem:paris" kind = "memory" '
+          'DOCUMENT "Paris is the capital of France, famous for the Eiffel Tower."')
+g.execute('CREATE NODE "mem:rome" kind = "memory" '
+          'DOCUMENT "Rome is the capital of Italy, home to the Colosseum."')
+g.execute('CREATE EDGE "mem:paris" -> "mem:rome" kind = "both_european_capitals"')
+
+# Retrieve - four primitives, all backed by the three storage engines
+g.execute('REMEMBER "European history" LIMIT 5')          # hybrid fusion
+g.execute('RECALL FROM "mem:paris" DEPTH 2 LIMIT 10')     # graph walk
+g.execute('LEXICAL SEARCH "Eiffel Tower" LIMIT 5')        # BM25
+g.execute('SIMILAR TO "capital city" LIMIT 5')            # cosine only
+
+g.close()
+```
+
+That's it. Core install covers REMEMBER / RECALL / LEXICAL / SIMILAR / SYS CRON / VAULT SYNC. Extras for PDF, image, audio, GPU, playground UI are all opt-in - see [Installation](#-installation).
 
 ---
 
@@ -39,22 +66,30 @@ Most agent memory systems are wrappers around a vector database. That works for 
 Three storage engines, one typed DSL, a tiered ingest pipeline, and a hybrid retrieval engine that fuses all of them.
 
 <p align="center">
-  <img src="docs/img/architecture.svg" alt="graphstore architecture: DSL + three storage engines fed by the tiered ingest pipeline" width="780">
+  <img src="docs/img/architecture.svg" alt="graphstore architecture: DSL + three storage engines + ingest pipeline + retrieval" width="780">
 </p>
 
-**Ingest tiers:** `txt/md` → direct · `html/docx/xlsx` → markitdown · `pdf` → pymupdf4llm → docling · `png/jpg` → vision sidecar (VLM, `[vision]`) · `wav/mp3/flac` → whisper in-process (`[audio]`).
+**What flows where:**
 
-<sub>Source: [`docs/img/architecture.dot`](docs/img/architecture.dot) — re-render with <code>dot -Tsvg architecture.dot -o architecture.svg</code>.</sub>
+- The **DSL** (Lark LALR(1), ~70 commands) is the only way to write. Every `CREATE`, `UPDATE`, `DELETE`, `ASSERT`, `RETRACT`, `INGEST`, `SYS *` goes through it.
+- Writes fan out to the three storage engines:
+  - **Graph** — typed numpy columns + scipy CSR edges. Reserved columns like `__event_at__`, `__confidence__`, `__retracted__` live here.
+  - **Vector** — usearch HNSW with cosine similarity. Auto-populated via schema `EMBED content` or the `DOCUMENT "..."` clause.
+  - **Document** — SQLite with an FTS5 virtual table. BM25 + blob storage + single-owner path lock.
+- The **ingest pipeline** is modality-aware and tiered. `txt/md` → direct · `html/docx/xlsx` → markitdown · `pdf` → pymupdf4llm → docling · `png/jpg` → vision sidecar (local llama.cpp + SmolVLM2-2.2B by default, `[vision]` extra) · `wav/mp3/flac/m4a` → whisper in-process (faster-whisper, `[audio]` extra).
+- **Retrieval** (REMEMBER / RECALL / SIMILAR TO / LEXICAL SEARCH / TRAVERSE) reads from all three engines and fuses the signals — see the pipeline diagram below.
+
+<sub>Source: [`docs/img/architecture.d2`](docs/img/architecture.d2) — re-render with <code>d2 --sketch --layout=dagre docs/img/architecture.d2 docs/img/architecture.svg</code> (requires [d2](https://d2lang.com)).</sub>
 
 ### REMEMBER - the retrieval engine
 
 `REMEMBER` is the core command. Five-stage pipeline, four weighted signals, optional rerank + nucleus walk.
 
 <p align="center">
-  <img src="docs/img/remember.svg" alt="REMEMBER pipeline: gather -> fuse -> temporal -> rerank -> nucleus -> ranked" width="780">
+  <img src="docs/img/remember.svg" alt="REMEMBER 5-stage retrieval pipeline: gather -> fuse -> temporal -> rerank -> nucleus" width="620">
 </p>
 
-<sub>Source: [`docs/img/remember.dot`](docs/img/remember.dot) — re-render with <code>dot -Tsvg remember.dot -o remember.svg</code>.</sub>
+<sub>Source: [`docs/img/remember.d2`](docs/img/remember.d2) — re-render with <code>d2 --sketch --layout=dagre docs/img/remember.d2 docs/img/remember.svg</code>.</sub>
 
 **Signals fused at stage 2** (defaults; weights are configurable):
 
@@ -329,17 +364,19 @@ AGGREGATE NODES WHERE kind = "memory" GROUP BY topic SELECT COUNT(), AVG(importa
 
 ## ⚡ Performance
 
-All numbers at 100k nodes, mid-range laptop, no GPU.
+Median latency over 30 iters, model2vec 256-dim embeddings, 16-core CPU @ 2-thread BLAS cap (graphstore's default). Reproduce on your box: `python benchmarks/micro_latency.py`. Last measured 2026-04-19.
 
-| Operation | Latency |
-|---|---|
-| Point lookup (`NODE "id"`) | 4 us |
-| Filtered scan (`NODES WHERE ... LIMIT 10`) | 68 us |
-| Semantic search (`SIMILAR TO` LIMIT 10) | 127 us |
-| Graph traversal (`RECALL` DEPTH 3) | 983 us |
-| Hybrid retrieval (`REMEMBER` LIMIT 10) | ~2 ms |
-| Assert / retract | 4-9 us |
-| Memory per node | 66 bytes (columns) + ~1 KB (vector) |
+| Operation | In-memory | On-disk | Notes |
+|---|---|---|---|
+| Point lookup `NODE "id"` | **5 us** | 11 us | hash → slot |
+| Filtered scan `NODES WHERE ... LIMIT 10` | **14 us** | 51 us | typed column filter |
+| Semantic search `SIMILAR TO "..." LIMIT 10` | **87 us** | 175 us | usearch HNSW ANN |
+| Graph traversal `RECALL DEPTH 3` | ~1 ms | ~1 ms | spreading activation |
+| Hybrid retrieval `REMEMBER LIMIT 10` | ~6 ms | ~50 ms | 4-signal fusion (scales with candidate set) |
+| `ASSERT` | 11 us | 4 ms | disk path pays WAL sync per call |
+| Memory per node | ~1.6 KB | ~1.6 KB | ~80 bytes typed columns + ~1 KB vector + overhead |
+
+Disk numbers at **100k nodes**, in-memory numbers at **10k nodes** (disk WAL sync dominates at small N, ANN tree depth dominates at large N). REMEMBER scales with the number of candidates the ANN + FTS leg return — realistic workloads have << 100 matches and the fused pipeline drops to single-digit ms.
 
 ### Benchmark results
 
