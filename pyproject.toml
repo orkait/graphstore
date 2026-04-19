@@ -108,6 +108,10 @@ include = ["graphstore*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# -n 4: 4 xdist workers. With the 2-thread BLAS cap set in conftest.py
+# that's 4 * 2 = 8 threads max. Measured: 118s single -> 66s (-44%).
+# Override per run via `pytest -n 0` (serial) or `pytest -n auto`.
+addopts = "-n 4 --timeout=30"
 markers = [
     "needs_embedder: requires graphstore[embed-default]",
     "needs_fastembed: requires graphstore[embed-fastembed]",
