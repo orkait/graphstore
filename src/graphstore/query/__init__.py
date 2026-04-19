@@ -60,6 +60,28 @@ class _QNamespace:
     create_node    = staticmethod(_writes.create_node)
     create_edge    = staticmethod(_writes.create_edge)
     delete_node    = staticmethod(_writes.delete_node)
+    update_node    = staticmethod(_writes.update_node)
+    upsert_node    = staticmethod(_writes.upsert_node)
+    delete_nodes   = staticmethod(_writes.delete_nodes)
+    update_nodes   = staticmethod(_writes.update_nodes)
+    update_edge    = staticmethod(_writes.update_edge)
+    delete_edge    = staticmethod(_writes.delete_edge)
+    delete_edges   = staticmethod(_writes.delete_edges)
+    increment      = staticmethod(_writes.increment)
+    assert_        = staticmethod(_writes.assert_)
+    retract        = staticmethod(_writes.retract)
+    merge          = staticmethod(_writes.merge)
+    propagate      = staticmethod(_writes.propagate)
+    forget         = staticmethod(_writes.forget)
+    connect_node   = staticmethod(_writes.connect_node)
+    ingest         = staticmethod(_writes.ingest)
+
+    # --- Control ---
+    bind_context   = staticmethod(_writes.bind_context)
+    discard_context = staticmethod(_writes.discard_context)
+    begin          = staticmethod(_writes.begin)
+    commit         = staticmethod(_writes.commit)
+    batch          = staticmethod(_writes.batch)
 
     # --- Escape hatch ---
     @staticmethod
