@@ -87,7 +87,7 @@ Weights are configurable. The pipeline is 5 stages: gather → fuse → temporal
 pip install graphstore
 ```
 
-Lightweight core: numpy, scipy, usearch, lark, msgspec. No torch, no PDF parser, no HTTP server.
+Lightweight core: numpy, scipy, usearch, lark, msgspec, psutil, threadpoolctl. No torch, no PDF parser, no HTTP server.
 
 ```bash
 # Embedder (30 MB, CPU-only, zero-config)
