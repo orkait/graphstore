@@ -280,19 +280,19 @@ Disk numbers at **100k nodes**, in-memory numbers at **10k nodes** (disk WAL syn
 
 > **Metric callout.** graphstore ships retrieval numbers, not end-to-end QA accuracy. *Retrieval accuracy* below means "did the gold-answer-bearing passage land in the retrieved top-K". End-to-end QA with an LLM reader is a strict superset and lives in the linked methodology doc.
 
-**LongMemEval-S** - 500 records, retrieval-only, Jina v5 Nano 768d, Kaggle T4 GPU:
+**LongMemEval-S** - 500 records, retrieval-only, Jina v5 Small 1024d, Kaggle T4 GPU, 2026-04-19 run (kernel `superkaiii/graphstore-jina-v5-small`):
 
-| Category | Retrieval accuracy |
-|---|---|
-| knowledge-update | 100.0% |
-| multi-session | 98.5% |
-| single-session-assistant | 100.0% |
-| single-session-user | 98.6% |
-| temporal-reasoning | 91.7% |
-| single-session-preference | 86.7% |
-| **Overall** | **96.4%** |
+| Category | n | Retrieval accuracy |
+|---|---|---|
+| knowledge-update | 78 | 100.0% |
+| multi-session | 133 | 98.5% |
+| single-session-assistant | 56 | 100.0% |
+| single-session-user | 70 | 98.6% |
+| temporal-reasoning | 133 | 94.7% |
+| single-session-preference | 30 | 83.3% |
+| **Overall** | **500** | **97.0%** |
 
-Fresh Kaggle run (Jina v5 Small 1024d, Apr 2026) is tracking the same 96% retrieval-accuracy envelope mid-run.
+Latency on that run: query p50 46 ms / p95 76 ms, ingest p50 1035 ms / p95 1070 ms. Memory delta +283 MB across 23,867 ingest ops. 5 h 20 m wall, no LLM judge, zero API calls. See [docs/benchmarks.md](docs/benchmarks.md) for the comparison band (Mem0, MemGPT, Zep).
 
 **LoCoMo** - 50Q, token-level F1 from retrieved passages, MiniMax M2.7 reader, Jina v5 Small 1024d:
 
