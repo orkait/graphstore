@@ -93,7 +93,7 @@ Core install includes everything needed for the agentic DB contract out of the b
 # PDF / DOCX / HTML ingestion (+200 MB)
 pip install 'graphstore[ingest]'
 
-# Local VLM sidecar for scanned PDFs / image captioning (+80 MB wheel, ~400 MB weights on first use)
+# Local VLM sidecar for scanned PDFs / image captioning (+80 MB wheel, ~1.5 GB weights on first use)
 pip install 'graphstore[vision]'
 
 # GPU acceleration for NER (Linux x86_64, CUDA 12)
@@ -110,7 +110,7 @@ pip install 'graphstore[ingest,vision,playground]'
 |---|---|
 | `ingest` | markitdown + pymupdf + pymupdf4llm (PDF/DOCX/HTML -> markdown) |
 | `ingest-pro` | docling (heavier PDF w/ tables + OCR; ~1 GB via torch. For CPU-only install: `pip install 'graphstore[ingest-pro]' --extra-index-url https://download.pytorch.org/whl/cpu`) |
-| `vision` | llama-cpp-python[server] + huggingface-hub (local VLM sidecar, SmolVLM-500M ~400 MB on first use; see `graphstore vision serve`) |
+| `vision` | llama-cpp-python[server] + huggingface-hub (local VLM sidecar, SmolVLM2-2.2B Q4_K_M ~1.5 GB on first use; see `graphstore vision serve`) |
 | `audio` | faster-whisper (in-process speech-to-text; tiny/base models ~40-150 MB on first use) |
 | `embedders-extra` | fastembed + llama-cpp-python (alternate embedder backends; model2vec is the default and lives in core) |
 | `playground` | fastapi + uvicorn (local web UI) |
@@ -184,7 +184,7 @@ Supports PDF, Word, Markdown, text, HTML, images (via local VLM sidecar under `[
 
 ### Ingest images with the local VLM sidecar
 
-The `[vision]` extra ships a local OpenAI-compatible sidecar (llama.cpp server + SmolVLM-500M Q8_0, ~400 MB on first use). Zero-config: first `INGEST ... USING VISION` call auto-starts it.
+The `[vision]` extra ships a local OpenAI-compatible sidecar (llama.cpp server + SmolVLM2-2.2B-Instruct Q4_K_M, ~1.5 GB on first use). Zero-config: first `INGEST ... USING VISION` call auto-starts it. Smaller presets (`smolvlm-500m` at ~400 MB) available via `GRAPHSTORE_VISION_MODEL` or `graphstore vision serve --model smolvlm-500m`.
 
 ```bash
 pip install 'graphstore[vision]'
@@ -193,10 +193,10 @@ graphstore vision serve --pull-only    # optional: pre-download weights
 
 ```sql
 -- Scanned PDF caption + OCR fallback
-INGEST "scan.pdf" USING VISION "SmolVLM-500M-Instruct-Q8_0.gguf"
+INGEST "scan.pdf" USING VISION "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
 
 -- Standalone image ingest
-INGEST "chart.png" USING VISION "SmolVLM-500M-Instruct-Q8_0.gguf" AS "img:q3-chart"
+INGEST "chart.png" USING VISION "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf" AS "img:q3-chart"
 ```
 
 Sidecar lifecycle:

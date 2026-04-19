@@ -233,7 +233,7 @@ class TestVisionHandler:
         """VisionHandler with an explicit base_url skips sidecar resolution."""
         from graphstore.ingest.vision import VisionHandler
         vh = VisionHandler(base_url="http://example.invalid:9/v1")
-        assert vh.model == "SmolVLM-500M-Instruct-Q8_0.gguf"
+        assert vh.model == "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
         assert vh._base_url == "http://example.invalid:9/v1"
 
     def test_init_resolves_via_env(self, monkeypatch):

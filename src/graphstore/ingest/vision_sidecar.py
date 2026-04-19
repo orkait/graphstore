@@ -65,7 +65,7 @@ VLM_MODELS: dict[str, VLMModelSpec] = {
     ),
 }
 
-DEFAULT_MODEL_NAME = "smolvlm-500m"
+DEFAULT_MODEL_NAME = "smolvlm2-2.2b"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8418
 

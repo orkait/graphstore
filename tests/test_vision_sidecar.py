@@ -116,18 +116,18 @@ def test_stop_returns_false_when_not_running(vlm_cache):
     assert vs.stop() is False
 
 
-def test_resolve_spec_defaults_to_smolvlm_500m(vlm_cache, monkeypatch):
+def test_resolve_spec_defaults_to_smolvlm2_2_2b(vlm_cache, monkeypatch):
     from graphstore.ingest import vision_sidecar as vs
     monkeypatch.delenv("GRAPHSTORE_VISION_MODEL", raising=False)
     spec = vs.resolve_spec(None)
-    assert spec.repo == "ggml-org/SmolVLM-500M-Instruct-GGUF"
+    assert spec.repo == "ggml-org/SmolVLM2-2.2B-Instruct-GGUF"
 
 
 def test_resolve_spec_reads_env(vlm_cache, monkeypatch):
     from graphstore.ingest import vision_sidecar as vs
-    monkeypatch.setenv("GRAPHSTORE_VISION_MODEL", "smolvlm2-2.2b")
+    monkeypatch.setenv("GRAPHSTORE_VISION_MODEL", "smolvlm-500m")
     spec = vs.resolve_spec(None)
-    assert spec.repo == "ggml-org/SmolVLM2-2.2B-Instruct-GGUF"
+    assert spec.repo == "ggml-org/SmolVLM-500M-Instruct-GGUF"
 
 
 def test_resolve_spec_passthrough_object(vlm_cache):

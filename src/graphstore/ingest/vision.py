@@ -25,7 +25,7 @@ class VisionHandler:
 
     def __init__(
         self,
-        model: str = "SmolVLM-500M-Instruct-Q8_0.gguf",
+        model: str = "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf",
         base_url: str | None = None,
         max_tokens: int = 128,
         api_key: str = "ollama",
