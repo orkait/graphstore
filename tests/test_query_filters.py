@@ -78,7 +78,7 @@ class TestAlgebraLaws:
 
     def test_not(self):
         f = ~F.eq("retracted", True)
-        assert f.to_dsl() == "NOT (retracted = true)"
+        assert f.to_dsl() == "NOT (retracted = 1)"
 
     def test_double_negation(self):
         """~~x == x (involution law)."""
@@ -147,7 +147,7 @@ class TestFromDict:
 
     def test_explicit_not(self):
         out = F.from_dict({"__not__": {"retracted": True}}).to_dsl()
-        assert out == "NOT (retracted = true)"
+        assert out == "NOT (retracted = 1)"
 
 
 class TestCompileWhere:

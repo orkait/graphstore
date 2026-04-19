@@ -6,6 +6,7 @@ prevented. Anything that cannot be safely coerced raises ``TypeError``.
 """
 from __future__ import annotations
 
+import math
 from datetime import date, datetime
 from typing import Any
 
@@ -30,12 +31,18 @@ def dsl_literal(value: Any) -> str:
       - anything else -> ``TypeError``
     """
     if value is None:
-        return "null"
+        return "NULL"   # grammar: "NULL" -> val_null
     if isinstance(value, bool):
-        return "true" if value else "false"
+        # grammar has no true/false keyword; emit as 1/0 NUMBER literal so
+        # comparisons like ``retracted = 1`` parse and match integer columns.
+        return "1" if value else "0"
     if isinstance(value, int):
         return str(value)
     if isinstance(value, float):
+        if math.isnan(value):
+            raise ValueError("NaN is not a valid DSL NUMBER")
+        if math.isinf(value):
+            raise ValueError("Infinity is not a valid DSL NUMBER")
         return repr(value)
     if isinstance(value, str):
         return _escape_string(value)

@@ -241,9 +241,18 @@ register_compiler("common_neighbors", _compile_common_neighbors)
 # pattern is raw; users pass the string directly.
 
 def match(pattern, *, limit: int | None = None) -> Query:
-    """Accepts a typed Pattern object OR a raw string."""
+    """Accepts a typed Pattern object OR a raw string.
+
+    Grammar requires at least one arrow (``pattern: match_step (arrow
+    match_step)+``); single-step patterns are rejected at build time.
+    """
     from graphstore.query.pattern import Pattern
     if isinstance(pattern, Pattern):
+        if len(pattern.steps) < 2:
+            raise ValueError(
+                "match() requires a pattern with at least one arrow; "
+                "use ``P.node(\"a\").to(P.var(\"b\"))`` or similar"
+            )
         text = pattern.to_dsl()
     elif isinstance(pattern, str):
         if not pattern.strip():

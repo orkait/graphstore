@@ -21,6 +21,11 @@ class TestPattern:
         p = P.node("fn_main")
         assert p.to_dsl() == '("fn_main")'
 
+    def test_single_step_rejected_by_match(self):
+        p = P.node("fn_main")
+        with pytest.raises(ValueError, match="at least one arrow"):
+            q.match(p)
+
     def test_single_var_step(self):
         p = P.var("callee")
         assert p.to_dsl() == "(callee)"

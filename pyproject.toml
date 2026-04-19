@@ -119,7 +119,9 @@ where = ["src"]
 include = ["graphstore*"]
 
 [tool.setuptools.package-data]
-"graphstore.dsl" = ["*.lark"]
+"graphstore"       = ["py.typed"]
+"graphstore.query" = ["py.typed"]
+"graphstore.dsl"   = ["*.lark"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

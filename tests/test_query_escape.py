@@ -40,13 +40,15 @@ class TestDslLiteral:
         assert dsl_literal(0.5) == "0.5"
 
     def test_bool_true(self):
-        assert dsl_literal(True) == "true"
+        # Grammar has no true/false keyword; emit as 1/0 NUMBER literal
+        assert dsl_literal(True) == "1"
 
     def test_bool_false(self):
-        assert dsl_literal(False) == "false"
+        assert dsl_literal(False) == "0"
 
     def test_none(self):
-        assert dsl_literal(None) == "null"
+        # Grammar: "NULL" -> val_null (uppercase)
+        assert dsl_literal(None) == "NULL"
 
     def test_list_of_strings(self):
         assert dsl_literal(["a", "b"]) == '("a", "b")'
@@ -55,7 +57,8 @@ class TestDslLiteral:
         assert dsl_literal([1, 2, 3]) == "(1, 2, 3)"
 
     def test_list_mixed(self):
-        assert dsl_literal(["a", 1, True]) == '("a", 1, true)'
+        # bool emits as NUMBER (1/0); grammar has no true/false keyword
+        assert dsl_literal(["a", 1, True]) == '("a", 1, 1)'
 
     def test_empty_list_raises(self):
         with pytest.raises(ValueError, match="empty list"):
@@ -74,11 +77,45 @@ class TestDslLiteral:
         with pytest.raises(TypeError, match="unsupported DSL value type"):
             dsl_literal(object())
 
+    def test_float_nan_rejected(self):
+        with pytest.raises(ValueError, match="NaN"):
+            dsl_literal(float("nan"))
+
+    def test_float_inf_rejected(self):
+        with pytest.raises(ValueError, match="[Ii]nfinity"):
+            dsl_literal(float("inf"))
+
+    def test_float_negative_inf_rejected(self):
+        with pytest.raises(ValueError, match="[Ii]nfinity"):
+            dsl_literal(float("-inf"))
+
+    def test_large_int(self):
+        # Python arbitrary precision; grammar's NUMBER regex accepts any digits
+        assert dsl_literal(10**20) == "100000000000000000000"
+
+    def test_empty_string(self):
+        # Valid literal even though often indicates a bug at call site
+        assert dsl_literal("") == '""'
+
+    def test_unicode_string(self):
+        assert dsl_literal("é ü 汉字 🔥") == '"é ü 汉字 🔥"'
+
+    def test_long_string_no_truncation(self):
+        s = "x" * 10_000
+        out = dsl_literal(s)
+        assert out.startswith('"')
+        assert out.endswith('"')
+        assert len(out) == 10_000 + 2
+
     def test_bool_before_int(self):
-        """bool must be checked before int since bool is a subclass of int."""
-        # If int check ran first, True -> "1". Verify we emit "true".
-        assert dsl_literal(True) == "true"
-        assert dsl_literal(False) == "false"
+        """bool must be checked before int since bool is a subclass of int.
+
+        We emit ``1``/``0`` not just because bool is int-compatible but
+        because grammar has no keyword for booleans. Having the bool check
+        first ensures dedicated handling regardless of int code path.
+        """
+        assert dsl_literal(True) == "1"
+        assert dsl_literal(False) == "0"
 
 
 class TestDslIdentifier:
