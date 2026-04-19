@@ -44,8 +44,10 @@ class CronScheduler:
                 logger.debug("CronScheduler: could not resolve db path: %s", e)
 
     def start(self) -> None:
-        """Start the cron timer thread."""
+        """Start the cron timer thread. Idempotent - no-op if already running."""
         if self._conn is None:
+            return
+        if self._thread is not None and self._thread.is_alive():
             return
         self._running = True
         self._thread = threading.Thread(
@@ -58,6 +60,7 @@ class CronScheduler:
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=5)
+            self._thread = None
             self._thread = None
         if self._tick_conn is not None:
             try:

@@ -298,8 +298,11 @@ class DocumentStore:
         for s in all_meta_slots - live_slots:
             self._conn.execute("DELETE FROM doc_metadata WHERE doc_slot = ?", (s,))
 
-        # Clean FTS for orphaned summaries
-        for s in orphan_sums:
+        # Clean FTS for orphaned summaries AND orphaned documents.
+        # put_document auto-writes plaintext bodies to doc_fts (PR #102),
+        # so orphaned documents can leave stale BM25 rows behind -
+        # REMEMBER would then return matches pointing at tombstoned slots.
+        for s in orphan_sums | orphan_docs:
             self._conn.execute("DELETE FROM doc_fts WHERE rowid = ?", (s,))
 
         self._conn.commit()

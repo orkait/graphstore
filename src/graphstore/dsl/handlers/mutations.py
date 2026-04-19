@@ -432,6 +432,7 @@ class MutationHandlers:
         deleted_ids = self.store.delete_nodes_bulk(
             ids_to_delete,
             vector_store=self._vector_store,
+            document_store=self._document_store,
         )
         return Result(kind="nodes", data=[{"id": i} for i in deleted_ids], count=len(deleted_ids))
 
