@@ -149,7 +149,17 @@ class GraphStoreSkillAdapter(GraphStoreAdapter):
         self._skill: str | None = None
         self._max_tokens: int = int(self.config.get("skill_max_tokens", 6000))
         self._retry_on_empty: int = int(self.config.get("skill_retry_on_empty", 1))
+        dump = self.config.get("skill_dump_raw_dir")
+        self._dump_dir: Path | None = Path(dump) if dump else None
+        if self._dump_dir is not None:
+            self._dump_dir.mkdir(parents=True, exist_ok=True)
+        self._last_raw: str | None = None
         self.name = f"{self.name}-skill-llm"
+
+    @property
+    def last_raw_output(self) -> str | None:
+        """Raw LLM output from the most recent ingest call. None before first call."""
+        return self._last_raw
 
     def _load_skill(self) -> str:
         if self._skill is not None:
@@ -170,6 +180,10 @@ class GraphStoreSkillAdapter(GraphStoreAdapter):
 
         with TimedOperation() as t:
             raw = llm_call(prompt, max_tokens=self._max_tokens, _retries=self._retry_on_empty)
+            self._last_raw = raw
+            if self._dump_dir is not None:
+                safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", session.session_id)
+                (self._dump_dir / f"{safe_id}.dsl").write_text(raw or "", encoding="utf-8")
             if not raw:
                 self.stats.llm_empty += 1
                 self.stats.sessions += 1
