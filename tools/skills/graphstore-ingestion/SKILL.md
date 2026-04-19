@@ -40,7 +40,7 @@ A single node can live in **all three at once**: row in numpy columns + vector i
 - **Embedding** (`graphstore/embedding/`) - pluggable embedder protocol (model2vec default, FastEmbed, OnnxHF for Jina v5/Harrier/EmbeddingGemma, GGUF via llama-cpp-python). Registry at `graphstore/registry/models.py`.
 - **Reranking** (`graphstore/embedding/reranker.py`) - pluggable cross-encoder reranker (FlashRank, ONNX, GGUF backends). Used by `remember_rerank` and `full_rerank` retrieval strategies.
 - **Beliefs** - `ASSERT` / `RETRACT` / `PROPAGATE` write reserved columns (`__confidence__`, `__retracted__`, `__source__`) on the Graph engine.
-- **Evolution** (`graphstore/evolve.py`) - `EvolutionEngine`, opt-in. WHEN/THEN rules that self-tune graphstore's own runtime parameters based on live signals.
+- **Evolution** (`graphstore/core/evolve/`) - `EvolutionEngine`, opt-in. WHEN/THEN rules that self-tune graphstore's own runtime parameters based on live signals.
 - **Ingest pipeline** (`graphstore/ingest/`) - file-to-graph routing (MarkItDown → PyMuPDF4LLM → Docling), chunker, vision. Used by the `INGEST` DSL verb.
 - **Algos** (`graphstore/algos/`) - 17 pure numpy/scipy primitives under a strict purity gate. Tunable in isolation.
 
