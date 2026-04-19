@@ -169,3 +169,13 @@ class TestCompileWhere:
     def test_bad_type_raises(self):
         with pytest.raises(TypeError):
             compile_where(42)
+
+    def test_false_const_raises_in_where(self):
+        """``F.eq(..) & F.false()`` collapses to F.false() which is unreachable
+        grammar. Catch at compile time rather than emitting invalid DSL."""
+        with pytest.raises(ValueError, match="never-match"):
+            compile_where(F.false())
+
+    def test_false_via_algebra_collapse_raises(self):
+        with pytest.raises(ValueError, match="never-match"):
+            compile_where(F.eq("k", "m") & F.false())

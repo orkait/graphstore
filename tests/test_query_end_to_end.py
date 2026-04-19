@@ -128,14 +128,24 @@ class TestFilterEndToEnd:
 
 
 class TestSysEndToEnd:
-    def test_status(self, gs_mem):
+    def test_status_returns_node_count(self, gs_mem):
+        for i in range(3):
+            q.create_node(f"m{i}", kind="memory", document=f"d{i}").execute(gs_mem)
         r = q.sys.status().execute(gs_mem)
-        assert r is not None
+        assert isinstance(r.data, dict)
+        assert r.data.get("nodes") == 3
 
-    def test_kinds(self, gs_mem):
-        q.create_node("m1", kind="memory", document="x").execute(gs_mem)
+    def test_kinds_lists_registered(self, gs_mem):
+        q.sys.register_node_kind("post", required={"title": "string"}).execute(gs_mem)
         r = q.sys.kinds().execute(gs_mem)
-        assert r is not None
+        # Find the registered kind in the result
+        names = []
+        for item in r.data:
+            if isinstance(item, dict):
+                names.append(item.get("kind") or item.get("name"))
+            else:
+                names.append(str(item))
+        assert "post" in names
 
     def test_register_node_kind_then_create(self, gs_mem):
         q.sys.register_node_kind(

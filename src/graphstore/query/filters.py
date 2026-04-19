@@ -353,7 +353,14 @@ class _Const(F):
 
 
 def compile_where(where: F | dict | None) -> str | None:
-    """Normalise a ``where`` argument to a DSL string or ``None``."""
+    """Normalise a ``where`` argument to a DSL string or ``None``.
+
+    A ``true`` constant (e.g. ``F.from_dict({})``) compiles to ``None``
+    meaning the WHERE clause is omitted. A ``false`` constant raises:
+    grammar has no ``false`` literal and no way to express "match
+    nothing" in a WHERE, so this almost always indicates an algebra
+    collapse the caller didn't intend (e.g. ``F.eq(...) & F.false()``).
+    """
     if where is None:
         return None
     if isinstance(where, dict):
@@ -361,7 +368,14 @@ def compile_where(where: F | dict | None) -> str | None:
             return None
         where = F.from_dict(where)
     if isinstance(where, F):
-        if isinstance(where, _Const) and where.value:
-            return None
+        if isinstance(where, _Const):
+            if where.value:
+                return None
+            raise ValueError(
+                "WHERE compiled to `false` (the algebra collapsed to a never-match "
+                "constant). Grammar has no false literal; this almost always means "
+                "an F.false() reached the query unintentionally. Check for patterns "
+                "like `F.eq(...) & F.false()`."
+            )
         return where.to_dsl()
     raise TypeError(f"where must be F, dict, or None; got {type(where).__name__}")
