@@ -131,6 +131,56 @@ def cmd_playground(args: argparse.Namespace) -> None:
     uvicorn.run(app, host=args.host, port=args.port)
 
 
+def cmd_vision(args: argparse.Namespace) -> None:
+    """Manage the local vision sidecar (start/stop/status/logs/pull)."""
+    try:
+        from graphstore.ingest import vision_sidecar as vs
+    except ImportError as e:
+        print(
+            "Missing dependencies. Install with:\n"
+            "  pip install 'graphstore[vision]'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    sub = args.vision_command
+    if sub == "serve":
+        if args.pull_only:
+            model_path, mmproj_path = vs.download_weights()
+            print(f"model:  {model_path}")
+            print(f"mmproj: {mmproj_path}")
+            return
+        try:
+            st = vs.start(
+                host=args.host,
+                port=args.port,
+                n_threads=args.threads,
+            )
+        except (RuntimeError, TimeoutError) as e:
+            print(f"sidecar failed to start: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"vision sidecar running at {st.base_url} (pid={st.pid}, model={st.model})")
+    elif sub == "stop":
+        ok = vs.stop()
+        print("stopped" if ok else "no sidecar was running")
+    elif sub == "status":
+        st = vs.status(host=args.host)
+        if st.running:
+            print(f"running  pid={st.pid}  port={st.port}  model={st.model}  url={st.base_url}")
+        else:
+            print("not running")
+    elif sub == "logs":
+        log = vs._log_file()
+        if not log.exists():
+            print("no logs yet", file=sys.stderr)
+            sys.exit(1)
+        with log.open("rb") as f:
+            sys.stdout.buffer.write(f.read())
+    else:
+        print("unknown vision subcommand", file=sys.stderr)
+        sys.exit(2)
+
+
 def cmd_config(args: argparse.Namespace) -> None:
     """Show config schema, defaults, or resolved values."""
     import json
@@ -190,6 +240,20 @@ def main(argv: list[str] | None = None) -> None:
     ue = sub.add_parser("uninstall-embedder", help="Remove an installed embedder model")
     ue.add_argument("name", help="Model name to uninstall")
     ue.set_defaults(func=cmd_uninstall_embedder)
+
+    # vision subcommand: local VLM sidecar (SmolVLM-500M by default)
+    vis = sub.add_parser("vision", help="Manage the local vision sidecar (serve/stop/status/logs)")
+    vis_sub = vis.add_subparsers(dest="vision_command", required=True)
+    vis_serve = vis_sub.add_parser("serve", help="Start the sidecar (downloads weights on first run)")
+    vis_serve.add_argument("--host", default="127.0.0.1")
+    vis_serve.add_argument("--port", type=int, default=8418)
+    vis_serve.add_argument("--threads", type=int, default=8)
+    vis_serve.add_argument("--pull-only", action="store_true", help="Download weights without starting the server")
+    vis_sub.add_parser("stop", help="Stop the running sidecar")
+    vis_status = vis_sub.add_parser("status", help="Show sidecar status")
+    vis_status.add_argument("--host", default="127.0.0.1")
+    vis_sub.add_parser("logs", help="Print the sidecar log file to stdout")
+    vis.set_defaults(func=cmd_vision)
 
     # config subcommand
     cfg = sub.add_parser("config", help="Show config defaults, schema, or current values")

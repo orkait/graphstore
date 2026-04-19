@@ -16,16 +16,33 @@ logger = logging.getLogger(__name__)
 
 
 class VisionHandler:
-    """Connects to an OpenAI-compatible vision endpoint. Tier 4 fallback."""
+    """Connects to an OpenAI-compatible vision endpoint. Tier 4 fallback.
+
+    If ``base_url`` is ``None``, resolves via ``vision_sidecar.resolve_base_url``
+    which checks ``GRAPHSTORE_VISION_URL`` env, a running graphstore sidecar, and
+    finally auto-spawns one when the ``[vision]`` extra is installed.
+    """
 
     def __init__(
         self,
-        model: str = "smolvlm2:2.2b",
-        base_url: str = "http://localhost:11434/v1",
+        model: str = "SmolVLM-500M-Instruct-Q8_0.gguf",
+        base_url: str | None = None,
         max_tokens: int = 300,
         api_key: str = "ollama",
         timeout: float = 60.0,
+        auto_start: bool = True,
     ):
+        if base_url is None:
+            from graphstore.ingest.vision_sidecar import resolve_base_url
+            resolved = resolve_base_url(auto_start=auto_start)
+            if resolved is None:
+                raise RuntimeError(
+                    "No vision endpoint available. Either:\n"
+                    "  1. pip install 'graphstore[vision]' (bundles a local sidecar)\n"
+                    "  2. set GRAPHSTORE_VISION_URL to an OpenAI-compatible /v1 URL\n"
+                    "  3. run `graphstore vision serve` to start the sidecar manually"
+                )
+            base_url = resolved
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._max_tokens = max_tokens

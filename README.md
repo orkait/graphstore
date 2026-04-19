@@ -111,13 +111,13 @@ pip install 'graphstore[embed-default,ingest,vault,scheduler]'
 | `embed-default` | model2vec - zero-config CPU embedder |
 | `embed-fastembed` | fastembed - ~30 ONNX encoder models |
 | `embed-gguf` | llama-cpp-python - GGUF embedders + reranker |
-| `ingest` | markitdown + pymupdf + pymupdf4llm (PDF/DOCX/HTML -> markdown; VisionHandler uses stdlib urllib against any OpenAI-compatible endpoint - no extra dep) |
+| `ingest` | markitdown + pymupdf + pymupdf4llm (PDF/DOCX/HTML -> markdown) |
 | `ingest-pro` | docling (heavier PDF w/ tables + OCR; ~1 GB via torch. For CPU-only install: `pip install 'graphstore[ingest-pro]' --extra-index-url https://download.pytorch.org/whl/cpu`) |
+| `vision` | llama-cpp-python[server] + huggingface-hub (local VLM sidecar, SmolVLM-500M ~400 MB on first use; see `graphstore vision serve`) |
 | `scheduler` | croniter (cron-expression parsing) |
 | `vault` | pyyaml (markdown vault sync) |
 | `playground` | fastapi + uvicorn (local web UI) |
-| `gpu` | onnxruntime-gpu + bundled nvidia-cu12 (Linux x86_64) |
-| `gpu-ort` | onnxruntime-gpu only (bring your own CUDA 12) |
+| `gpu` | onnxruntime-gpu only (bring your own CUDA 12 + cuDNN 9) |
 | `dev` | pytest + pytest-benchmark + pytest-xdist + pytest-timeout |
 
 </details>

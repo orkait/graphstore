@@ -91,22 +91,18 @@ playground = [
     "uvicorn>=0.20",
     "pydantic>=2.0",
 ]
-# Lean: onnxruntime-gpu only. Assumes host has CUDA 12 + cuDNN 9
-# findable by the dynamic linker. Saves ~1.6 GB over [gpu].
-gpu-ort = [
-    "onnxruntime-gpu>=1.23; sys_platform == 'linux' and platform_machine == 'x86_64'",
-]
-# Zero-config: bundles the nvidia-*-cu12 runtime wheels, ctypes-dlopened
-# at first use. Platform markers keep pip install clean on mac/win/arm.
+# onnxruntime-gpu for NER (TinyBERT) CUDA acceleration. Assumes host has
+# CUDA 12 + cuDNN 9 findable by the dynamic linker. Users needing bundled
+# CUDA runtime wheels should pin nvidia-*-cu12 manually - we keep this lean.
 gpu = [
     "onnxruntime-gpu>=1.23; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "nvidia-cublas-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "nvidia-cuda-runtime-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "nvidia-cuda-nvrtc-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "nvidia-cudnn-cu12>=9.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "nvidia-cufft-cu12>=11.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "nvidia-curand-cu12>=10.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "nvidia-nvjitlink-cu12>=12.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+# Vision: llama.cpp sidecar server for image understanding. Ships a local
+# OpenAI-compatible HTTP endpoint (SmolVLM-500M by default, ~400 MB GGUF
+# downloaded on first use). See `graphstore vision serve` CLI.
+vision = [
+    "llama-cpp-python[server]>=0.3",
+    "huggingface-hub>=0.24",
 ]
 [tool.setuptools.package-dir]
 "" = "src"
@@ -132,6 +128,7 @@ markers = [
     "needs_scheduler: requires graphstore[scheduler]",
     "needs_playground: requires graphstore[playground]",
     "needs_gpu: requires graphstore[gpu]",
+    "needs_vision: requires graphstore[vision]",
 ]
 
 [tool.bumpversion]
