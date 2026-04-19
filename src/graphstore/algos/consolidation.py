@@ -73,9 +73,14 @@ def cluster_by_entity(
                 ))
             continue
 
-        # Get slots that have vectors
-        vec_slots = [s for s in slots if s < len(has_vector) and has_vector[s]]
-        non_vec_slots = [s for s in slots if s not in set(vec_slots)]
+        # Get slots that have vectors. Vectorised against has_vector bitmap
+        # instead of a Python comprehension per slot.
+        slots_arr = np.asarray(slots, dtype=np.int64)
+        in_range = slots_arr < len(has_vector)
+        live = np.zeros_like(in_range)
+        live[in_range] = has_vector[slots_arr[in_range]]
+        vec_slots = slots_arr[live].tolist()
+        non_vec_slots = slots_arr[~live].tolist()
 
         if not vec_slots:
             # No vectors - each message standalone
@@ -143,11 +148,12 @@ def cluster_by_entity(
                     break
                 # Add all above-threshold candidates in this round so the
                 # loop converges in O(log N) rounds rather than N.
+                # Batched update: one mask assign + one vector sum instead
+                # of a Python loop over new_indices.
                 new_indices = candidates[above]
-                for idx in new_indices:
-                    assigned[idx] = True
-                    cluster.append(int(idx))
-                    cluster_sum = cluster_sum + slot_vecs_norm[idx]
+                assigned[new_indices] = True
+                cluster.extend(int(i) for i in new_indices)
+                cluster_sum = cluster_sum + slot_vecs_norm[new_indices].sum(axis=0)
 
             clusters.append(cluster)
 
