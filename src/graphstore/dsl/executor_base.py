@@ -19,8 +19,8 @@ class ExecutorBase(VisibilityMixin, FilteringMixin):
         self.cost_threshold = 100_000
         self._embedder_dirty = False
         self._fts_full_text = True
-        self._vision_model = "smolvlm2:2.2b"
-        self._vision_base_url = "http://localhost:11434/v1"
+        self._vision_model = "SmolVLM-500M-Instruct-Q8_0.gguf"
+        self._vision_base_url: str | None = None
         self._vision_max_tokens = 300
         self._defer_embeddings: bool = False
         self._pending_embeddings: list[tuple[int, str]] = []

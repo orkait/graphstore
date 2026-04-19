@@ -67,8 +67,8 @@ class DocumentConfig(msgspec.Struct, frozen=True):
     chunk_overlap: int = 50
     summary_max_length: int = 200
     fts_full_text: bool = True
-    vision_model: str = "smolvlm2:2.2b"
-    vision_base_url: str = "http://localhost:11434/v1"
+    vision_model: str = "SmolVLM-500M-Instruct-Q8_0.gguf"
+    vision_base_url: str | None = None
     vision_max_tokens: int = 300
 
 
