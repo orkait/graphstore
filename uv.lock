@@ -709,11 +709,14 @@ name = "graphstore"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
+    { name = "croniter" },
     { name = "lark" },
+    { name = "model2vec" },
     { name = "msgspec" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "psutil" },
+    { name = "pyyaml" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "threadpoolctl" },
@@ -732,13 +735,8 @@ dev = [
     { name = "pytest-xdist" },
     { name = "tokenizers" },
 ]
-embed-default = [
-    { name = "model2vec" },
-]
-embed-fastembed = [
+embedders-extra = [
     { name = "fastembed" },
-]
-embed-gguf = [
     { name = "llama-cpp-python" },
 ]
 gpu = [
@@ -757,12 +755,6 @@ playground = [
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "uvicorn" },
-]
-scheduler = [
-    { name = "croniter" },
-]
-vault = [
-    { name = "pyyaml" },
 ]
 vision = [
     { name = "huggingface-hub" },
@@ -784,17 +776,17 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "croniter", marker = "extra == 'scheduler'", specifier = ">=6.0" },
+    { name = "croniter", specifier = ">=6.0" },
     { name = "docling", marker = "extra == 'ingest-pro'", specifier = ">=2.0" },
     { name = "fastapi", marker = "extra == 'playground'", specifier = ">=0.100" },
-    { name = "fastembed", marker = "extra == 'embed-fastembed'", specifier = ">=0.8" },
+    { name = "fastembed", marker = "extra == 'embedders-extra'", specifier = ">=0.8" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "huggingface-hub", marker = "extra == 'vision'", specifier = ">=0.24" },
     { name = "lark", specifier = ">=1.1" },
-    { name = "llama-cpp-python", marker = "extra == 'embed-gguf'", specifier = ">=0.3" },
+    { name = "llama-cpp-python", marker = "extra == 'embedders-extra'", specifier = ">=0.3" },
     { name = "llama-cpp-python", extras = ["server"], marker = "extra == 'vision'", specifier = ">=0.3" },
     { name = "markitdown", marker = "extra == 'ingest'", specifier = ">=0.1" },
-    { name = "model2vec", marker = "extra == 'embed-default'", specifier = ">=0.4" },
+    { name = "model2vec", specifier = ">=0.4" },
     { name = "msgspec", specifier = ">=0.18" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "onnxruntime", marker = "extra == 'dev'", specifier = ">=1.17" },
@@ -808,14 +800,14 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.4" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.8" },
-    { name = "pyyaml", marker = "extra == 'vault'", specifier = ">=6.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "scipy", specifier = ">=1.10" },
     { name = "threadpoolctl", specifier = ">=3.1" },
     { name = "tokenizers", marker = "extra == 'dev'", specifier = ">=0.15" },
     { name = "usearch", specifier = ">=2.0" },
     { name = "uvicorn", marker = "extra == 'playground'", specifier = ">=0.20" },
 ]
-provides-extras = ["dev", "embed-default", "embed-fastembed", "embed-gguf", "ingest", "ingest-pro", "scheduler", "vault", "playground", "gpu", "vision"]
+provides-extras = ["dev", "embedders-extra", "ingest", "ingest-pro", "playground", "gpu", "vision"]
 
 [package.metadata.requires-dev]
 dev = [

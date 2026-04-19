@@ -33,6 +33,16 @@ dependencies = [
     "msgspec>=0.18",
     "psutil>=5.9",
     "threadpoolctl>=3.1",
+    # Tiny, high-leverage. Bundling so that `pip install graphstore` delivers
+    # the agentic DB contract out of the box:
+    #   - model2vec: default embedder (REMEMBER / RECALL / LEXICAL SEARCH),
+    #     ~40 MB wheel + ~30 MB model downloaded on first use.
+    #   - croniter: enables `SYS CRON` DSL (~100 KB).
+    #   - pyyaml: enables `VAULT SYNC` + YAML frontmatter (~200 KB).
+    # Pass `embedder='none'` to GraphStore() if you want to skip embedder init.
+    "model2vec>=0.4",
+    "croniter>=6.0",
+    "pyyaml>=6.0",
 ]
 
 [project.urls]
@@ -58,13 +68,8 @@ dev = [
     "onnxruntime>=1.17",
     "tokenizers>=0.15",
 ]
-embed-default = [
-    "model2vec>=0.4",
-]
-embed-fastembed = [
+embedders-extra = [
     "fastembed>=0.8",
-]
-embed-gguf = [
     "llama-cpp-python>=0.3",
 ]
 ingest = [
@@ -79,12 +84,6 @@ ingest = [
 # no openai Python SDK dep needed.
 ingest-pro = [
     "docling>=2.0",
-]
-scheduler = [
-    "croniter>=6.0",
-]
-vault = [
-    "pyyaml>=6.0",
 ]
 playground = [
     "fastapi>=0.100",
@@ -121,11 +120,11 @@ testpaths = ["tests"]
 # Override per run via `pytest -n 0` (serial) or `pytest -n auto`.
 addopts = "-n 4 --timeout=60"
 markers = [
-    "needs_embedder: requires graphstore[embed-default]",
-    "needs_fastembed: requires graphstore[embed-fastembed]",
+    "needs_embedder: embedder test (model2vec is now core, kept for compat)",
+    "needs_fastembed: requires graphstore[embedders-extra] (fastembed)",
     "needs_ingest: requires graphstore[ingest]",
-    "needs_vault: requires graphstore[vault]",
-    "needs_scheduler: requires graphstore[scheduler]",
+    "needs_vault: vault test (pyyaml is now core, kept for compat)",
+    "needs_scheduler: scheduler test (croniter is now core, kept for compat)",
     "needs_playground: requires graphstore[playground]",
     "needs_gpu: requires graphstore[gpu]",
     "needs_vision: requires graphstore[vision]",

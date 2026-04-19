@@ -17,14 +17,8 @@ class Model2VecEmbedder(Embedder):
     def __init__(self, model_name: str = "minishlab/M2V_base_output", cache_dir: str | None = None):
         cache_key = (model_name, cache_dir)
         if cache_key not in _model_cache:
-            try:
-                from model2vec import StaticModel
-            except ImportError as e:
-                raise ImportError(
-                    "Model2VecEmbedder requires the `embed-default` extra. "
-                    "Install with: pip install 'graphstore[embed-default]'"
-                ) from e
-            
+            from model2vec import StaticModel
+
             # If cache_dir is provided and model exists there, try loading from local
             if cache_dir:
                 local_path = Path(cache_dir) / model_name.split("/")[-1]

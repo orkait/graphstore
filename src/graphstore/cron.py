@@ -71,13 +71,7 @@ class CronScheduler:
 
     def add(self, name: str, schedule: str, query: str) -> dict:
         """Register a cron job. Validates cron expression."""
-        try:
-            from croniter import croniter
-        except ImportError as e:
-            raise ImportError(
-                "CronScheduler requires the `scheduler` extra. "
-                "Install with: pip install 'graphstore[scheduler]'"
-            ) from e
+        from croniter import croniter
         if not croniter.is_valid(schedule):
             raise ValueError(f"Invalid cron expression: {schedule!r}")
         now = time.time()

@@ -27,8 +27,9 @@ class LlamaCppEmbedder(Embedder):
             from llama_cpp import Llama
         except ImportError as e:
             raise ImportError(
-                "LlamaCppEmbedder requires the `embed-gguf` extra. "
-                "Install with: pip install 'graphstore[embed-gguf]'"
+                "LlamaCppEmbedder requires llama-cpp-python. "
+                "Install with: pip install 'graphstore[embedders-extra]' "
+                "(or 'graphstore[vision]' which ships the same wheel)."
             ) from e
 
         self._model = Llama(

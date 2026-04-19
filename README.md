@@ -87,20 +87,20 @@ Weights are configurable. The pipeline is 5 stages: gather → fuse → temporal
 pip install graphstore
 ```
 
-Lightweight core: numpy, scipy, usearch, lark, msgspec, psutil, threadpoolctl. No torch, no PDF parser, no HTTP server.
+Core install includes everything needed for the agentic DB contract out of the box: REMEMBER / RECALL (model2vec embedder), SYS CRON (croniter), VAULT SYNC (pyyaml), plus the numpy / scipy / usearch / lark / msgspec / psutil / threadpoolctl foundation. No torch, no PDF parser, no HTTP server.
 
 ```bash
-# Embedder (30 MB, CPU-only, zero-config)
-pip install 'graphstore[embed-default]'
-
-# PDF / DOCX / HTML ingestion
+# PDF / DOCX / HTML ingestion (+200 MB)
 pip install 'graphstore[ingest]'
 
-# GPU acceleration (Linux x86_64, CUDA 12)
+# Local VLM sidecar for scanned PDFs / image captioning (+80 MB wheel, ~400 MB weights on first use)
+pip install 'graphstore[vision]'
+
+# GPU acceleration for NER (Linux x86_64, CUDA 12)
 pip install 'graphstore[gpu]'
 
-# Everything
-pip install 'graphstore[embed-default,ingest,vault,scheduler]'
+# Everything heavy
+pip install 'graphstore[ingest,vision,playground]'
 ```
 
 <details>
@@ -114,8 +114,7 @@ pip install 'graphstore[embed-default,ingest,vault,scheduler]'
 | `ingest` | markitdown + pymupdf + pymupdf4llm (PDF/DOCX/HTML -> markdown) |
 | `ingest-pro` | docling (heavier PDF w/ tables + OCR; ~1 GB via torch. For CPU-only install: `pip install 'graphstore[ingest-pro]' --extra-index-url https://download.pytorch.org/whl/cpu`) |
 | `vision` | llama-cpp-python[server] + huggingface-hub (local VLM sidecar, SmolVLM-500M ~400 MB on first use; see `graphstore vision serve`) |
-| `scheduler` | croniter (cron-expression parsing) |
-| `vault` | pyyaml (markdown vault sync) |
+| `embedders-extra` | fastembed + llama-cpp-python (alternate embedder backends; model2vec is the default and lives in core) |
 | `playground` | fastapi + uvicorn (local web UI) |
 | `gpu` | onnxruntime-gpu only (bring your own CUDA 12 + cuDNN 9) |
 | `dev` | pytest + pytest-benchmark + pytest-xdist + pytest-timeout |

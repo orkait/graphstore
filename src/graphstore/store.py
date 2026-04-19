@@ -350,14 +350,6 @@ class GraphStore:
                     model_name=cfg.vector.model2vec_model,
                     cache_dir=cfg.vector.model_cache_dir,
                 )
-            except ImportError:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "default embedder unavailable: pip install 'graphstore[embed-default]' "
-                    "(model2vec). Falling back to no embedder - REMEMBER/RECALL will "
-                    "return 0 results. Pass embedder='none' to silence this warning."
-                )
-                return None
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning("embedder init failed: %s", e)
