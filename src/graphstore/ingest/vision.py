@@ -27,7 +27,7 @@ class VisionHandler:
         self,
         model: str = "SmolVLM-500M-Instruct-Q8_0.gguf",
         base_url: str | None = None,
-        max_tokens: int = 300,
+        max_tokens: int = 128,
         api_key: str = "ollama",
         timeout: float = 60.0,
         auto_start: bool = True,
@@ -83,7 +83,7 @@ class VisionHandler:
             "messages": [{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Describe this image concisely. Focus on data, text, and key elements."},
+                    {"type": "text", "text": "In one or two sentences, describe this image. Include any visible text verbatim."},
                     {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
                 ],
             }],
