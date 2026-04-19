@@ -26,7 +26,7 @@ DATASET_VARIANT = "s"
 
 # GraphStore source
 REPO_URL        = "https://github.com/orkait/graphstore.git"
-REPO_BRANCH     = "refactor/simplify-retrieval-pipeline"
+REPO_BRANCH     = "main"
 
 # Hardware
 GPU_MEM_GB      = "12"
@@ -223,7 +223,10 @@ def setup_env():
         return False
 
     os.environ["GRAPHSTORE_CONFIG"] = CONFIG_PATH
+    # `graphstore` package lives under src/ (PEP 517 layout); `benchmarks`
+    # sits at the repo root. Both need to be importable.
     sys.path.insert(0, f"{GRAPHSTORE_DIR}/src")
+    sys.path.insert(0, GRAPHSTORE_DIR)
 
     sys.argv = [
         "bench",
