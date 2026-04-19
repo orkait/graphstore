@@ -1,0 +1,88 @@
+direction: down
+
+title: |md
+  # REMEMBER — 5-stage retrieval pipeline
+| { near: top-center }
+
+q: |md
+  REMEMBER "European architecture" LIMIT 10
+| {
+  shape: oval
+  style.fill: "#e0f2fe"
+}
+
+gather: |md
+  ## Stage 1 — Gather
+  union · capped adaptively
+| {
+  style.fill: "#f1f5f9"
+
+  vec: |md
+    **vector ANN**
+    sentence-level cosine
+    usearch HNSW
+  | { style.fill: "#dbeafe" }
+
+  bm25: |md
+    **BM25 FTS5**
+    chunk-level keyword
+    SQLite FTS5
+  | { style.fill: "#dbeafe" }
+}
+
+fuse: |md
+  ## Stage 2 — Fuse
+  weighted (default) · rrf (alt)
+
+  **vec_signal**     0.52
+  **bm25_signal**    0.25
+  **recency**        0.15
+  **graph_signal**   0.08
+
+  + co-occurrence boost
+  + recall-frequency nudge
+| {
+  style.fill: "#fef3c7"
+}
+
+temporal: |md
+  ## Stage 3 — Temporal
+  hard-zero outside AT window
+  exp(-age / half_life)
+| {
+  style.fill: "#f1f5f9"
+}
+
+rerank: |md
+  ## Stage 4 — Rerank (optional)
+  cross-encoder
+  GGUF / ONNX / FlashRank
+| {
+  style.fill: "#f1f5f9"
+  style.stroke-dash: 4
+}
+
+nucleus: |md
+  ## Stage 5 — Nucleus (optional)
+  structural-edge walk
+  attaches to meta["nucleus"]
+| {
+  style.fill: "#f1f5f9"
+  style.stroke-dash: 4
+}
+
+out: |md
+  Ranked nodes
+| {
+  shape: oval
+  style.fill: "#dcfce7"
+}
+
+q -> gather.vec
+q -> gather.bm25
+gather.vec -> fuse
+gather.bm25 -> fuse
+fuse -> temporal
+temporal -> rerank
+rerank -> nucleus
+nucleus -> out

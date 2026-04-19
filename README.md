@@ -39,22 +39,30 @@ Most agent memory systems are wrappers around a vector database. That works for 
 Three storage engines, one typed DSL, a tiered ingest pipeline, and a hybrid retrieval engine that fuses all of them.
 
 <p align="center">
-  <img src="docs/img/architecture.svg" alt="graphstore architecture: DSL + three storage engines fed by the tiered ingest pipeline" width="780">
+  <img src="docs/img/architecture.svg" alt="graphstore architecture: DSL + three storage engines + ingest pipeline + retrieval" width="780">
 </p>
 
-**Ingest tiers:** `txt/md` → direct · `html/docx/xlsx` → markitdown · `pdf` → pymupdf4llm → docling · `png/jpg` → vision sidecar (VLM, `[vision]`) · `wav/mp3/flac` → whisper in-process (`[audio]`).
+**What flows where:**
 
-<sub>Source: [`docs/img/architecture.dot`](docs/img/architecture.dot) — re-render with <code>dot -Tsvg architecture.dot -o architecture.svg</code>.</sub>
+- The **DSL** (Lark LALR(1), ~70 commands) is the only way to write. Every `CREATE`, `UPDATE`, `DELETE`, `ASSERT`, `RETRACT`, `INGEST`, `SYS *` goes through it.
+- Writes fan out to the three storage engines:
+  - **Graph** — typed numpy columns + scipy CSR edges. Reserved columns like `__event_at__`, `__confidence__`, `__retracted__` live here.
+  - **Vector** — usearch HNSW with cosine similarity. Auto-populated via schema `EMBED content` or the `DOCUMENT "..."` clause.
+  - **Document** — SQLite with an FTS5 virtual table. BM25 + blob storage + single-owner path lock.
+- The **ingest pipeline** is modality-aware and tiered. `txt/md` → direct · `html/docx/xlsx` → markitdown · `pdf` → pymupdf4llm → docling · `png/jpg` → vision sidecar (local llama.cpp + SmolVLM2-2.2B by default, `[vision]` extra) · `wav/mp3/flac/m4a` → whisper in-process (faster-whisper, `[audio]` extra).
+- **Retrieval** (REMEMBER / RECALL / SIMILAR TO / LEXICAL SEARCH / TRAVERSE) reads from all three engines and fuses the signals — see the pipeline diagram below.
+
+<sub>Source: [`docs/img/architecture.d2`](docs/img/architecture.d2) — re-render with <code>d2 --sketch --layout=dagre docs/img/architecture.d2 docs/img/architecture.svg</code> (requires [d2](https://d2lang.com)).</sub>
 
 ### REMEMBER - the retrieval engine
 
 `REMEMBER` is the core command. Five-stage pipeline, four weighted signals, optional rerank + nucleus walk.
 
 <p align="center">
-  <img src="docs/img/remember.svg" alt="REMEMBER pipeline: gather -> fuse -> temporal -> rerank -> nucleus -> ranked" width="780">
+  <img src="docs/img/remember.svg" alt="REMEMBER 5-stage retrieval pipeline: gather -> fuse -> temporal -> rerank -> nucleus" width="620">
 </p>
 
-<sub>Source: [`docs/img/remember.dot`](docs/img/remember.dot) — re-render with <code>dot -Tsvg remember.dot -o remember.svg</code>.</sub>
+<sub>Source: [`docs/img/remember.d2`](docs/img/remember.d2) — re-render with <code>d2 --sketch --layout=dagre docs/img/remember.d2 docs/img/remember.svg</code>.</sub>
 
 **Signals fused at stage 2** (defaults; weights are configurable):
 
