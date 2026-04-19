@@ -47,6 +47,22 @@ g.close()
 
 That's it. Core install covers REMEMBER / RECALL / LEXICAL / SIMILAR / SYS CRON / VAULT SYNC. Extras for PDF, image, audio, GPU, playground UI are all opt-in - see [Installation](#-installation).
 
+### Prefer typed Python over DSL strings?
+
+Use the built-in query builder. Every DSL verb is a typed function - escape-safe, IDE-autocomplete-friendly, composable.
+
+```python
+from graphstore import q, F
+
+# Same three queries as above, via the builder:
+q.create_node("mem:paris", kind="memory",
+              document="Paris is the capital of France.").execute(g)
+q.remember("European history", limit=5).execute(g)
+q.nodes(where=F.eq("kind", "memory") & F.gt("importance", 0.5), limit=10).execute(g)
+```
+
+100% DSL coverage (87 verbs). Full reference: [docs/query-builder.md](docs/query-builder.md).
+
 ---
 
 ## Why graphstore?

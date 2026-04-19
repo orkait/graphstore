@@ -4,7 +4,7 @@ description: How to inject data into graphstore correctly. Covers the three stor
 compatibility: Requires a local graphstore install. Works against any graphstore >= 0.3.0.
 metadata:
   author: orkait
-  version: "2.1"
+  version: "2.2"
 ---
 
 # Graphstore ingestion
@@ -630,3 +630,36 @@ graphstore = three storage engines (graph + vector + document) behind one DSL. R
 7. Audio ingest = just `INGEST "clip.mp3"` under `[audio]`; in-process faster-whisper.
 
 When in doubt: Pattern A for conversations, Pattern B for documents, Pattern E for images, Pattern F for audio.
+
+## Query builder (v0.3.0+)
+
+Prefer the typed builder over string DSL when writing adapters or user-facing code. Escape-safe, IDE-autocomplete-friendly, 100% DSL coverage.
+
+```python
+from graphstore import q, F
+
+# Ingestion adapter using the builder end-to-end
+q.sys.register_node_kind("message", required={"session": "string", "role": "string"}, optional={"position": "int"}).execute(gs)
+q.sys.register_node_kind("entity", required={"name": "string"}).execute(gs)  # no EMBED
+
+batch = q.batch(
+    q.create_node(f"{session_id}:msg{i}", kind="message",
+                  session=session_id, role=msg.role, position=i,
+                  document=msg.content),
+    q.create_edge(f"sess:{session_id}", f"{session_id}:msg{i}", kind="has_message"),
+    *[q.create_edge(f"{session_id}:msg{i}", f"ent:{slug(e)}", kind="mentions")
+      for e in dedupe(extract_entities(msg.content))],
+)
+batch.execute(gs)
+
+# Retrieval
+q.remember(question, limit=20, where=F.eq("kind", "message")).execute(gs)
+```
+
+Full reference: [docs/query-builder.md](../../../docs/query-builder.md).
+
+**Why prefer it for adapters:**
+- Auto-escapes user-generated text (stops the classic string-interpolation injection)
+- Catches typos at author time instead of query time
+- Predicate algebra (`F`) gives reusable filter libraries
+- Clause ordering is grammar-correct by construction (e.g. EXPIRES before DOCUMENT in CREATE NODE)
