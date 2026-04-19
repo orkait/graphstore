@@ -110,15 +110,15 @@ pip install 'graphstore[embed-default,ingest,vault,scheduler]'
 |---|---|
 | `embed-default` | model2vec - zero-config CPU embedder |
 | `embed-fastembed` | fastembed - ~30 ONNX encoder models |
-| `ingest` | markitdown + pymupdf (PDF/DOCX/HTML -> markdown) |
-| `ingest-pro` | docling + openai (heavier PDF + vision via LLM) |
+| `embed-gguf` | llama-cpp-python - GGUF embedders + reranker |
+| `ingest` | markitdown + pymupdf + pymupdf4llm (PDF/DOCX/HTML -> markdown; VisionHandler uses stdlib urllib against any OpenAI-compatible endpoint - no extra dep) |
+| `ingest-pro` | docling (heavier PDF w/ tables + OCR; ~1 GB via torch. For CPU-only install: `pip install 'graphstore[ingest-pro]' --extra-index-url https://download.pytorch.org/whl/cpu`) |
 | `scheduler` | croniter (cron-expression parsing) |
 | `vault` | pyyaml (markdown vault sync) |
 | `playground` | fastapi + uvicorn (local web UI) |
 | `gpu` | onnxruntime-gpu + bundled nvidia-cu12 (Linux x86_64) |
 | `gpu-ort` | onnxruntime-gpu only (bring your own CUDA 12) |
-| `voice` | moonshine STT + piper TTS |
-| `dev` | pytest + pytest-benchmark |
+| `dev` | pytest + pytest-benchmark + pytest-xdist + pytest-timeout |
 
 </details>
 
@@ -253,13 +253,6 @@ g.execute('VAULT NEW "Project Requirements" KIND "context"')
 g.execute('VAULT SEARCH "deployment requirements" LIMIT 5')
 ```
 
-**Voice (speech I/O)**
-```python
-g = GraphStore(path="./brain", voice=True)
-g.speak("The Q3 revenue grew 15%")
-g.listen(on_text=lambda text: agent.process(text))
-```
-
 **Context isolation**
 ```sql
 BIND CONTEXT "reasoning-session-42"
@@ -354,13 +347,16 @@ g = GraphStore(
     embedder="default",       # or a custom Embedder instance, or "none"
     queued=True,              # thread-safe + cron scheduler
     vault="./notes",          # markdown vault (None = disabled)
-    voice=False,              # STT/TTS (False = disabled)
     fusion_method="weighted", # "weighted" or "rrf"
     recency_half_life_days=7300,  # ~20 years - agent memory decays slowly
 )
 ```
 
 Config is loaded in layers: `config.py` defaults -> `graphstore.json` overrides -> `GRAPHSTORE_*` env vars -> constructor kwargs.
+
+**Single-owner per path.** Persistent stores take an advisory lock on `<path>/.graphstore.lock`. A second `GraphStore(path=...)` against the same path raises `StoreInUse` - WAL replay + compact + checkpoint are not safe across processes. In-memory stores are unlocked. The OS reclaims the lock on process exit.
+
+**Thread safety.** Default is single-threaded. Pass `queued=True` to enable a worker thread that serialises writes from multiple callers. BLAS thread count is capped at import time (`OMP_NUM_THREADS=2` by default; override with `GRAPHSTORE_BLAS_CAP=N`) so importing graphstore will not saturate all your cores.
 
 <details>
 <summary><strong>graphstore.json reference</strong></summary>
@@ -503,10 +499,8 @@ graphstore/
   vector/                 # usearch ANN index
   document/               # SQLite FTS5 + blob storage
   ingest/                 # File -> graph pipeline
-  retrieval/              # Query-aware retrieval planner
   vault/                  # Markdown note system
-  voice/                  # STT + TTS
-  registry/               # Model management
+  registry/               # Embedder download + cache
   persistence/            # SQLite serialization
   server.py               # Playground web UI
   cli.py                  # CLI
