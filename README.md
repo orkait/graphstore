@@ -280,7 +280,7 @@ Disk numbers at **100k nodes**, in-memory numbers at **10k nodes** (disk WAL syn
 
 > **Metric callout.** graphstore ships retrieval numbers, not end-to-end QA accuracy. *Retrieval accuracy* below means "did the gold-answer-bearing passage land in the retrieved top-K". End-to-end QA with an LLM reader is a strict superset and lives in the linked methodology doc.
 
-**LongMemEval-S** - 500 records, retrieval-only, Jina v5 Small 1024d, Kaggle T4 GPU, 2026-04-19 run (kernel `superkaiii/graphstore-jina-v5-small`):
+**LongMemEval-S** - 500 records, retrieval-only, Jina v5 Small 1024d, Kaggle T4 GPU, 2026-04-19 run. Public kernel (full logs + output + reproducible in-browser): [kaggle.com/code/superkaiii/graphstore-jina-v5-small](https://www.kaggle.com/code/superkaiii/graphstore-jina-v5-small).
 
 | Category | n | Retrieval accuracy |
 |---|---|---|
