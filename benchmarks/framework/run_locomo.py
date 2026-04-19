@@ -197,10 +197,16 @@ def main():
                         help="max questions PER conversation")
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--embedder", default="model2vec")
+    parser.add_argument("--adapter", default="graphstore",
+                        choices=["graphstore", "skill"],
+                        help="graphstore = deterministic NER+CREATE; "
+                             "skill = LLM-driven DSL emission via graphstore-dsl skill")
+    parser.add_argument("--skill-dump-dir", default=None,
+                        help="Only used with --adapter skill: dump raw LLM output per session")
+    parser.add_argument("--no-carry-facts", action="store_true",
+                        help="Only with --adapter skill: disable cross-session fact memory")
     parser.add_argument("--out-dir", default="benchmarks/framework/results")
     args = parser.parse_args()
-
-    from .adapters.graphstore_ import GraphStoreAdapter
 
     ds = load_locomo(args.data_path, max_conversations=args.max_conversations)
     print(f"LoCoMo: {len(ds)} total QA pairs, {len(set(r.question.metadata.get('sample_id') for r in ds.records))} conversations")
@@ -213,7 +219,17 @@ def main():
         config["embedder_model"] = model
     else:
         config["embedder"] = args.embedder
-    adapter = GraphStoreAdapter(config=config)
+
+    if args.adapter == "skill":
+        from .adapters.graphstore_skill import GraphStoreSkillAdapter
+        if args.skill_dump_dir:
+            config["skill_dump_raw_dir"] = args.skill_dump_dir
+        if args.no_carry_facts:
+            config["skill_carry_facts"] = False
+        adapter = GraphStoreSkillAdapter(config=config)
+    else:
+        from .adapters.graphstore_ import GraphStoreAdapter
+        adapter = GraphStoreAdapter(config=config)
 
     summary, details = run_locomo(adapter, ds, k=args.k, max_questions=args.max_questions)
 
