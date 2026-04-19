@@ -79,7 +79,7 @@ Three storage engines, one typed DSL, a tiered ingest pipeline, and a hybrid ret
 - The **ingest pipeline** is modality-aware and tiered. `txt/md` → direct · `html/docx/xlsx` → markitdown · `pdf` → pymupdf4llm → docling · `png/jpg` → vision sidecar (local llama.cpp + SmolVLM2-2.2B by default, `[vision]` extra) · `wav/mp3/flac/m4a` → whisper in-process (faster-whisper, `[audio]` extra).
 - **Retrieval** (REMEMBER / RECALL / SIMILAR TO / LEXICAL SEARCH / TRAVERSE) reads from all three engines and fuses the signals — see the pipeline diagram below.
 
-<sub>Source: [`docs/img/architecture.d2`](docs/img/architecture.d2) — re-render with <code>d2 --sketch --layout=dagre docs/img/architecture.d2 docs/img/architecture.svg</code> (requires [d2](https://d2lang.com)).</sub>
+<sub>Source: [`docs/img/architecture.svg`](docs/img/architecture.svg) — hand-authored, edit directly.</sub>
 
 ### REMEMBER - the retrieval engine
 
@@ -89,7 +89,7 @@ Three storage engines, one typed DSL, a tiered ingest pipeline, and a hybrid ret
   <img src="docs/img/remember.svg" alt="REMEMBER 5-stage retrieval pipeline: gather -> fuse -> temporal -> rerank -> nucleus" width="620">
 </p>
 
-<sub>Source: [`docs/img/remember.d2`](docs/img/remember.d2) — re-render with <code>d2 --sketch --layout=dagre docs/img/remember.d2 docs/img/remember.svg</code>.</sub>
+<sub>Source: [`docs/img/remember.svg`](docs/img/remember.svg) — hand-authored, edit directly.</sub>
 
 **Signals fused at stage 2** (defaults; weights are configurable):
 
