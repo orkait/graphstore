@@ -30,8 +30,8 @@
   <text x="120" y="85" text-anchor="middle" class="title">User / Agent</text>
 
   <!-- DSL (top centre) -->
-  <rect x="370" y="50" width="280" height="70" rx="10" class="node dsl"/>
-  <text x="510" y="78" text-anchor="middle" class="title">DSL — Lark LALR(1), 70+ verbs</text>
+  <rect x="320" y="50" width="380" height="70" rx="10" class="node dsl"/>
+  <text x="510" y="78" text-anchor="middle" class="title">DSL (Lark LALR(1), 70+ verbs)</text>
   <text x="510" y="98" text-anchor="middle" class="sub">CREATE · REMEMBER · INGEST · RECALL · ASSERT · SYS *</text>
 
   <!-- Ingest pipeline (under INGEST verb in DSL) -->
