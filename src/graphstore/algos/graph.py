@@ -37,99 +37,153 @@ def bidirectional_bfs(
 
     Returns list of node indices including source and target, or None.
 
-    Args:
-        max_depth: per-direction expansion cap. ``None`` (default) means
-            unbounded - iterate until one frontier is empty or the two
-            frontiers meet. Prior versions defaulted to 10 which silently
-            truncated shortest-path queries on real-diameter graphs past
-            10 hops. Callers with a known cost ceiling should pass an
-            explicit integer to preserve the old behavior.
+    Implementation: dense boolean visited + int32 parent arrays per side.
+    Each expansion gathers all neighbors of the current frontier in one
+    numpy slice against CSR indptr/indices, filters unseen via boolean
+    mask, and scatters parents with numpy.unique first-occurrence. Distance
+    is tracked in an int32 array - no Python dict churn.
     """
     if source == target:
         return [source]
 
-    # Track distance from source/target so the meeting-point tiebreaker
-    # picks the actually-shortest path. Without distance tracking, pre-fix
-    # ``min(meeting)`` picked the numerically-smallest slot index among all
-    # meeting points in the current expansion step — arbitrary with respect
-    # to path length when the expansion produced multiple candidates in one
-    # step (bug #3).
-    fwd_dist: dict[int, int] = {source: 0}
-    bwd_dist: dict[int, int] = {target: 0}
+    n = max(matrix.shape[0], matrix_t.shape[0])
+    if source >= n or target >= n or source < 0 or target < 0:
+        return None
 
-    fwd_visited = {source: None}
-    fwd_frontier = [source]
-    bwd_visited = {target: None}
-    bwd_frontier = [target]
+    # -1 sentinel = unvisited. Source/target are roots - parent=-2 marks them
+    # as visited without a real parent (distinguishes from unvisited -1).
+    _ROOT = -2
+    fwd_parent = np.full(n, -1, dtype=np.int64)
+    bwd_parent = np.full(n, -1, dtype=np.int64)
+    fwd_dist = np.full(n, -1, dtype=np.int32)
+    bwd_dist = np.full(n, -1, dtype=np.int32)
+    fwd_parent[source] = _ROOT
+    bwd_parent[target] = _ROOT
+    fwd_dist[source] = 0
+    bwd_dist[target] = 0
 
-    # Unbounded mode: iterate while at least one frontier is non-empty. The
-    # graph is finite so the outer loop must terminate once both frontiers
-    # exhaust their reachable components. Explicit int cap takes precedence.
+    fwd_frontier = np.array([source], dtype=np.int64)
+    bwd_frontier = np.array([target], dtype=np.int64)
+
     step = 0
     while True:
         if max_depth is not None and step >= max_depth:
             return None
         step += 1
 
-        if not fwd_frontier and not bwd_frontier:
+        if fwd_frontier.size == 0 and bwd_frontier.size == 0:
             return None
 
-        # Expand the smaller non-empty frontier. When one side is exhausted,
-        # keep expanding the other until it too exhausts - otherwise we'd
-        # pick the empty side repeatedly (len 0 <= len N) and infinite-loop
-        # on no-route queries.
         expand_fwd = (
-            bool(fwd_frontier)
-            and (not bwd_frontier or len(fwd_frontier) <= len(bwd_frontier))
+            fwd_frontier.size > 0
+            and (bwd_frontier.size == 0 or fwd_frontier.size <= bwd_frontier.size)
         )
         if expand_fwd:
-            fwd_frontier, fwd_visited = _expand_frontier(
-                matrix, fwd_frontier, fwd_visited, fwd_dist,
+            fwd_frontier = _expand_frontier_np(
+                matrix, fwd_frontier, fwd_parent, fwd_dist, step,
             )
         else:
-            bwd_frontier, bwd_visited = _expand_frontier(
-                matrix_t, bwd_frontier, bwd_visited, bwd_dist,
+            bwd_frontier = _expand_frontier_np(
+                matrix_t, bwd_frontier, bwd_parent, bwd_dist, step,
             )
 
-        meeting = set(fwd_visited) & set(bwd_visited)
-        if meeting:
-            # Tie-break by combined path length, not slot index. Falling
-            # back to slot only as a final ordering so the choice is
-            # deterministic across runs.
-            mid = min(meeting, key=lambda m: (fwd_dist[m] + bwd_dist[m], m))
-            return _reconstruct_path(fwd_visited, bwd_visited, mid)
+        # Meeting points: slots visited by both sides.
+        both = (fwd_parent >= -1) & (fwd_parent != -1) & (bwd_parent != -1)
+        # The first guard (>=-1) is a tautology on int64 but kept explicit;
+        # what we need is "not unvisited", i.e. != -1.
+        both = (fwd_parent != -1) & (bwd_parent != -1)
+        if both.any():
+            meeting_slots = np.nonzero(both)[0]
+            combined = fwd_dist[meeting_slots].astype(np.int64) + bwd_dist[meeting_slots].astype(np.int64)
+            # Tie-break: min combined distance, then min slot index for determinism.
+            order = np.lexsort((meeting_slots, combined))
+            mid = int(meeting_slots[order[0]])
+            return _reconstruct_path_np(fwd_parent, bwd_parent, mid, source, target, _ROOT)
 
 
-def _expand_frontier(matrix, frontier, visited, dist: dict | None = None):
-    new_frontier = []
-    for node in frontier:
-        start = matrix.indptr[node]
-        end = matrix.indptr[node + 1]
-        neighbors = matrix.indices[start:end]
-        for nb in neighbors:
-            nb = int(nb)
-            if nb not in visited:
-                visited[nb] = node
-                new_frontier.append(nb)
-                if dist is not None:
-                    dist[nb] = dist[node] + 1
-    return new_frontier, visited
+def _expand_frontier_np(
+    matrix: csr_matrix,
+    frontier: np.ndarray,
+    parent: np.ndarray,
+    dist: np.ndarray,
+    cur_step: int,
+) -> np.ndarray:
+    """Vectorised one-hop expansion.
+
+    Collects all neighbors of ``frontier`` via CSR row slicing, filters
+    those already visited, picks the first parent per new neighbor, and
+    scatters parents + distances in one numpy pass. Returns the next
+    frontier as an int64 array.
+    """
+    if frontier.size == 0:
+        return frontier
+
+    indptr = matrix.indptr
+    indices = matrix.indices
+
+    # Per-row neighbor counts -> parent-per-neighbor via np.repeat.
+    starts = indptr[frontier]
+    ends = indptr[frontier + 1]
+    counts = ends - starts
+    total = int(counts.sum())
+    if total == 0:
+        return np.empty(0, dtype=np.int64)
+
+    # Flat neighbor array: concatenate each row's slice.
+    out = np.empty(total, dtype=indices.dtype)
+    pos = 0
+    # Small Python loop over |frontier|, not |nnz|: each iteration is a
+    # vectorised slice assign. O(frontier) Python calls, O(nnz_of_frontier)
+    # memory bandwidth - negligible compared to the old per-edge loop.
+    for i, (s, e) in enumerate(zip(starts.tolist(), ends.tolist())):
+        c = e - s
+        if c:
+            out[pos:pos + c] = indices[s:e]
+            pos += c
+    parents_flat = np.repeat(frontier, counts)
+
+    # Filter already-visited. np.unique with return_index keeps the first
+    # parent per new neighbor so BFS parent pointers match a standard
+    # level-ordered expansion.
+    unseen = parent[out] == -1
+    if not unseen.any():
+        return np.empty(0, dtype=np.int64)
+
+    new_nb = out[unseen]
+    new_par = parents_flat[unseen]
+    uniq, first_idx = np.unique(new_nb, return_index=True)
+    parent[uniq] = new_par[first_idx]
+    dist[uniq] = cur_step
+    return uniq.astype(np.int64)
 
 
-def _reconstruct_path(fwd_visited, bwd_visited, meeting_point):
-    fwd_path = []
+def _reconstruct_path_np(
+    fwd_parent: np.ndarray,
+    bwd_parent: np.ndarray,
+    meeting_point: int,
+    source: int,
+    target: int,
+    root_sentinel: int,
+) -> list[int]:
+    """Walk the parent arrays back to source and forward to target."""
+    fwd_path: list[int] = []
     node = meeting_point
-    while node is not None:
-        fwd_path.append(node)
-        node = fwd_visited[node]
+    while node != root_sentinel and node >= 0:
+        fwd_path.append(int(node))
+        p = int(fwd_parent[node])
+        if p == root_sentinel or p < 0:
+            break
+        node = p
     fwd_path.reverse()
 
-    bwd_path = []
-    node = bwd_visited[meeting_point]
-    while node is not None:
-        bwd_path.append(node)
-        node = bwd_visited[node]
-
+    bwd_path: list[int] = []
+    node = int(bwd_parent[meeting_point])
+    while node != root_sentinel and node >= 0:
+        bwd_path.append(int(node))
+        p = int(bwd_parent[node])
+        if p == root_sentinel or p < 0:
+            break
+        node = p
     return fwd_path + bwd_path
 
 
