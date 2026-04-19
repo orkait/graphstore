@@ -111,6 +111,7 @@ pip install 'graphstore[ingest,vision,playground]'
 | `ingest` | markitdown + pymupdf + pymupdf4llm (PDF/DOCX/HTML -> markdown) |
 | `ingest-pro` | docling (heavier PDF w/ tables + OCR; ~1 GB via torch. For CPU-only install: `pip install 'graphstore[ingest-pro]' --extra-index-url https://download.pytorch.org/whl/cpu`) |
 | `vision` | llama-cpp-python[server] + huggingface-hub (local VLM sidecar, SmolVLM-500M ~400 MB on first use; see `graphstore vision serve`) |
+| `audio` | faster-whisper (in-process speech-to-text; tiny/base models ~40-150 MB on first use) |
 | `embedders-extra` | fastembed + llama-cpp-python (alternate embedder backends; model2vec is the default and lives in core) |
 | `playground` | fastapi + uvicorn (local web UI) |
 | `gpu` | onnxruntime-gpu only (bring your own CUDA 12 + cuDNN 9) |
@@ -179,7 +180,7 @@ INGEST "report.pdf" AS "doc:q3" KIND "report"
 SYS CONNECT    -- auto-wire similar chunks across documents
 ```
 
-Supports PDF, Word, Markdown, text, HTML, and images (via local VLM sidecar under `[vision]`). Parses, chunks, embeds, and wires into the graph automatically.
+Supports PDF, Word, Markdown, text, HTML, images (via local VLM sidecar under `[vision]`), and audio (via faster-whisper under `[audio]`). Parses, chunks, embeds, and wires into the graph automatically.
 
 ### Ingest images with the local VLM sidecar
 
@@ -214,6 +215,21 @@ Bring your own endpoint (Ollama, vLLM, OpenAI cloud) via env:
 export GRAPHSTORE_VISION_URL=https://my-vllm.example.com/v1
 export GRAPHSTORE_VISION_MODEL=smolvlm2-2.2b  # preset override
 ```
+
+### Ingest audio with the local Whisper backend
+
+The `[audio]` extra adds in-process speech-to-text via faster-whisper (CTranslate2). No sidecar needed - whisper calls are short enough that in-process beats IPC overhead. Small Whisper models (~40-150 MB) download from HuggingFace Hub on first use.
+
+```bash
+pip install 'graphstore[audio]'
+```
+
+```sql
+INGEST "interview.mp3"
+INGEST "voicememo.m4a" AS "mem:standup-2024-03-15"
+```
+
+Per-segment timestamps are preserved in the chunk heading (e.g. `[00:12-00:34]`) so cited chunks can be located in the source audio. Language is auto-detected; pass an explicit ISO code via `USING whisper` kwargs on the Python API if detection is flaky.
 
 ### Track beliefs
 

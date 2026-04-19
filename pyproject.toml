@@ -72,6 +72,14 @@ embedders-extra = [
     "fastembed>=0.8",
     "llama-cpp-python>=0.3",
 ]
+# Audio: in-process speech-to-text via faster-whisper (CTranslate2). Small
+# Whisper models ship via HuggingFace Hub on first use (base ~150 MB). Unlike
+# the vision path (which uses a sidecar because VLM inference is long and
+# benefits from server-side batching), whisper transcription is short enough
+# to run in-process without IPC overhead.
+audio = [
+    "faster-whisper>=1.0",
+]
 ingest = [
     "markitdown>=0.1",
     "pymupdf4llm>=0.1",
@@ -128,6 +136,7 @@ markers = [
     "needs_playground: requires graphstore[playground]",
     "needs_gpu: requires graphstore[gpu]",
     "needs_vision: requires graphstore[vision]",
+    "needs_audio: requires graphstore[audio]",
 ]
 
 [tool.bumpversion]
