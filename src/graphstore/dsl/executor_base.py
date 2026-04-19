@@ -21,7 +21,7 @@ class ExecutorBase(VisibilityMixin, FilteringMixin):
         self._fts_full_text = True
         self._vision_model = "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
         self._vision_base_url: str | None = None
-        self._vision_max_tokens = 300
+        self._vision_max_tokens = 512
         self._defer_embeddings: bool = False
         self._pending_embeddings: list[tuple[int, str]] = []
         self._embed_batch_size: int = 64

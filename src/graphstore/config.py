@@ -69,7 +69,7 @@ class DocumentConfig(msgspec.Struct, frozen=True):
     fts_full_text: bool = True
     vision_model: str = "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
     vision_base_url: str | None = None
-    vision_max_tokens: int = 300
+    vision_max_tokens: int = 512
 
 
 class DslConfig(msgspec.Struct, frozen=True):

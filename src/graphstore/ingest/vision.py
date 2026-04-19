@@ -27,7 +27,7 @@ class VisionHandler:
         self,
         model: str = "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf",
         base_url: str | None = None,
-        max_tokens: int = 128,
+        max_tokens: int = 512,
         api_key: str = "ollama",
         timeout: float = 60.0,
         auto_start: bool = True,
