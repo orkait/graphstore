@@ -76,10 +76,15 @@ class IngestHandlers:
         summary_len = getattr(self, '_summary_max_length', 200)
         chunk_overlap = getattr(self, '_chunk_overlap', 50)
 
-        logger.info("[ingest] chunking %d chars (size=%d, overlap=%d) ...",
-                     len(result.markdown), chunk_size, chunk_overlap)
-
-        if self._chunker is not None:
+        # Ingestors may pre-chunk (e.g. pymupdf4llm preserves per-page
+        # provenance by returning page-scoped chunks with .page set). When
+        # IngestResult.chunks is already populated, skip re-chunking - we'd
+        # lose the page numbers.
+        if result.chunks:
+            chunks = result.chunks
+            logger.info("[ingest] using %d pre-chunked segments from %s",
+                        len(chunks), result.parser_used)
+        elif self._chunker is not None:
             chunks = self._chunker.chunk(
                 result.markdown,
                 max_chunk_size=chunk_size,
@@ -88,6 +93,8 @@ class IngestHandlers:
             )
         else:
             from graphstore.ingest.chunker import chunk_by_heading
+            logger.info("[ingest] chunking %d chars (size=%d, overlap=%d) ...",
+                        len(result.markdown), chunk_size, chunk_overlap)
             chunks = chunk_by_heading(
                 result.markdown,
                 max_chunk_size=chunk_size,
@@ -311,6 +318,23 @@ class IngestHandlers:
         logger.info("[ingest] %s done: %d sections, %d chunks, %d images",
                      parent_id, len(sections), len(chunks), image_count)
 
+        # Surface ingestor-level warnings (e.g. scanned PDF with near-zero
+        # text extraction) to the caller. Without this, users only discover
+        # a low-confidence ingest when REMEMBER returns nothing against the
+        # new doc.
+        meta: dict = {}
+        warnings: list[str] = []
+        ing_warning = result.metadata.get("warning")
+        if ing_warning:
+            warnings.append(ing_warning)
+        if result.confidence < 0.5:
+            warnings.append(
+                f"Ingest confidence {result.confidence:.2f} (parser={result.parser_used}). "
+                f"Text quality may be insufficient for retrieval."
+            )
+        if warnings:
+            meta["warnings"] = warnings
+
         return Result(kind="ok", data={
             "doc_id": parent_id,
             "chunks": len(chunks),
@@ -318,7 +342,7 @@ class IngestHandlers:
             "images": image_count,
             "parser": result.parser_used,
             "confidence": result.confidence,
-        }, count=len(chunks))
+        }, count=len(chunks), meta=meta)
 
     def _ingest_image_with_vision(self, q: IngestStmt, safe_path: str, ext: str) -> Result:
         """Handle standalone image ingest with VLM description."""
