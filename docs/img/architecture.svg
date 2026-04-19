@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
@@ -7,8 +7,8 @@
       .node { stroke:#64748b; stroke-width:1.5; }
       .user { fill:#e0f2fe; }
       .dsl  { fill:#f1f5f9; }
-      .eng  { fill:#dbeafe; }
       .ing  { fill:#dcfce7; }
+      .eng  { fill:#dbeafe; }
       .ret  { fill:#fef3c7; }
       .title { font-size:14px; font-weight:700; fill:#0f172a; }
       .sub   { font-size:12px; fill:#334155; }
@@ -22,56 +22,62 @@
   <ellipse cx="120" cy="80" rx="75" ry="28" class="node user"/>
   <text x="120" y="85" text-anchor="middle" class="title">User / Agent</text>
 
-  <!-- DSL -->
-  <rect x="380" y="50" width="200" height="70" rx="10" class="node dsl"/>
-  <text x="480" y="78" text-anchor="middle" class="title">DSL</text>
-  <text x="480" y="98" text-anchor="middle" class="sub">Lark LALR(1) · 70+ commands</text>
+  <!-- DSL (top centre) -->
+  <rect x="370" y="50" width="280" height="70" rx="10" class="node dsl"/>
+  <text x="510" y="78" text-anchor="middle" class="title">DSL — Lark LALR(1), 70+ verbs</text>
+  <text x="510" y="98" text-anchor="middle" class="sub">CREATE · REMEMBER · INGEST · RECALL · ASSERT · SYS *</text>
 
-  <!-- Ingest -->
-  <rect x="760" y="50" width="180" height="70" rx="10" class="node ing"/>
-  <text x="850" y="78" text-anchor="middle" class="title">Ingest pipeline</text>
-  <text x="850" y="98" text-anchor="middle" class="sub">tiered · modality-aware</text>
+  <!-- Ingest pipeline (under INGEST verb in DSL) -->
+  <rect x="370" y="180" width="280" height="90" rx="10" class="node ing"/>
+  <text x="510" y="206" text-anchor="middle" class="title">Ingest pipeline</text>
+  <text x="510" y="226" text-anchor="middle" class="sub">triggered by INGEST "file.ext"</text>
+  <text x="510" y="243" text-anchor="middle" class="sub">markitdown · pymupdf4llm · docling</text>
+  <text x="510" y="260" text-anchor="middle" class="sub">vision sidecar · whisper</text>
 
-  <!-- Engines -->
-  <rect x="60"  y="240" width="200" height="90" rx="10" class="node eng"/>
-  <text x="160" y="268" text-anchor="middle" class="title">Graph engine</text>
-  <text x="160" y="288" text-anchor="middle" class="sub">numpy columns</text>
-  <text x="160" y="305" text-anchor="middle" class="sub">scipy CSR edges</text>
+  <!-- Engines row -->
+  <rect x="60"  y="350" width="200" height="90" rx="10" class="node eng"/>
+  <text x="160" y="378" text-anchor="middle" class="title">Graph engine</text>
+  <text x="160" y="398" text-anchor="middle" class="sub">numpy columns</text>
+  <text x="160" y="415" text-anchor="middle" class="sub">scipy CSR edges</text>
 
-  <rect x="380" y="240" width="200" height="90" rx="10" class="node eng"/>
-  <text x="480" y="268" text-anchor="middle" class="title">Vector engine</text>
-  <text x="480" y="288" text-anchor="middle" class="sub">usearch HNSW</text>
-  <text x="480" y="305" text-anchor="middle" class="sub">cosine</text>
+  <rect x="380" y="350" width="200" height="90" rx="10" class="node eng"/>
+  <text x="480" y="378" text-anchor="middle" class="title">Vector engine</text>
+  <text x="480" y="398" text-anchor="middle" class="sub">usearch HNSW</text>
+  <text x="480" y="415" text-anchor="middle" class="sub">cosine</text>
 
-  <rect x="700" y="240" width="200" height="90" rx="10" class="node eng"/>
-  <text x="800" y="268" text-anchor="middle" class="title">Document engine</text>
-  <text x="800" y="288" text-anchor="middle" class="sub">SQLite + FTS5 BM25</text>
-  <text x="800" y="305" text-anchor="middle" class="sub">blobs + summaries</text>
+  <rect x="700" y="350" width="200" height="90" rx="10" class="node eng"/>
+  <text x="800" y="378" text-anchor="middle" class="title">Document engine</text>
+  <text x="800" y="398" text-anchor="middle" class="sub">SQLite + FTS5 BM25</text>
+  <text x="800" y="415" text-anchor="middle" class="sub">blobs + summaries</text>
 
   <!-- Retrieval -->
-  <rect x="300" y="430" width="360" height="70" rx="10" class="node ret"/>
-  <text x="480" y="458" text-anchor="middle" class="title">Retrieval (5-stage fusion)</text>
-  <text x="480" y="478" text-anchor="middle" class="sub">REMEMBER · RECALL · SIMILAR TO · LEXICAL · TRAVERSE</text>
+  <rect x="300" y="480" width="360" height="60" rx="10" class="node ret"/>
+  <text x="480" y="505" text-anchor="middle" class="title">Retrieval (5-stage fusion)</text>
+  <text x="480" y="525" text-anchor="middle" class="sub">REMEMBER · RECALL · SIMILAR TO · LEXICAL · TRAVERSE</text>
 
-  <!-- Edges: User → DSL -->
-  <path class="edge" d="M195,80 L380,80"/>
+  <!-- User → DSL -->
+  <path class="edge" d="M195,80 L370,80"/>
 
-  <!-- DSL → engines (write) -->
-  <path class="edge" d="M430,120 Q430,180 230,240"/>
-  <path class="edge" d="M480,120 L480,240"/>
-  <path class="edge" d="M530,120 Q530,180 730,240"/>
+  <!-- DSL → Ingest (INGEST verb dispatches) -->
+  <path class="edge" d="M510,120 L510,180"/>
+  <text x="520" y="150" class="edgelabel">INGEST verb</text>
+
+  <!-- DSL → engines (direct writes: CREATE / ASSERT / UPDATE / …) -->
+  <path class="edge" d="M395,120 Q250,200 210,350"/>
+  <path class="edge" d="M440,120 Q380,240 450,350"/>
+  <path class="edge" d="M620,120 Q680,240 770,350"/>
 
   <!-- Ingest → engines -->
-  <path class="edge" d="M810,120 Q700,180 290,240"/>
-  <path class="edge" d="M820,120 Q660,180 530,240"/>
-  <path class="edge" d="M850,120 L800,240"/>
+  <path class="edge" d="M420,270 Q300,310 180,350"/>
+  <path class="edge" d="M500,270 L480,350"/>
+  <path class="edge" d="M600,270 Q720,310 790,350"/>
 
   <!-- Engines → Retrieval -->
-  <path class="edge" d="M200,330 Q200,400 380,430"/>
-  <path class="edge" d="M480,330 L480,430"/>
-  <path class="edge" d="M760,330 Q760,400 580,430"/>
+  <path class="edge" d="M200,440 Q200,465 380,480"/>
+  <path class="edge" d="M480,440 L480,480"/>
+  <path class="edge" d="M760,440 Q760,465 580,480"/>
 
-  <!-- Retrieval → User (ranked) -->
-  <path class="edge-dashed" d="M300,465 Q120,420 120,110"/>
-  <text x="175" y="410" class="edgelabel">ranked</text>
+  <!-- Retrieval → User (ranked nodes) -->
+  <path class="edge-dashed" d="M300,510 Q120,460 120,110"/>
+  <text x="165" y="450" class="edgelabel">ranked nodes</text>
 </svg>

@@ -71,12 +71,12 @@ Three storage engines, one typed DSL, a tiered ingest pipeline, and a hybrid ret
 
 **What flows where:**
 
-- The **DSL** (Lark LALR(1), ~70 commands) is the only way to write. Every `CREATE`, `UPDATE`, `DELETE`, `ASSERT`, `RETRACT`, `INGEST`, `SYS *` goes through it.
-- Writes fan out to the three storage engines:
+- The **DSL** (Lark LALR(1), ~70 verbs) is the only way in. Every `CREATE`, `UPDATE`, `DELETE`, `ASSERT`, `RETRACT`, `INGEST`, `SYS *` goes through it.
+- **Direct writes** (`CREATE NODE`, `ASSERT`, `UPDATE`, `CREATE EDGE`, …) land straight in the three engines:
   - **Graph** — typed numpy columns + scipy CSR edges. Reserved columns like `__event_at__`, `__confidence__`, `__retracted__` live here.
-  - **Vector** — usearch HNSW with cosine similarity. Auto-populated via schema `EMBED content` or the `DOCUMENT "..."` clause.
-  - **Document** — SQLite with an FTS5 virtual table. BM25 + blob storage + single-owner path lock.
-- The **ingest pipeline** is modality-aware and tiered. `txt/md` → direct · `html/docx/xlsx` → markitdown · `pdf` → pymupdf4llm → docling · `png/jpg` → vision sidecar (local llama.cpp + SmolVLM2-2.2B by default, `[vision]` extra) · `wav/mp3/flac/m4a` → whisper in-process (faster-whisper, `[audio]` extra).
+  - **Vector** — usearch HNSW with cosine. Auto-populated via schema `EMBED content` or the `DOCUMENT "..."` clause.
+  - **Document** — SQLite + FTS5 virtual table. BM25 + blob storage + single-owner path lock.
+- **`INGEST "file.ext"`** is itself a DSL verb. It dispatches to the ingest pipeline, which is tiered and modality-aware: `txt/md` → direct · `html/docx/xlsx` → markitdown · `pdf` → pymupdf4llm → docling · `png/jpg` → vision sidecar (local llama.cpp + SmolVLM2-2.2B default, `[vision]` extra) · `wav/mp3/flac/m4a` → whisper in-process (faster-whisper, `[audio]` extra). The pipeline's output flows into the same three engines.
 - **Retrieval** (REMEMBER / RECALL / SIMILAR TO / LEXICAL SEARCH / TRAVERSE) reads from all three engines and fuses the signals — see the pipeline diagram below.
 
 <sub>Source: [`docs/img/architecture.svg`](docs/img/architecture.svg) — hand-authored, edit directly.</sub>
