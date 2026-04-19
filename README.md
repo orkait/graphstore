@@ -36,74 +36,86 @@ Most agent memory systems are wrappers around a vector database. That works for 
 
 ## 🏗️ How it works
 
-Three storage engines, one typed DSL, and a hybrid retrieval pipeline that fuses all of them.
+Three storage engines, one typed DSL, a tiered ingest pipeline, and a hybrid retrieval engine that fuses all of them.
 
-```text
-                   ┌──────────────────────────────────────┐
-                   │    DSL  -  Lark LALR(1) grammar      │
-                   │    one query language, 70+ commands  │
-                   └──────────────────┬───────────────────┘
-                                      │
-                ┌─────────────────────┼─────────────────────┐
-                ▼                     ▼                     ▼
-        ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
-        │    Graph      │     │    Vector     │     │   Document    │
-        ├───────────────┤     ├───────────────┤     ├───────────────┤
-        │ numpy columns │     │ usearch HNSW  │     │ SQLite + FTS5 │
-        │ scipy CSR     │     │ cosine        │     │ BM25 + blobs  │
-        │ edge index    │     │ int8 / fp32   │     │ summaries     │
-        └───────────────┘     └───────────────┘     └───────────────┘
-                ▲                     ▲                     ▲
-                └─────────────────────┼─────────────────────┘
-                                      │
-                    ┌─────────────────┴─────────────────┐
-                    │    Ingest pipeline (tiered)       │
-                    │  txt/md  ─▶ direct                │
-                    │  html/docx/xlsx ─▶ markitdown     │
-                    │  pdf  ─▶ pymupdf4llm ─▶ docling   │
-                    │  png/jpg ─▶ vision sidecar (VLM)  │
-                    │  wav/mp3 ─▶ whisper (in-process)  │
-                    └───────────────────────────────────┘
+```mermaid
+flowchart TD
+    User([User / Agent])
+    DSL["<b>DSL</b><br/>Lark LALR(1), 70+ commands"]
+
+    subgraph Engines [" "]
+        direction LR
+        Graph["<b>Graph</b><br/>numpy columns<br/>scipy CSR edges<br/>edge index"]
+        Vector["<b>Vector</b><br/>usearch HNSW<br/>cosine<br/>int8 / fp32"]
+        Document["<b>Document</b><br/>SQLite + FTS5<br/>BM25 + blobs<br/>summaries"]
+    end
+
+    subgraph Ingest ["Ingest pipeline (tiered, modality-aware)"]
+        direction LR
+        TxtMd[txt / md<br/>direct]
+        Mit[html / docx / xlsx<br/>markitdown]
+        Pdf[pdf<br/>pymupdf4llm → docling]
+        Vis[png / jpg<br/>vision sidecar VLM]
+        Aud[wav / mp3 / flac<br/>whisper in-process]
+    end
+
+    User --> DSL
+    DSL --> Graph
+    DSL --> Vector
+    DSL --> Document
+    Ingest --> Graph
+    Ingest --> Vector
+    Ingest --> Document
+
+    classDef engine fill:#1e3a8a,stroke:#60a5fa,color:#e0e7ff,stroke-width:1px
+    classDef ingest fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px
+    class Graph,Vector,Document engine
+    class TxtMd,Mit,Pdf,Vis,Aud ingest
 ```
 
 ### REMEMBER - the retrieval engine
 
-`REMEMBER` is the core command. It runs a five-stage pipeline and fuses four signals into a single ranked result set.
+`REMEMBER` is the core command. Five-stage pipeline, four weighted signals, optional rerank + nucleus walk.
 
-```text
-  REMEMBER "European architecture" LIMIT 10
-                                │
-     ┌──────────────────────────┴──────────────────────────┐
-     │                                                     │
-     ▼              Stage 1 — Gather                       │
-┌─────────────┐   union of top candidates                  │
-│  vec ANN    │   ─▶ sentence-level cosine over usearch    │
-│  BM25 FTS5  │   ─▶ chunk-level keyword match             │
-└─────────────┘                                            │
-                                                           │
-                  Stage 2 — Fuse  (weighted or RRF)        │
-  ┌─────────────────────────────────────────────────────┐  │
-  │  vec_signal      max sentence cosine         0.52   │  │
-  │  bm25_signal     FTS5 normalised              0.25   │  │
-  │  recency         exp(-age/half_life)         0.15   │  │
-  │  graph_signal    entity-degree (opt-in)      0.08   │  │
-  │  + co-occurrence boost  (found by both vec AND bm25) │  │
-  │  + recall-frequency nudge  (log-scaled)              │  │
-  └─────────────────────────────────────────────────────┘  │
-                                                           │
-                  Stage 3 — Temporal filter                │
-                  (hard zero outside AT window)            │
-                                                           │
-                  Stage 4 — Rerank  (optional)             │
-                  cross-encoder: GGUF or ONNX              │
-                                                           │
-                  Stage 5 — Nucleus walk  (optional)       │
-                  structural-edge context expansion        │
-                                                           │
-                  Ranked nodes  ◀──────────────────────────┘
+```mermaid
+flowchart TD
+    Q["REMEMBER &quot;European architecture&quot; LIMIT 10"]
+
+    subgraph S1 ["Stage 1 · Gather (union, capped adaptively)"]
+        V[vector ANN<br/>sentence-level cosine<br/>usearch HNSW]
+        B[BM25 FTS5<br/>chunk-level keyword<br/>SQLite FTS5]
+    end
+
+    subgraph S2 ["Stage 2 · Fuse (weighted | rrf)"]
+        direction LR
+        F1[vec_signal · 0.52]
+        F2[bm25_signal · 0.25]
+        F3[recency · 0.15]
+        F4[graph_signal · 0.08]
+        F5[+ co-occurrence boost<br/>+ recall-frequency nudge]
+    end
+
+    S3[Stage 3 · Temporal filter<br/>hard-zero outside AT window]
+    S4[Stage 4 · Rerank <br/>optional cross-encoder GGUF / ONNX]
+    S5[Stage 5 · Nucleus walk<br/>optional structural-edge expansion]
+    R([Ranked nodes])
+
+    Q --> V
+    Q --> B
+    V --> S2
+    B --> S2
+    S2 --> S3
+    S3 --> S4
+    S4 --> S5
+    S5 --> R
+
+    classDef stage fill:#1e293b,stroke:#64748b,color:#f1f5f9,stroke-width:1px
+    classDef signal fill:#312e81,stroke:#818cf8,color:#e0e7ff,stroke-width:1px
+    class S3,S4,S5 stage
+    class F1,F2,F3,F4,F5 signal
 ```
 
-All weights, the fusion method (`weighted` / `rrf`), half-life, reranker, and nucleus expansion are configurable via `graphstore.json`, `GRAPHSTORE_DSL_*` env vars, or constructor kwargs.
+All weights, fusion method, half-life, reranker, and nucleus expansion are configurable via `graphstore.json`, `GRAPHSTORE_DSL_*` env, or constructor kwargs.
 
 ---
 
@@ -379,9 +391,11 @@ All numbers at 100k nodes, mid-range laptop, no GPU.
 
 ### Benchmark results
 
-**LongMemEval-S** (500 records, retrieval-only, Jina v5 Nano 768d, Kaggle T4 GPU):
+> **Metric callout.** graphstore ships retrieval numbers, not end-to-end QA accuracy. *Retrieval accuracy* below means "did the gold-answer-bearing passage land in the retrieved top-K". End-to-end QA with an LLM reader is a strict superset and lives in the linked methodology doc.
 
-| Category | Accuracy |
+**LongMemEval-S** - 500 records, retrieval-only, Jina v5 Nano 768d, Kaggle T4 GPU:
+
+| Category | Retrieval accuracy |
 |---|---|
 | knowledge-update | 100.0% |
 | multi-session | 98.5% |
@@ -391,7 +405,9 @@ All numbers at 100k nodes, mid-range laptop, no GPU.
 | single-session-preference | 86.7% |
 | **Overall** | **96.4%** |
 
-**LoCoMo** (50Q, token-level F1, MiniMax M2.7 reader, Jina v5 Small 1024d):
+Fresh Kaggle run (Jina v5 Small 1024d, Apr 2026) is tracking the same 96% retrieval-accuracy envelope mid-run.
+
+**LoCoMo** - 50Q, token-level F1 from retrieved passages, MiniMax M2.7 reader, Jina v5 Small 1024d:
 
 | Category | F1 |
 |---|---|
@@ -402,9 +418,9 @@ All numbers at 100k nodes, mid-range laptop, no GPU.
 | temporal | 0.189 |
 | **Overall** | **0.357** |
 
-For context: GPT-3.5-turbo with full conversation context scores 0.378 on LoCoMo. graphstore achieves comparable quality using only retrieved passages (no full context), with a smaller LLM reader.
+For context: GPT-3.5-turbo with full conversation context scores 0.378 on LoCoMo. graphstore hits comparable quality using only retrieved passages (no full context), with a smaller reader LLM.
 
-Retrieval recall (keyword in top-K passages, no LLM):
+**Retrieval recall at K** (keyword in top-K, no LLM):
 
 | K | Recall |
 |---|---|
@@ -413,9 +429,9 @@ Retrieval recall (keyword in top-K passages, no LLM):
 | top-20 | 84% |
 | top-50 | 96% |
 
-**BEAM** support is included via `benchmarks/framework/run_beam.py` - generates BEAM-compatible answer JSON for external evaluation.
+**BEAM** - included via `benchmarks/framework/run_beam.py`, generates BEAM-compatible answer JSON for external evaluation.
 
-Full methodology, reproduction instructions, and comparison details: see [docs/benchmarks.md](docs/benchmarks.md).
+Full methodology, reproduction instructions, and comparison with Mem0 / MemGPT / Zep: see [docs/benchmarks.md](docs/benchmarks.md).
 
 All three benchmarks run from one CLI:
 ```bash
@@ -432,19 +448,25 @@ python -m benchmarks.framework.cli run --dataset beam --data-path /tmp/BEAM --va
 g = GraphStore(
     path="./brain",
     ceiling_mb=256,
-    embedder="default",       # or a custom Embedder instance, or "none"
-    queued=True,              # thread-safe + cron scheduler
-    vault="./notes",          # markdown vault (None = disabled)
-    fusion_method="weighted", # "weighted" or "rrf"
+    embedder="default",           # "default" (model2vec, core), "none", "installed:<name>", or an Embedder
+    queued=True,                  # worker-thread write queue + cron scheduler
+    vault="./notes",              # markdown vault (None = disabled)
+    fusion_method="weighted",     # "weighted" or "rrf"
     recency_half_life_days=7300,  # ~20 years - agent memory decays slowly
+    graph_signal_enabled=True,    # fold entity-degree channel into REMEMBER
+    nucleus_expansion=False,      # off by default; walks structural edges after rerank
+    # Vision (only used when INGEST ... USING VISION fires)
+    # vision_base_url=None,       # None -> auto-resolve sidecar -> env -> error
+    # vision_model="SmolVLM2-2.2B-Instruct-Q4_K_M.gguf",
+    # vision_max_tokens=512,
 )
 ```
 
-Config is loaded in layers: `config.py` defaults -> `graphstore.json` overrides -> `GRAPHSTORE_*` env vars -> constructor kwargs.
+Config is loaded in layers: `config.py` defaults → `graphstore.json` overrides → `GRAPHSTORE_*` env vars → constructor kwargs.
 
-**Single-owner per path.** Persistent stores take an advisory lock on `<path>/.graphstore.lock`. A second `GraphStore(path=...)` against the same path raises `StoreInUse` - WAL replay + compact + checkpoint are not safe across processes. In-memory stores are unlocked. The OS reclaims the lock on process exit.
+**Single-owner per path.** Persistent stores take an advisory lock on `<path>/.graphstore.lock`. A second `GraphStore(path=...)` against the same path raises `StoreInUse` — WAL replay + compact + checkpoint are not safe across processes. In-memory stores are unlocked. OS reclaims the lock on process exit.
 
-**Thread safety.** Default is single-threaded. Pass `queued=True` to enable a worker thread that serialises writes from multiple callers. BLAS thread count is capped at import time (`OMP_NUM_THREADS=2` by default; override with `GRAPHSTORE_BLAS_CAP=N`) so importing graphstore will not saturate all your cores.
+**Thread safety.** Default is single-threaded. `queued=True` installs a worker thread that serialises writes from multiple callers. BLAS thread count is capped at import time (`OMP_NUM_THREADS=2` by default; override with `GRAPHSTORE_BLAS_CAP=N`) so importing graphstore doesn't saturate all cores.
 
 <details>
 <summary><strong>graphstore.json reference</strong></summary>
@@ -454,23 +476,43 @@ Only include fields you want to override. Missing fields use defaults from `conf
 ```json
 {
   "core": {
-    "ceiling_mb": 512
+    "ceiling_mb": 512,
+    "embed_batch_size": 64
   },
   "vector": {
     "search_oversample": 16,
-    "similarity_threshold": 0.85
+    "similarity_threshold": 0.85,
+    "embedder": "default",
+    "model2vec_model": "minishlab/M2V_base_output"
+  },
+  "document": {
+    "chunk_max_size": 2000,
+    "chunk_overlap": 50,
+    "vision_model": "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf",
+    "vision_base_url": null,
+    "vision_max_tokens": 512
   },
   "dsl": {
     "fusion_method": "weighted",
     "remember_weights": [0.52, 0.25, 0.15, 0.08],
     "recency_half_life_days": 7300,
     "graph_signal_enabled": true,
-    "nucleus_expansion": false
+    "sentence_query_expansion": true,
+    "nucleus_expansion": false,
+    "reranker": null
   }
 }
 ```
 
-Environment variables: `GRAPHSTORE_CORE_CEILING_MB=512`, `GRAPHSTORE_DSL_FUSION_METHOD=weighted`, etc.
+Environment overrides (flattened by section): `GRAPHSTORE_CORE_CEILING_MB=512`, `GRAPHSTORE_DSL_FUSION_METHOD=rrf`, `GRAPHSTORE_VISION_URL=http://...`, `GRAPHSTORE_VISION_MODEL=smolvlm-500m`, `GRAPHSTORE_VLM_CACHE_DIR=/mnt/cache/vlm`.
+
+Inspect from the CLI:
+
+```bash
+graphstore config --defaults    # dump current defaults as JSON
+graphstore config --schema      # JSON Schema for graphstore.json
+graphstore config --path graphstore.json   # show resolved values
+```
 
 </details>
 
@@ -514,7 +556,7 @@ WHAT IF RETRACT "id"
 ```sql
 CREATE NODE "id" kind = "x" name = "foo"
 CREATE NODE "id" kind = "x" EVENT_AT "2024-03-15"
-CREATE NODE "id" kind = "x" DOCUMENT "full text..." EXPIRES IN 1h   -- DOCUMENT blob is auto-indexed into BM25 for text content types
+CREATE NODE "id" kind = "x" EXPIRES IN 1h DOCUMENT "full text..."   -- DOCUMENT auto-populates BM25 + vector + blob (PR #102). EXPIRES must come before DOCUMENT.
 UPDATE NODE "id" SET name = "new"
 UPSERT NODE "id" kind = "x" name = "foo"
 DELETE NODE "id"
