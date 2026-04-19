@@ -70,15 +70,29 @@ class ColumnStore:
 
     def clear(self, slot: int) -> None:
         """Clear all column values at slot (node deletion)."""
+        self.clear_slots((slot,))
+
+    def clear_slots(self, slots) -> None:
+        """Batch-clear column values. Accepts iterable or numpy index array.
+
+        Single numpy assignment per column instead of one write per slot
+        per column - roughly columns * len(slots) Python ops collapse to
+        columns vectorised writes.
+        """
+        if not len(slots) if hasattr(slots, "__len__") else slots is None:
+            return
+        idx = np.asarray(list(slots), dtype=np.int64) if not isinstance(slots, np.ndarray) else slots
+        if idx.size == 0:
+            return
         for field in self._columns:
             dtype_str = self._dtypes[field]
             if dtype_str == "int64":
-                self._columns[field][slot] = self.INT64_SENTINEL
+                self._columns[field][idx] = self.INT64_SENTINEL
             elif dtype_str == "float64":
-                self._columns[field][slot] = np.nan
+                self._columns[field][idx] = np.nan
             elif dtype_str == "int32_interned":
-                self._columns[field][slot] = self.STR_SENTINEL
-            self._presence[field][slot] = False
+                self._columns[field][idx] = self.STR_SENTINEL
+            self._presence[field][idx] = False
         self.dirty = True
 
     def grow(self, new_capacity: int) -> None:
