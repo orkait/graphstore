@@ -54,3 +54,9 @@ tests/fixtures/voice/*.mp3
 hf_token_dataset/
 bug_fixes/
 .coverage
+
+# Docusaurus build artefacts
+website/node_modules/
+website/.docusaurus/
+website/build/
+website/.cache-loader/
