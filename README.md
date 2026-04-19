@@ -108,9 +108,6 @@ pip install 'graphstore[ingest,vision,playground]'
 
 | Extra | What it adds |
 |---|---|
-| `embed-default` | model2vec - zero-config CPU embedder |
-| `embed-fastembed` | fastembed - ~30 ONNX encoder models |
-| `embed-gguf` | llama-cpp-python - GGUF embedders + reranker |
 | `ingest` | markitdown + pymupdf + pymupdf4llm (PDF/DOCX/HTML -> markdown) |
 | `ingest-pro` | docling (heavier PDF w/ tables + OCR; ~1 GB via torch. For CPU-only install: `pip install 'graphstore[ingest-pro]' --extra-index-url https://download.pytorch.org/whl/cpu`) |
 | `vision` | llama-cpp-python[server] + huggingface-hub (local VLM sidecar, SmolVLM-500M ~400 MB on first use; see `graphstore vision serve`) |
@@ -182,7 +179,41 @@ INGEST "report.pdf" AS "doc:q3" KIND "report"
 SYS CONNECT    -- auto-wire similar chunks across documents
 ```
 
-Supports PDF, Word, Markdown, text, images (via VLM), audio (via STT). Parses, chunks, embeds, and wires into the graph automatically.
+Supports PDF, Word, Markdown, text, HTML, and images (via local VLM sidecar under `[vision]`). Parses, chunks, embeds, and wires into the graph automatically.
+
+### Ingest images with the local VLM sidecar
+
+The `[vision]` extra ships a local OpenAI-compatible sidecar (llama.cpp server + SmolVLM-500M Q8_0, ~400 MB on first use). Zero-config: first `INGEST ... USING VISION` call auto-starts it.
+
+```bash
+pip install 'graphstore[vision]'
+graphstore vision serve --pull-only    # optional: pre-download weights
+```
+
+```sql
+-- Scanned PDF caption + OCR fallback
+INGEST "scan.pdf" USING VISION "SmolVLM-500M-Instruct-Q8_0.gguf"
+
+-- Standalone image ingest
+INGEST "chart.png" USING VISION "SmolVLM-500M-Instruct-Q8_0.gguf" AS "img:q3-chart"
+```
+
+Sidecar lifecycle:
+
+```bash
+graphstore vision models     # list built-in presets (smolvlm-500m, smolvlm2-2.2b, qwen2.5-vl-3b)
+graphstore vision serve      # start (auto-download on first run)
+graphstore vision status     # PID + port + model in use
+graphstore vision logs       # tail the sidecar log
+graphstore vision stop       # SIGTERM the sidecar
+```
+
+Bring your own endpoint (Ollama, vLLM, OpenAI cloud) via env:
+
+```bash
+export GRAPHSTORE_VISION_URL=https://my-vllm.example.com/v1
+export GRAPHSTORE_VISION_MODEL=smolvlm2-2.2b  # preset override
+```
 
 ### Track beliefs
 
@@ -480,29 +511,26 @@ SYS EVOLVE LIST / SHOW / ENABLE / DISABLE / DELETE / HISTORY
 
 ```
 graphstore/
-  graphstore.py           # Main entry point
+  store.py                # Main GraphStore entry point
   config.py               # Typed config (msgspec Structs)
   wal.py                  # Write-ahead log
-  cron.py                 # Scheduled jobs
-  evolve.py               # Self-tuning rules
-  core/                   # Graph engine (numpy + CSR + columns)
+  cron.py                 # Scheduled jobs (croniter, now core)
+  core/                   # Graph engine (numpy + CSR + columns) + evolve/ self-tuning
   dsl/                    # Query language (grammar + parser + handlers)
-    handlers/
-      intelligence.py     # REMEMBER, RECALL, SIMILAR, LEXICAL SEARCH
-      mutations.py        # CREATE, UPDATE, DELETE, MERGE
-      traversal.py        # TRAVERSE, PATH, SUBGRAPH
-      beliefs.py          # ASSERT, RETRACT, PROPAGATE
-      ...
+    handlers/             # Sharded by domain (mutations, traversal, beliefs, intelligence, ...)
+    sys/                  # SYS command shards (lifecycle, pipeline, queries, schema, cron)
   algos/                  # Pure algorithms (fusion, spreading, consolidation)
-  embedding/              # Embedder backends (model2vec, ONNX, GGUF, fastembed)
+  embedding/              # model2vec (core default) + fastembed/GGUF/ONNX (extras)
   vector/                 # usearch ANN index
   document/               # SQLite FTS5 + blob storage
   ingest/                 # File -> graph pipeline
-  vault/                  # Markdown note system
+    vision.py             # OpenAI-compat HTTP client to VLM endpoint
+    vision_sidecar.py     # Local llama.cpp sidecar launcher (under [vision])
+  vault/                  # Markdown note system (pyyaml, now core)
   registry/               # Embedder download + cache
   persistence/            # SQLite serialization
-  server.py               # Playground web UI
-  cli.py                  # CLI
+  server.py               # Playground web UI (under [playground])
+  cli.py                  # CLI (install-embedder, playground, vision, config)
 benchmarks/
   framework/
     cli.py                # Unified benchmark CLI (longmemeval, locomo, beam)
@@ -525,13 +553,13 @@ benchmarks/
 git clone https://github.com/orkait/graphstore.git
 cd graphstore
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-pytest     # 1185 tests
+pip install -e ".[dev,ingest,vision,embedders-extra,playground]"
+pytest     # 1183+ tests, ~17s on 8-core CPU with -n 4
 ```
 
 ---
 
 ## 📄 License
 
-MIT
+AGPL-3.0 - see [LICENSE](LICENSE).
 </div>
