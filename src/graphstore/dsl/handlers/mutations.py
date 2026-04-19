@@ -145,30 +145,33 @@ class MutationHandlers:
 
     def _collect_doc_children(self, doc_id: str) -> list[tuple[str, int]]:
         """Collect all (node_id, slot) pairs for a document's children.
-        Works at slot level via raw edge lists to avoid materializing dicts."""
+
+        Uses built CSR matrices instead of scanning raw edge lists - O(fanout)
+        per edge type instead of O(|E|) per type, and section -> chunk descent
+        becomes two neighbor lookups rather than N*M list scans.
+        """
         doc_slot = self._resolve_slot(doc_id)
         if doc_slot is None:
             return []
-        children = []
-        child_kinds = {"has_chunk", "has_image", "has_section"}
-        slot_to_id = self.store._slot_to_id
-        edges_by_type = self.store._edges_by_type
+        em = self.store.edge_matrices
         tombstones = self.store.node_tombstones
+        slot_to_id = self.store._slot_to_id
+        children: list[tuple[str, int]] = []
 
-        for etype in child_kinds:
-            for s, t, _d in edges_by_type.get(etype, []):
-                if s == doc_slot and t not in tombstones:
-                    tgt_id = slot_to_id(t)
-                    if tgt_id is None:
-                        continue
-                    if etype == "has_section":
-                        for se_etype in ("has_chunk",):
-                            for ss, st, _sd in edges_by_type.get(se_etype, []):
-                                if ss == t and st not in tombstones:
-                                    st_id = slot_to_id(st)
-                                    if st_id is not None:
-                                        children.append((st_id, st))
-                    children.append((tgt_id, t))
+        def _emit(slot: int) -> None:
+            if slot in tombstones:
+                return
+            nid = slot_to_id(slot)
+            if nid is not None:
+                children.append((nid, slot))
+
+        for etype in ("has_chunk", "has_image", "has_section"):
+            for nb in em.neighbors_out(doc_slot, etype):
+                t = int(nb)
+                _emit(t)
+                if etype == "has_section":
+                    for nb2 in em.neighbors_out(t, "has_chunk"):
+                        _emit(int(nb2))
         return children
 
     @staticmethod

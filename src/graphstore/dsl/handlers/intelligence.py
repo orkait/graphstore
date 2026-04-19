@@ -534,40 +534,25 @@ class IntelligenceHandlers:
                 u_scores = _algo_recency_decay(u_ts, u_pres_at, u_ref, half_life_days=half_life)
                 recency_signal[no_event_cands] = u_scores
 
-        # Graph signal: entity-aware scoring.
-        # Chunks connected to high-degree entities (mentioned across many sessions)
-        # get boosted. This rewards topical relevance over structural noise.
+        # Graph signal: entity-aware scoring via one CSR matmul.
+        # mentions[chunk, entity] = 1 → in_degree(entity) = column sum.
+        # graph_signal[chunk] = sum_{e in entities_of(chunk)} log1p(in_degree(e))
+        #                    = (mentions @ log1p(in_degree))[chunk]
+        # Replaces a nested Python loop + per-entity memoisation dict.
         graph_enabled = getattr(self, '_graph_signal_enabled', False)
         graph_signal = np.zeros(n, dtype=np.float64)
         if graph_enabled:
-            # Cache entity degrees: entity_slot -> number of chunks mentioning it
-            entity_degrees: dict[int, int] = {}
-
-            def _entity_degree(ent_slot: int) -> int:
-                if ent_slot not in entity_degrees:
-                    ent_in = self.store.edge_matrices.neighbors_in(ent_slot, "mentions")
-                    entity_degrees[ent_slot] = len(ent_in)
-                return entity_degrees[ent_slot]
-
-            for slot in slot_arr:
-                slot_int = int(slot)
-                # Get entities this chunk mentions
-                ent_slots = self.store.edge_matrices.neighbors_out(slot_int, "mentions")
-                if len(ent_slots) == 0:
-                    continue
-                # Score = sum of log1p(entity_degree)
-                score = 0.0
-                for es in ent_slots:
-                    es_int = int(es)
-                    if es_int < n:  # only valid slots
-                        score += np.log1p(_entity_degree(es_int))
-                graph_signal[slot_int] = score
-
-            # Normalize against max in candidate set
-            cand_scores = graph_signal[slot_arr]
-            max_gs = float(cand_scores.max())
-            if max_gs > 0:
-                graph_signal /= max_gs
+            mentions = self.store.edge_matrices.get({"mentions"})
+            if mentions is not None and mentions.shape[0] >= 1 and mentions.nnz > 0:
+                # Clip to current slot count if matrix was built on stale capacity.
+                m = mentions[:n, :n] if mentions.shape[0] > n else mentions
+                in_deg = np.asarray(m.sum(axis=0)).ravel()  # length n
+                log1p_deg = np.log1p(in_deg)
+                gs = np.asarray(m @ log1p_deg).ravel()
+                graph_signal[:len(gs)] = gs
+                max_gs = float(graph_signal[slot_arr].max()) if len(slot_arr) else 0.0
+                if max_gs > 0:
+                    graph_signal /= max_gs
 
         # Fusion. Graph-signal semantics, parity across fusion methods:
         #   - 4 weights: graph is additive 4th channel       (w3 * graph)
