@@ -7,7 +7,7 @@ Public surface:
   q.remember("European history", limit=10)
   q.nodes(where=F.eq("kind", "memory") & F.gt("importance", 0.5))
 
-User guide: docs/query-builder.md
+User guide: https://graphstore-docs.orkait.com/query-builder
 """
 from __future__ import annotations
 
