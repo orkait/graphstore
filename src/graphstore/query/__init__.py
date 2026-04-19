@@ -16,6 +16,7 @@ from typing import Any
 from graphstore.query import plugins
 from graphstore.query.filters import F
 from graphstore.query.runtime import Query
+from graphstore.query.time_expr import Time, TimeExpr
 from graphstore.query.verbs import (
     reads as _reads,
     writes as _writes,
@@ -140,6 +141,7 @@ class _QNamespace:
 
     # --- Writes ---
     create_node    = staticmethod(_writes.create_node)
+    create_node_auto = staticmethod(_writes.create_node_auto)
     create_edge    = staticmethod(_writes.create_edge)
     delete_node    = staticmethod(_writes.delete_node)
     update_node    = staticmethod(_writes.update_node)
@@ -164,6 +166,7 @@ class _QNamespace:
     begin          = staticmethod(_writes.begin)
     commit         = staticmethod(_writes.commit)
     batch          = staticmethod(_writes.batch)
+    var            = staticmethod(_writes.var)
 
     # --- Namespaces ---
     sys            = _SysNamespace()
@@ -214,4 +217,4 @@ class _QNamespace:
 q = _QNamespace()
 
 
-__all__ = ["q", "F", "Query", "register_verb"]
+__all__ = ["q", "F", "Query", "Time", "TimeExpr", "register_verb"]

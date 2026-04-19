@@ -27,7 +27,8 @@ class TestLeafBuilders:
         assert F.in_("topic", ["travel", "finance"]).to_dsl() == 'topic IN ("travel", "finance")'
 
     def test_not_in(self):
-        assert F.not_in("topic", ["test"]).to_dsl() == 'topic NOT IN ("test")'
+        # Grammar has no NOT IN; emitted as NOT (... IN (...))
+        assert F.not_in("topic", ["test"]).to_dsl() == 'NOT (topic IN ("test"))'
 
     def test_in_empty_raises(self):
         with pytest.raises(ValueError, match="non-empty"):
@@ -38,13 +39,15 @@ class TestLeafBuilders:
             F.in_("topic", "not-a-list")
 
     def test_is_null(self):
-        assert F.is_null("deleted_at").to_dsl() == "deleted_at IS NULL"
+        # Grammar uses = NULL / != NULL, not IS (NOT) NULL
+        assert F.is_null("deleted_at").to_dsl() == "deleted_at = NULL"
 
     def test_is_not_null(self):
-        assert F.is_not_null("deleted_at").to_dsl() == "deleted_at IS NOT NULL"
+        assert F.is_not_null("deleted_at").to_dsl() == "deleted_at != NULL"
 
     def test_startswith(self):
-        assert F.startswith("title", "Project").to_dsl() == 'title STARTSWITH "Project"'
+        # Grammar has no STARTSWITH; emitted as LIKE "prefix%"
+        assert F.startswith("title", "Project").to_dsl() == 'title LIKE "Project%"'
 
     def test_contains(self):
         assert F.contains("title", "budget").to_dsl() == 'title CONTAINS "budget"'

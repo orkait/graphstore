@@ -27,7 +27,7 @@ from .config import (
     CoreConfig, VectorConfig, DocumentConfig, DslConfig,
     VaultConfig, PersistenceConfig, RetentionConfig, ServerConfig,
 )
-from .query import q, F, Query, register_verb
+from .query import q, F, Query, Time, TimeExpr, register_verb
 
 __all__ = [
     "GraphStore", "CoreStore", "SchemaRegistry",
@@ -42,5 +42,5 @@ __all__ = [
     "GraphStoreConfig", "load_config", "save_config",
     "CoreConfig", "VectorConfig", "DocumentConfig", "DslConfig",
     "VaultConfig", "PersistenceConfig", "RetentionConfig", "ServerConfig",
-    "q", "F", "Query", "register_verb",
+    "q", "F", "Query", "Time", "TimeExpr", "register_verb",
 ]

@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from graphstore.query.escape import dsl_identifier, dsl_literal, dsl_node_id
+from graphstore.query.escape import dsl_identifier, dsl_literal, dsl_node_id, dsl_node_ref, dsl_variable
 from graphstore.query.runtime import Query, register_compiler
 
 
@@ -79,6 +79,57 @@ def _compile_create_node(p: dict) -> str:
 register_compiler("create_node", _compile_create_node)
 
 
+# ---------- CREATE NODE AUTO ----------------------------------------------
+# create_node_auto: "CREATE" "NODE" "AUTO" field_pairs vector? expires? event? document?
+
+def create_node_auto(
+    *,
+    kind: str,
+    event_at: Any = None,
+    expires_in: str | None = None,
+    document: str | None = None,
+    vector: list[float] | None = None,
+    **fields: Any,
+) -> Query:
+    """``CREATE NODE AUTO ...`` - graphstore generates the node id.
+
+    Same clause ordering as ``create_node``; only the id is auto.
+    """
+    if not isinstance(kind, str) or not kind:
+        raise ValueError("create_node_auto() requires kind= as a non-empty str")
+    overlap = _CREATE_NODE_RESERVED & set(fields)
+    if overlap:
+        raise TypeError(
+            f"create_node_auto() got reserved kwarg(s) via **fields: {sorted(overlap)}"
+        )
+    params: dict = {"kind": kind, "fields": dict(fields)}
+    if event_at is not None: params["event_at"] = event_at
+    if expires_in is not None: params["expires_in"] = expires_in
+    if document is not None: params["document"] = document
+    if vector is not None: params["vector"] = list(vector)
+    return Query(_verb="create_node_auto", _params=params, _kind="write")
+
+
+def _compile_create_node_auto(p: dict) -> str:
+    parts = ["CREATE NODE AUTO"]
+    parts.append(_format_field("kind", p["kind"]))
+    for name, value in p["fields"].items():
+        parts.append(_format_field(name, value))
+    if "vector" in p:
+        parts.append("VECTOR [" + ", ".join(dsl_literal(v) for v in p["vector"]) + "]")
+    if "expires_in" in p:
+        n, u = _parse_expires_in(p["expires_in"])
+        parts.append(f"EXPIRES IN {n}{u}")
+    if "event_at" in p:
+        parts.append(f"EVENT_AT {dsl_literal(p['event_at'])}")
+    if "document" in p:
+        parts.append(f"DOCUMENT {dsl_literal(p['document'])}")
+    return " ".join(parts)
+
+
+register_compiler("create_node_auto", _compile_create_node_auto)
+
+
 # ---------- CREATE EDGE ---------------------------------------------------
 # create_edge: "CREATE" "EDGE" node_ref "->" node_ref field_pairs
 
@@ -99,7 +150,7 @@ def create_edge(
 
 
 def _compile_create_edge(p: dict) -> str:
-    parts = [f"CREATE EDGE {dsl_node_id(p['src'])} -> {dsl_node_id(p['tgt'])}"]
+    parts = [f"CREATE EDGE {dsl_node_ref(p['src'])} -> {dsl_node_ref(p['tgt'])}"]
     parts.append(_format_field("kind", p["kind"]))
     for name, value in p["fields"].items():
         parts.append(_format_field(name, value))
@@ -564,4 +615,33 @@ def batch(*statements: Query) -> Query:
         _verb="batch",
         _params={"text": f"BEGIN\n{body}\nCOMMIT"},
         _kind="batch",
+    )
+
+
+# ---------- VAR ASSIGN ----------------------------------------------------
+# var_assign: VARIABLE "=" write_query    (only inside BEGIN..COMMIT)
+
+def var(name: str, inner: Query) -> Query:
+    """``$name = <write_query>`` - batch variable assignment.
+
+    Only valid inside a BEGIN..COMMIT block. ``inner`` must be a write
+    query (CREATE NODE/EDGE, UPDATE, etc.). Emit the resulting Query into
+    a batch alongside other statements; later statements reference the
+    variable via ``"$name"`` in node-id slots.
+
+    Usage:
+
+        batch = q.batch(
+            q.var("x", q.create_node("n1", kind="memory", document="a")),
+            q.var("y", q.create_node("n2", kind="memory", document="b")),
+            q.create_edge("$x", "$y", kind="next"),
+        )
+    """
+    if inner._kind not in ("write",):
+        raise ValueError(f"q.var() inner must be a write Query, got {inner._kind!r}")
+    var_tok = dsl_variable(name)
+    return Query(
+        _verb="raw",
+        _params={"text": f"{var_tok} = {inner.dsl()}"},
+        _kind="write",
     )

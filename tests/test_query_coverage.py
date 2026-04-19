@@ -30,7 +30,8 @@ EXPECTED_VERBS = {
     "recall", "what_if_retract",
     "similar", "lexical", "remember",
     # Writes
-    "create_node", "update_node", "upsert_node",
+    "create_node", "create_node_auto",
+    "update_node", "upsert_node",
     "delete_node", "delete_nodes",
     "create_edge", "update_edge", "delete_edge", "delete_edges",
     "increment", "assert_", "retract", "update_nodes_write",  # alias not used

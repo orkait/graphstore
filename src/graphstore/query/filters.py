@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from graphstore.query.escape import dsl_identifier, dsl_literal
+from graphstore.query.escape import dsl_field_ref, dsl_identifier, dsl_literal
 
 
 # -------------------------------------------------------------------------
@@ -155,6 +155,32 @@ class F:
         return _Leaf(field_name, "is_not_null", None)
 
     @classmethod
+    def like(cls, field_name: str, pattern: str) -> "F":
+        if not isinstance(pattern, str):
+            raise TypeError("F.like pattern must be a str")
+        return _Like(field_name, pattern)
+
+    @classmethod
+    def similar_score(cls, field_name: str, text: str, *, gt: float) -> "F":
+        """``SIMILAR(field, "text") > N`` - vector similarity predicate.
+
+        Grammar requires strict ``>`` comparison.
+        """
+        if not isinstance(text, str):
+            raise TypeError("F.similar_score text must be a str")
+        if not isinstance(gt, (int, float)):
+            raise TypeError("F.similar_score gt must be a number")
+        return _SimilarScore(field_name, text, float(gt))
+
+    @classmethod
+    def indegree(cls, op: str, n: int | float, *, field: str | None = None) -> "F":
+        return _Degree("INDEGREE", field, op, n)
+
+    @classmethod
+    def outdegree(cls, op: str, n: int | float, *, field: str | None = None) -> "F":
+        return _Degree("OUTDEGREE", field, op, n)
+
+    @classmethod
     def raw(cls, dsl_expr: str) -> "F":
         if not isinstance(dsl_expr, str) or not dsl_expr.strip():
             raise ValueError("F.raw requires a non-empty expression string")
@@ -222,16 +248,68 @@ class _Leaf(F):
     value: Any
 
     def to_dsl(self) -> str:
-        name = dsl_identifier(self.field_name)
+        name = dsl_field_ref(self.field_name)
         if self.op in _COMPARISON_OPS:
             return f"{name} {_COMPARISON_OPS[self.op]} {dsl_literal(self.value)}"
         if self.op in _MEMBERSHIP_OPS:
-            return f"{name} {_MEMBERSHIP_OPS[self.op]} {dsl_literal(list(self.value))}"
-        if self.op in _STRING_OPS:
-            return f"{name} {_STRING_OPS[self.op]} {dsl_literal(self.value)}"
+            # Grammar: in_cond: field_ref "IN" "(" value ("," value)* ")"
+            #          NOT IN is not in grammar directly; emit as NOT(IN)
+            vals = list(self.value)
+            joined = "(" + ", ".join(dsl_literal(v) for v in vals) + ")"
+            if self.op == "not_in":
+                return f"NOT ({name} IN {joined})"
+            return f"{name} IN {joined}"
+        if self.op == "contains":
+            # Grammar: contains_cond: field_ref "CONTAINS" STRING
+            return f"{name} CONTAINS {dsl_literal(self.value)}"
+        if self.op == "startswith":
+            # Grammar: no STARTSWITH op; use LIKE "x%" instead
+            val = str(self.value)
+            return f"{name} LIKE {dsl_literal(val + '%')}"
         if self.op in _UNARY_OPS:
-            return f"{name} {_UNARY_OPS[self.op]}"
+            # Grammar: no explicit IS NULL / IS NOT NULL; use != null or = null
+            if self.op == "is_null":
+                return f"{name} = NULL"
+            return f"{name} != NULL"
         raise ValueError(f"unknown op {self.op!r}. Valid: {sorted(ALL_OPS)}")
+
+
+@dataclass(frozen=True, slots=True)
+class _Like(F):
+    field_name: str
+    pattern: str
+
+    def to_dsl(self) -> str:
+        return f"{dsl_field_ref(self.field_name)} LIKE {dsl_literal(self.pattern)}"
+
+
+@dataclass(frozen=True, slots=True)
+class _SimilarScore(F):
+    field_name: str
+    text: str
+    gt: float
+
+    def to_dsl(self) -> str:
+        return f"SIMILAR({dsl_field_ref(self.field_name)}, {dsl_literal(self.text)}) > {self.gt}"
+
+
+_DEGREE_OPS = {"!=": "!=", ">=": ">=", "<=": "<=", "=": "=", ">": ">", "<": "<"}
+
+
+@dataclass(frozen=True, slots=True)
+class _Degree(F):
+    kind: str              # "INDEGREE" | "OUTDEGREE"
+    field_name: str | None
+    op: str
+    n: int | float
+
+    def to_dsl(self) -> str:
+        if self.op not in _DEGREE_OPS:
+            raise ValueError(f"degree op must be one of {sorted(_DEGREE_OPS)}, got {self.op!r}")
+        if not isinstance(self.n, (int, float)) or isinstance(self.n, bool):
+            raise TypeError(f"degree n must be a number, got {self.n!r}")
+        field_part = f" {dsl_field_ref(self.field_name)}" if self.field_name else ""
+        return f"{self.kind}{field_part} {self.op} {self.n}"
 
 
 @dataclass(frozen=True, slots=True)
