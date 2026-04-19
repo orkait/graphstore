@@ -51,8 +51,24 @@ q.nodes(
 ).execute(g)
 ```
 
-87 typed verbs. 100% DSL coverage. 100% line coverage. Injection-proof via a single escape helper.
+87 typed verbs. 100% DSL coverage. 100% line coverage. Injection-proof via a single escape helper. Full reference: [Query builder](./query-builder).
 
-## What to read next
+## Why graphstore
 
-Docs are under active migration. For now, the source of truth remains the [README on GitHub](https://github.com/orkait/graphstore#readme) until migration lands in PR 2.
+Most agent memory is a vector DB wrapper. Fine for simple lookup, breaks on:
+
+- **Multi-signal retrieval** - vectors miss keyword matches, BM25 misses semantic matches. You need both, plus graph structure and recency, fused.
+- **Graph-native ops** - spreading activation, subgraph extraction, path queries, counterfactuals. First-class DSL, not a bolt-on.
+- **Temporal awareness** - `__event_at__` is a reserved column, not a convention.
+- **Belief tracking** - ASSERT with confidence, RETRACT when wrong, find CONTRADICTIONS automatically.
+- **Zero infra** - SQLite + numpy + usearch. No Docker, no server, no cloud.
+
+## Next steps
+
+- [Installation](./installation) - core + optional extras
+- [Architecture](./concepts/architecture) - three engines, one DSL
+- [REMEMBER pipeline](./concepts/remember-pipeline) - retrieval internals
+- [Query builder](./query-builder) - typed Python API
+- [DSL reference](./dsl/reference) - every verb
+- [First memory walkthrough](./guides/first-memory) - end-to-end on LoCoMo
+- [Benchmarks](./benchmarks/overview) - LongMemEval + LoCoMo results
