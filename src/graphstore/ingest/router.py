@@ -94,18 +94,30 @@ def ingest_file(file_path: str, using: str | None = None, **kwargs) -> IngestRes
 
 
 def list_ingestors() -> list[dict]:
+    """Report available ingestors + their registered extensions.
+
+    The audio tier was removed with the voice subsystem (PR #104). Untested
+    docling audio/video formats (m4a/aac/mp4/avi/mov) were pruned in PR #117.
+    The vision ingestor lives under a separate code path (VisionHandler
+    sidecar via `[vision]` extra); it is reported here as tier 4 for visibility.
+    """
     _docling_formats = ["pdf", "docx", "pptx", "xlsx", "md", "html", "csv",
                         "png", "jpg", "jpeg", "tiff", "tif", "bmp", "webp",
-                        "tex", "adoc", "m4a", "aac", "mp4", "avi", "mov"]
+                        "tex", "adoc"]
     try:
         import docling as _  # noqa
         docling_available = True
     except ImportError:
         docling_available = False
+    try:
+        import llama_cpp.server as _  # noqa
+        vision_available = True
+    except ImportError:
+        vision_available = False
 
     return [
-        {"name": "markitdown", "formats": ["txt", "md", "html", "csv", "json", "xml", "docx", "pptx", "xlsx", "pdf", "zip", "png", "jpg"], "tier": 1},
-        {"name": "pymupdf4llm", "formats": ["pdf"], "tier": 2},
-        {"name": "docling", "formats": _docling_formats, "tier": 3, "available": docling_available},
-        {"name": "audio", "formats": ["wav", "mp3", "ogg", "flac"], "tier": 4, "opt_in": True},
+        {"name": "markitdown", "formats": ["txt", "md", "html", "csv", "json", "xml", "docx", "pptx", "xlsx", "pdf", "zip", "png", "jpg"], "tier": 1, "extra": "ingest"},
+        {"name": "pymupdf4llm", "formats": ["pdf"], "tier": 2, "extra": "ingest"},
+        {"name": "docling", "formats": _docling_formats, "tier": 3, "available": docling_available, "extra": "ingest-pro"},
+        {"name": "vision", "formats": ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff"], "tier": 4, "available": vision_available, "extra": "vision"},
     ]

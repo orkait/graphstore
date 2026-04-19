@@ -146,7 +146,14 @@ class TestRouter:
         ingestors = list_ingestors()
         names = [i["name"] for i in ingestors]
         assert "markitdown" in names
-        assert "audio" in names
+        assert "pymupdf4llm" in names
+        assert "docling" in names
+        assert "vision" in names
+        # Audio tier was removed with voice subsystem (PR #104)
+        assert "audio" not in names
+        # All entries must declare their extra
+        for ing in ingestors:
+            assert "extra" in ing, f"{ing['name']} missing 'extra' field"
 
 
 class TestRouterDoclingExtensions:
