@@ -169,11 +169,17 @@ class VectorStore:
             return n * (self._dims * 4 + 64) + self._has_vector.nbytes
 
     def save(self, path: str | None = None) -> bytes | None:
-        """Serialize index to path (for mmap) or return bytes."""
-        target = path or self._path
-        if target:
+        """Serialize index. Explicit `path` writes to file and returns None;
+        no arg returns the serialised bytes regardless of ``self._path``.
+
+        Callers that want a bytes buffer (e.g. SYS SNAPSHOT) must omit
+        ``path`` - we used to fall back to ``self._path`` here, which meant
+        snapshots on persistent stores got ``None`` back and then
+        ``Index.load(None)`` crashed.
+        """
+        if path is not None:
             self._ensure_writable()
-            self._index.save(str(target))
+            self._index.save(str(path))
             return None
         return bytes(self._index.save(None))
 

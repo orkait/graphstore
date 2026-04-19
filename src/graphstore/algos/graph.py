@@ -74,16 +74,22 @@ def bidirectional_bfs(
         if not fwd_frontier and not bwd_frontier:
             return None
 
-        if len(fwd_frontier) <= len(bwd_frontier):
-            if fwd_frontier:
-                fwd_frontier, fwd_visited = _expand_frontier(
-                    matrix, fwd_frontier, fwd_visited, fwd_dist,
-                )
+        # Expand the smaller non-empty frontier. When one side is exhausted,
+        # keep expanding the other until it too exhausts - otherwise we'd
+        # pick the empty side repeatedly (len 0 <= len N) and infinite-loop
+        # on no-route queries.
+        expand_fwd = (
+            bool(fwd_frontier)
+            and (not bwd_frontier or len(fwd_frontier) <= len(bwd_frontier))
+        )
+        if expand_fwd:
+            fwd_frontier, fwd_visited = _expand_frontier(
+                matrix, fwd_frontier, fwd_visited, fwd_dist,
+            )
         else:
-            if bwd_frontier:
-                bwd_frontier, bwd_visited = _expand_frontier(
-                    matrix_t, bwd_frontier, bwd_visited, bwd_dist,
-                )
+            bwd_frontier, bwd_visited = _expand_frontier(
+                matrix_t, bwd_frontier, bwd_visited, bwd_dist,
+            )
 
         meeting = set(fwd_visited) & set(bwd_visited)
         if meeting:

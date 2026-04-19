@@ -139,4 +139,5 @@ dev = [
     "pytest>=9.0.2",
     "pytest-benchmark>=5.2.3",
     "pytest-cov>=7.0.0",
+    "pytest-timeout>=2.4.0",
 ]
