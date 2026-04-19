@@ -19,7 +19,7 @@ Bench: same query side as `graphstore_.py`; only `ingest()` differs.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +31,37 @@ from .graphstore_ import GraphStoreAdapter
 
 
 _SKILL_PATH = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "skills" / "graphstore-dsl" / "SKILL.md"
+
+# Regexes to scrape ASSERT + RETRACT statements from emitted DSL so we can
+# track running belief state across sessions within one conversation. These
+# match the canonical shape the skill tells the LLM to emit; anything odd
+# just misses the scrape and stays uninjected - harmless.
+_ASSERT_RE = re.compile(
+    r'^ASSERT\s+"([^"\\]+(?:\\.[^"\\]*)*)"\s+(.*)$',
+    re.IGNORECASE,
+)
+_RETRACT_RE = re.compile(
+    r'^RETRACT\s+"([^"\\]+(?:\\.[^"\\]*)*)"(?:\s+REASON\s+"([^"\\]*(?:\\.[^"\\]*)*)")?\s*$',
+    re.IGNORECASE,
+)
+_KV_VALUE_RE = re.compile(r'value\s*=\s*"([^"\\]*(?:\\.[^"\\]*)*)"')
+_KV_KIND_RE = re.compile(r'kind\s*=\s*"([^"\\]*(?:\\.[^"\\]*)*)"')
+_KV_CONFIDENCE_RE = re.compile(r'CONFIDENCE\s+([0-9.]+)')
+_KV_SOURCE_RE = re.compile(r'SOURCE\s+"([^"\\]*(?:\\.[^"\\]*)*)"')
+_KV_EVENT_AT_RE = re.compile(r'EVENT_AT\s+"([^"\\]*(?:\\.[^"\\]*)*)"')
+
+
+@dataclass
+class _FactState:
+    """One live belief tracked across sessions."""
+    fact_id: str
+    kind: str = ""
+    value: str = ""
+    confidence: float = 1.0
+    source: str = ""
+    event_at: str = ""
+    retracted: bool = False
+    retract_reason: str = ""
 
 
 @dataclass
@@ -62,13 +93,98 @@ class _IngestStats:
         }
 
 
-def _render_session_prompt(session: Session, skill: str) -> str:
-    """Build the LLM prompt: skill + session + emission instructions."""
+def _render_known_facts_block(facts: dict[str, _FactState], max_facts: int = 120) -> str:
+    """Format live (non-retracted) facts so the LLM can see prior belief state.
+
+    Retracted facts are skipped so the LLM cannot re-assert something that was
+    already superseded. If the set grows beyond max_facts, keep the most
+    recent by insertion order (dict preserves it in Python 3.7+).
+    """
+    alive = [f for f in facts.values() if not f.retracted]
+    if not alive:
+        return ""
+    alive = alive[-max_facts:]
+    lines = ["--- KNOWN FACTS FROM PRIOR SESSIONS ---",
+             "# Do not re-assert any of these. If a new message contradicts one,",
+             "# emit RETRACT before the superseding ASSERT.",
+             ""]
+    for f in alive:
+        bits = [f'[{f.fact_id}]']
+        if f.kind:
+            bits.append(f'kind="{f.kind}"')
+        bits.append(f'value="{f.value}"')
+        bits.append(f'confidence={f.confidence:.2f}')
+        if f.source:
+            bits.append(f'source="{f.source}"')
+        if f.event_at:
+            bits.append(f'event_at="{f.event_at}"')
+        lines.append(" ".join(bits))
+    return "\n".join(lines)
+
+
+def _scrape_belief_updates(
+    executed_lines: list[str],
+    facts: dict[str, _FactState],
+) -> None:
+    """Walk successfully-executed statements and update running fact state.
+
+    Only ASSERT / RETRACT matter. Other writes ignored.
+    """
+    for line in executed_lines:
+        m = _ASSERT_RE.match(line)
+        if m:
+            fact_id = m.group(1)
+            rest = m.group(2)
+            st = facts.get(fact_id) or _FactState(fact_id=fact_id)
+            km = _KV_KIND_RE.search(rest)
+            if km:
+                st.kind = km.group(1)
+            vm = _KV_VALUE_RE.search(rest)
+            if vm:
+                st.value = vm.group(1)
+            cm = _KV_CONFIDENCE_RE.search(rest)
+            if cm:
+                try:
+                    st.confidence = float(cm.group(1))
+                except ValueError:
+                    pass
+            sm = _KV_SOURCE_RE.search(rest)
+            if sm:
+                st.source = sm.group(1)
+            em = _KV_EVENT_AT_RE.search(rest)
+            if em:
+                st.event_at = em.group(1)
+            st.retracted = False
+            st.retract_reason = ""
+            facts[fact_id] = st
+            continue
+        m = _RETRACT_RE.match(line)
+        if m:
+            fact_id = m.group(1)
+            reason = m.group(2) or ""
+            st = facts.get(fact_id) or _FactState(fact_id=fact_id)
+            st.retracted = True
+            st.retract_reason = reason
+            facts[fact_id] = st
+
+
+def _render_session_prompt(
+    session: Session,
+    skill: str,
+    known_facts: dict[str, _FactState] | None = None,
+) -> str:
+    """Build the LLM prompt: skill + known-facts block + session + instructions."""
     date = session.metadata.get("date", "unknown-date")
     turns = []
     for i, msg in enumerate(session.messages):
         turns.append(f"[{i}] [{date}] {msg.role}: {msg.content}")
     turns_block = "\n".join(turns)
+
+    facts_block = ""
+    if known_facts:
+        rendered = _render_known_facts_block(known_facts)
+        if rendered:
+            facts_block = rendered + "\n\n"
 
     instructions = f"""
 --- YOUR TASK ---
@@ -118,7 +234,7 @@ Rules:
 --- EMIT DSL NOW ---
 """.strip()
 
-    return f"{skill}\n\n{instructions}"
+    return f"{skill}\n\n{facts_block}{instructions}"
 
 
 _STATEMENT_BATCH_LIMIT = 400
@@ -149,11 +265,14 @@ class GraphStoreSkillAdapter(GraphStoreAdapter):
         self._skill: str | None = None
         self._max_tokens: int = int(self.config.get("skill_max_tokens", 6000))
         self._retry_on_empty: int = int(self.config.get("skill_retry_on_empty", 1))
+        self._carry_facts: bool = bool(self.config.get("skill_carry_facts", True))
+        self._max_known_facts: int = int(self.config.get("skill_max_known_facts", 120))
         dump = self.config.get("skill_dump_raw_dir")
         self._dump_dir: Path | None = Path(dump) if dump else None
         if self._dump_dir is not None:
             self._dump_dir.mkdir(parents=True, exist_ok=True)
         self._last_raw: str | None = None
+        self._known_facts: dict[str, _FactState] = {}
         self.name = f"{self.name}-skill-llm"
 
     @property
@@ -176,7 +295,8 @@ class GraphStoreSkillAdapter(GraphStoreAdapter):
             return 0.0
 
         skill = self._load_skill()
-        prompt = _render_session_prompt(session, skill)
+        known = self._known_facts if self._carry_facts else None
+        prompt = _render_session_prompt(session, skill, known_facts=known)
 
         with TimedOperation() as t:
             raw = llm_call(prompt, max_tokens=self._max_tokens, _retries=self._retry_on_empty)
@@ -192,6 +312,7 @@ class GraphStoreSkillAdapter(GraphStoreAdapter):
             lines = _iter_dsl_lines(raw)
             self.stats.emitted += len(lines)
 
+            executed_lines: list[str] = []
             with self._gs.deferred_embeddings(batch_size=self._embed_batch_size):
                 for line in lines[:_STATEMENT_BATCH_LIMIT]:
                     try:
@@ -204,11 +325,26 @@ class GraphStoreSkillAdapter(GraphStoreAdapter):
                     try:
                         self._gs.execute(line)
                         self.stats.executed += 1
+                        executed_lines.append(line)
                     except Exception as e:
                         self.stats.exec_failed += 1
                         if len(self.stats.last_exec_errors) < 5:
                             self.stats.last_exec_errors.append((line[:120], str(e)[:120]))
                         continue
+
+            if self._carry_facts:
+                _scrape_belief_updates(executed_lines, self._known_facts)
+                # cap memory: drop oldest retracted, then oldest live, beyond limit
+                if len(self._known_facts) > self._max_known_facts * 2:
+                    # Evict retracted first
+                    for fid in list(self._known_facts.keys()):
+                        if len(self._known_facts) <= self._max_known_facts * 2:
+                            break
+                        if self._known_facts[fid].retracted:
+                            del self._known_facts[fid]
+                    # Then oldest live
+                    while len(self._known_facts) > self._max_known_facts * 2:
+                        self._known_facts.pop(next(iter(self._known_facts)))
 
         self.stats.sessions += 1
         return t.elapsed_ms
@@ -221,6 +357,7 @@ class GraphStoreSkillAdapter(GraphStoreAdapter):
     def reset(self) -> None:
         super().reset()
         self.stats = _IngestStats()
+        self._known_facts = {}
         # Parent adapter registers `message` with `content:string` REQUIRED +
         # `EMBED content`. That fits the content-field path. This adapter
         # teaches the LLM to use `DOCUMENT "..."` instead (G2 / PR #102), so
