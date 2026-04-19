@@ -2,129 +2,166 @@
 
 # graphstore
 
-**Memory infrastructure for AI agents**
+**Agentic memory for AI agents. Not a database.**
 
 [![CI](https://github.com/orkait/graphstore/actions/workflows/ci.yml/badge.svg)](https://github.com/orkait/graphstore/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/graphstore?color=f59e0b&logo=pypi&logoColor=white)](https://pypi.org/project/graphstore/)
-[![PyPI Downloads](https://img.shields.io/pypi/dm/graphstore?color=f59e0b&logo=pypi&logoColor=white)](https://pypi.org/project/graphstore/)
+[![Downloads](https://img.shields.io/pypi/dm/graphstore?color=f59e0b&logo=pypi&logoColor=white)](https://pypi.org/project/graphstore/)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.10-3776AB?logo=python&logoColor=white)](https://python.org)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-ea580c?logo=gnu&logoColor=white)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-graphstore--docs.orkait.com-f59e0b?logo=readthedocs&logoColor=white)](https://graphstore-docs.orkait.com)
-[![SQLite](https://img.shields.io/badge/storage-SQLite-003B57?logo=sqlite&logoColor=white)](https://sqlite.org)
-[![usearch](https://img.shields.io/badge/vector-HNSW%20%2F%20usearch-FF6B35?logoColor=white)](https://github.com/unum-cloud/usearch)
 
 </div>
 
 ---
-
-graphstore gives AI agents persistent, queryable memory. Store nodes and edges with a typed DSL; retrieve by meaning, by association, by text, or any combination - one call. Runs in-process, persists to SQLite. No server, no infrastructure.
-
-Full docs: **[graphstore-docs.orkait.com](https://graphstore-docs.orkait.com)**
-
-## ⚡ 60-second start
-
-```bash
-pip install graphstore
-```
 
 ```python
 from graphstore import GraphStore
 
 g = GraphStore(path="./brain")
 
-# Store: DOCUMENT populates vector + BM25 + blob in one shot
 g.execute('CREATE NODE "mem:paris" kind = "memory" '
           'DOCUMENT "Paris is the capital of France, famous for the Eiffel Tower."')
 g.execute('CREATE NODE "mem:rome" kind = "memory" '
           'DOCUMENT "Rome is the capital of Italy, home to the Colosseum."')
 g.execute('CREATE EDGE "mem:paris" -> "mem:rome" kind = "both_european_capitals"')
 
-# Retrieve - four primitives, all backed by the three storage engines
 g.execute('REMEMBER "European history" LIMIT 5')          # hybrid fusion
 g.execute('RECALL FROM "mem:paris" DEPTH 2 LIMIT 10')     # graph walk
 g.execute('LEXICAL SEARCH "Eiffel Tower" LIMIT 5')        # BM25
-g.execute('SIMILAR TO "capital city" LIMIT 5')            # cosine only
-
-g.close()
 ```
 
-Core install covers REMEMBER / RECALL / LEXICAL / SIMILAR / SYS CRON / VAULT SYNC. Extras for PDF, image, audio, GPU, playground UI are opt-in. See [Installation](#-installation) or [full docs](https://graphstore-docs.orkait.com/installation).
+`pip install graphstore`. Runs in-process, persists to SQLite. No Docker, no server, no service account.
 
----
+## It is not a database
 
-## Why graphstore?
+graphstore is not a vector DB, not a graph DB, not a relational DB. Call it any of those and you will be disappointed. There is no ACID, no query planner, no SQL. What there is: a memory store that behaves the way an agent actually uses memory. Facts get written with a confidence score. They expire. They get contradicted. They decay by recency. They get retrieved by meaning, by association, by keyword, by structure, or by all four fused together in one call.
 
-Most agent memory systems are wrappers around a vector database. That works for simple retrieval but breaks down when you need:
+The insight is simple. Most agent memory is a thin wrapper over a vector store. That wrapper survives demos and falls apart the moment an agent asks "what happened last May" and cosine similarity cheerfully returns something from 2022 that happens to be semantically close. Or the moment three tools write three contradictory facts about the same entity and nobody notices. Or the moment the agent needs to walk from a conversation to the entity it mentioned to every other conversation that entity appeared in. Vector similarity does not answer that. Neither does keyword search. And neither does a graph on its own.
 
-- **Multi-signal retrieval** - vector similarity alone misses keyword matches. BM25 alone misses semantic matches. You need both, plus graph structure, plus recency, fused intelligently.
-- **Graph-native operations** - spreading activation, subgraph extraction, path queries, counterfactual reasoning. These aren't afterthoughts, they're first-class DSL commands.
-- **Temporal awareness** - knowing WHEN something happened matters as much as WHAT happened. `__event_at__` is a reserved column, not a hack.
-- **Belief tracking** - agents deal with uncertain, contradictory facts. ASSERT with confidence, RETRACT when wrong, find CONTRADICTIONS automatically.
-- **Zero infrastructure** - everything is SQLite + numpy + usearch. No Docker, no server, no cloud dependency.
+graphstore pretends none of these primitives exist alone. Vector, BM25, graph, recency, and confidence all live in the same store and get fused at retrieval time. That is the whole thesis. Everything else in this repo is the plumbing.
 
----
+## 60-second start
 
-## 🏗️ How it works
+```bash
+pip install graphstore
+```
 
-Three storage engines, one typed DSL, a tiered ingest pipeline, and a hybrid retrieval engine that fuses all of them.
+Core ships with everything you need to start, meaning REMEMBER, RECALL, LEXICAL, SIMILAR, SYS CRON, and VAULT SYNC. The default embedder is [model2vec](https://github.com/MinishLab/model2vec) at 256 dimensions, which is fast enough that you will not notice it. Swap it for Jina v5, bge-*, EmbeddingGemma, or anything else via `graphstore install-embedder`. PDFs, images, audio, GPU, web UI are opt-in extras. See [Installation](#installation).
+
+## How it stores things
+
+Three engines, one DSL, one lock file.
 
 <p align="center">
   <img src="website/static/img/architecture.svg" alt="graphstore architecture: DSL + three storage engines + ingest pipeline + retrieval" width="780">
 </p>
 
-**What flows where:**
+The **graph engine** is columnar numpy arrays plus scipy CSR edge matrices. Every field you set becomes a typed column. Every edge you create lands in a sparse matrix that supports row-level lookups in O(degree). Reserved columns (`__event_at__`, `__confidence__`, `__retracted__`, `__source__`) are first-class, not metadata bags.
 
-- The **DSL** (Lark LALR(1), ~70 verbs) is the only way in. Every `CREATE`, `UPDATE`, `DELETE`, `ASSERT`, `RETRACT`, `INGEST`, `SYS *` goes through it.
-- **Direct writes** land straight in the three engines:
-  - **Graph** - typed numpy columns + scipy CSR edges. Reserved columns like `__event_at__`, `__confidence__`, `__retracted__` live here.
-  - **Vector** - usearch HNSW with cosine. Auto-populated via schema `EMBED content` or the `DOCUMENT "..."` clause.
-  - **Document** - SQLite + FTS5 virtual table. BM25 + blob storage + single-owner path lock.
-- **`INGEST "file.ext"`** is itself a DSL verb. Tiered and modality-aware: `txt/md` (direct), `html/docx/xlsx` (markitdown), `pdf` (pymupdf4llm / docling), `png/jpg` (vision sidecar), `wav/mp3/flac/m4a` (whisper). Output flows into the same three engines.
-- **Retrieval** (REMEMBER / RECALL / SIMILAR TO / LEXICAL SEARCH / TRAVERSE) reads from all three engines and fuses the signals.
+The **vector engine** is usearch HNSW with cosine distance. `DOCUMENT "text"` or a schema with `EMBED content` triggers auto-embedding. You never call `.embed()` yourself.
 
-Deep dive: [Architecture](https://graphstore-docs.orkait.com/concepts/architecture) | [Edge matrix internals](https://graphstore-docs.orkait.com/concepts/edge-matrix).
+The **document engine** is SQLite plus FTS5. BM25 scoring, blob storage, and a single-owner advisory lock live here. If a second process tries to open the same path, it gets `StoreInUse`. WAL replay + compact + checkpoint are not safe across processes, and pretending otherwise is how data gets corrupted.
 
-### REMEMBER, the retrieval engine
+The **DSL** (Lark LALR(1), around 70 verbs) is the only way in. Every write, every read, every `INGEST`, every `SYS *` goes through the same grammar. There is no alternate escape hatch that bypasses type checks or the confidence model.
 
-`REMEMBER` is the core command. Five-stage pipeline, four weighted signals, optional rerank + nucleus walk.
+Full walkthrough of the architecture: [Architecture](https://graphstore-docs.orkait.com/concepts/architecture). Edge matrix internals (LSM-style dynamic buffer on top of frozen CSR, bidirectional spread matrix, cache invalidation rules): [Edge matrix](https://graphstore-docs.orkait.com/concepts/edge-matrix).
+
+## How it retrieves things: REMEMBER
+
+`REMEMBER` is the one verb that matters. Everything else (`SIMILAR`, `LEXICAL`, `RECALL`) is a leg of the same pipeline exposed on its own when you want to skip the fusion.
 
 <p align="center">
   <img src="website/static/img/remember.svg" alt="REMEMBER 5-stage retrieval pipeline: gather -> fuse -> temporal -> rerank -> nucleus" width="620">
 </p>
 
-**Signals fused at stage 2** (defaults; weights configurable):
+Five stages. At stage two, these signals combine with configurable weights:
 
-| Signal | Weight | Source |
+| Signal | Weight | Where it comes from |
 |---|---|---|
-| `vec_signal` | 0.52 | max sentence cosine over usearch ANN |
+| `vec_signal` | 0.52 | max sentence cosine over the usearch ANN |
 | `bm25_signal` | 0.25 | SQLite FTS5 over `doc_fts` |
 | `recency` | 0.15 | `exp(-age / half_life)` from `__event_at__` or `__updated_at__` |
-| `graph_signal` | 0.08 | entity-degree sum over mentioned entities (opt-in) |
-| + co-occurrence | bonus | `min(vec, bm25) * 0.10` when a candidate is found by both |
-| + recall-frequency | nudge | `log1p(recall_count) * 0.05` |
+| `graph_signal` | 0.08 | sum of entity degrees for entities mentioned in the candidate |
+| co-occurrence bonus | +0.10 | when a candidate is found by both vec and bm25 |
+| recall-frequency nudge | +0.05 | `log1p(recall_count)`, tiny boost for frequently-accessed items |
 
-Every weight is configurable via `graphstore.json`, `GRAPHSTORE_DSL_*` env vars, or constructor kwargs. Full pipeline walkthrough: [REMEMBER docs](https://graphstore-docs.orkait.com/concepts/remember-pipeline).
+Every weight is configurable through `graphstore.json`, `GRAPHSTORE_DSL_*` env vars, or constructor kwargs. There is no hidden logic tuning itself behind your back. If LongMemEval is giving you 97% and LoCoMo is giving you 0.36 F1, it is because of these numbers, and you can change them.
 
----
+Every `REMEMBER` result includes the per-signal breakdown so you can see why a candidate ranked where it did:
 
-## 🐍 Typed query builder
+```python
+r = g.execute('REMEMBER "Caroline counseling" LIMIT 1 WHERE kind = "message"')
+n = r.data[0]
+print(n["_remember_score"], n["_vector_sim"], n["_bm25_score"],
+      n["_recency_score"], n["_graph_score"], n["_recall_score"])
+```
 
-Every DSL verb is a typed Python function. Escape-safe, autocomplete-friendly, composable.
+Deep dive: [REMEMBER pipeline](https://graphstore-docs.orkait.com/concepts/remember-pipeline).
+
+## A real example
+
+Say you are building a support agent that handles one user across many sessions. The user told you two months ago they had a pet cat named Luna. Yesterday they complained their dog is sick. What does the agent actually need from memory?
+
+First, ingest sessions as they happen:
+
+```python
+for session in transcripts:
+    g.execute(f'CREATE NODE "sess:{session.id}" kind = "session" '
+              f'EVENT_AT "{session.date}"')
+    for i, msg in enumerate(session.messages):
+        g.execute(f'CREATE NODE "msg:{session.id}:{i}" kind = "message" '
+                  f'speaker = "{msg.speaker}" '
+                  f'EVENT_AT "{session.date}" '
+                  f'DOCUMENT "{msg.content}"')
+        g.execute(f'CREATE EDGE "sess:{session.id}" -> "msg:{session.id}:{i}" '
+                  f'kind = "has_message"')
+```
+
+Then ask questions the way an agent would:
+
+```python
+# "What pets does this user have?" - vector alone gets "cat", "dog", "Luna" mixed up.
+# REMEMBER fuses vector + BM25 + recency and ranks yesterday's dog message above
+# the older cat message because recency matters for state.
+g.execute('REMEMBER "user pets" LIMIT 5')
+
+# "What did they say in May?" - pure vector will pick semantically-close May-like
+# content from any time. REMEMBER with AT adds a hard temporal filter.
+g.execute('REMEMBER "recent concerns" AT "2024-05" LIMIT 10')
+
+# "Tell me everything about Luna." - not a search. This is a graph walk from an
+# entity you already know exists, through every message that mentions it.
+g.execute('RECALL FROM "ent:luna" DEPTH 2 LIMIT 20')
+```
+
+And when the agent learns something contradicts an earlier belief:
+
+```python
+g.execute('ASSERT "fact:pet" value = "cat" CONFIDENCE 0.9 SOURCE "session-1"')
+g.execute('ASSERT "fact:pet" value = "dog" CONFIDENCE 0.95 SOURCE "session-42"')
+g.execute('SYS CONTRADICTIONS WHERE kind = "fact" FIELD value')
+# returns the pair; your agent decides whether both are true (multiple pets) or
+# one supersedes the other.
+```
+
+That is the shape of it. No glue code to write, no vector search to bolt onto a SQL database, no FTS5 index to manage, no recency filter to compute in Python.
+
+## Typed query builder
+
+If you prefer typed Python over DSL strings, every verb has a function. Same injection protection, same grammar, IDE autocomplete.
 
 ```python
 from graphstore import q, F, Time
 
-# The same three queries as above, via the builder
 q.create_node("mem:paris", kind="memory",
               document="Paris is the capital of France.").execute(g)
-q.remember("European history", limit=5).execute(g)
-q.nodes(where=F.eq("kind", "memory") & F.gt("importance", 0.5), limit=10).execute(g)
 
-# Predicate algebra (Django-Q style, operators &, |, ~)
+# Predicate algebra with & | ~
 recent = F.gte("__event_at__", Time.now_minus(7, "d"))
 q.nodes(where=F.eq("kind", "memory") & recent & ~F.eq("__retracted__", True))
 
-# Batch compose with variable assignment
+# Batches compose with variable assignment
 q.batch(
     q.var("x", q.create_node("n1", kind="memory", document="a")),
     q.var("y", q.create_node("n2", kind="memory", document="b")),
@@ -132,125 +169,13 @@ q.batch(
 ).execute(g)
 ```
 
-**100% DSL coverage** (87 typed verbs + 4 typed sub-DSLs) · **100% line coverage** on the builder (1880 / 1880) · **injection-proof** (every user string through a single `dsl_literal` helper) · **immutable** (modifiers return new Query, never mutate) · **parser-roundtrip-verified**.
+87 typed verbs, full DSL coverage, 100% line coverage on the builder (1880 of 1880 statements), every user string routed through a single escape helper, every emission round-tripped through the real DSL parser in tests. If the builder emits it, the parser accepts it. Full reference: [Query builder](https://graphstore-docs.orkait.com/query-builder).
 
-Full reference: [Query builder docs](https://graphstore-docs.orkait.com/query-builder).
+## Benchmarks
 
----
+### LongMemEval-S, retrieval accuracy
 
-## 🧠 What you can do
-
-### Store and recall
-
-```sql
--- Store a retrievable memory: DOCUMENT populates vector + BM25 + blob in one shot
-CREATE NODE "mem:123" kind = "memory" topic = "finance"
-  DOCUMENT "Q3 revenue beat expectations driven by enterprise renewals."
-
--- Hybrid retrieval (5-signal fusion)
-REMEMBER "quarterly revenue trends" TOKENS 4000
-
--- Graph traversal (spreading activation)
-RECALL FROM "concept:finance" DEPTH 3 LIMIT 10
-
--- Keyword search (BM25 over FTS5)
-LEXICAL SEARCH "Q3 revenue" LIMIT 10
-
--- Vector similarity (pure cosine, no fusion)
-SIMILAR TO "budget forecasting" LIMIT 10
-
--- Temporal retrieval (recency-weighted + hard filter)
-REMEMBER "what happened in May" AT "2024-05" LIMIT 10
-```
-
-### Beliefs, time, consolidation
-
-```sql
-ASSERT "fact:earth-radius" value = 6371 kind = "fact" CONFIDENCE 0.99 SOURCE "physics-tool"
-RETRACT "fact:old-preference" REASON "user corrected this"
-SYS CONTRADICTIONS WHERE kind = "belief" FIELD value GROUP BY topic
-
--- When-it-happened, not just when-ingested
-CREATE NODE "event:trip" kind = "event" content = "visited Paris" EVENT_AT "2024-03-15"
-REMEMBER "trip plans" AT "2024-03" LIMIT 10
-
--- Cluster episodic memories, no LLM needed
-SYS CONSOLIDATE THRESHOLD 0.7
-```
-
-### Ingest documents
-
-```sql
-INGEST "report.pdf" AS "doc:q3" KIND "report"
-INGEST "chart.png" USING VISION "smolvlm2-2.2b"
-INGEST "interview.mp3"                                -- needs [audio]
-SYS CONNECT    -- auto-wire similar chunks across documents
-```
-
-<details>
-<summary><strong>More: TTL, snapshots, cron, evolution, vault, contexts, graph walks</strong></summary>
-
-```sql
--- TTL + hard delete
-CREATE NODE "scratch:temp" kind = "working" data = "..." EXPIRES IN 30m
-SYS EXPIRE WHERE kind = "working"
-FORGET NODE "mem:old"
-
--- Snapshot reasoning branches
-SYS SNAPSHOT "before-hypothesis"
-SYS ROLLBACK TO "before-hypothesis"
-
--- Scheduled maintenance (needs queued=True)
-SYS CRON ADD "expire-ttl" SCHEDULE "@hourly" QUERY "SYS EXPIRE"
-
--- Self-tuning rules
-SYS EVOLVE RULE "reindex-on-drift"
-  WHEN recall_hit_rate <= 0.4
-  THEN RUN SYS REEMBED
-  COOLDOWN 86400
-
--- Markdown vault (python: GraphStore(path="./brain", vault="./notes"))
-VAULT NEW "Project Requirements" KIND "context"
-VAULT SEARCH "deployment requirements" LIMIT 5
-
--- Context isolation
-BIND CONTEXT "reasoning-session-42"
-CREATE NODE "hyp:1" kind = "hypothesis" content = "maybe X"
-DISCARD CONTEXT "reasoning-session-42"
-
--- Graph walks
-TRAVERSE FROM "id" DEPTH 3
-PATH FROM "a" TO "b" MAX_DEPTH 5
-ANCESTORS OF "id" DEPTH 3
-COMMON NEIGHBORS OF "a" AND "b"
-AGGREGATE NODES WHERE kind = "memory" GROUP BY topic SELECT COUNT(), AVG(importance)
-```
-
-</details>
-
-Full DSL reference (every verb, every clause): [DSL reference](https://graphstore-docs.orkait.com/dsl/reference).
-
----
-
-## ⚡ Performance
-
-### Micro-latency (single operation)
-
-Median over 30 iters, model2vec 256d, 16-core CPU @ 2-thread BLAS cap (graphstore's default). Reproduce: `python benchmarks/micro_latency.py`. Last measured 2026-04-19.
-
-| Operation | In-memory | On-disk | Notes |
-|---|---|---|---|
-| Point lookup `NODE "id"` | **5 us** | 11 us | hash to slot |
-| Filtered scan `NODES WHERE ... LIMIT 10` | **14 us** | 51 us | typed column filter |
-| Semantic search `SIMILAR TO "..." LIMIT 10` | **87 us** | 175 us | usearch HNSW ANN |
-| Graph traversal `RECALL DEPTH 3` | ~1 ms | ~1 ms | spreading activation |
-| Hybrid retrieval `REMEMBER LIMIT 10` | ~6 ms | ~50 ms | 4-signal fusion |
-| `ASSERT` | 11 us | 4 ms | disk pays WAL sync per call |
-| Memory per node | ~1.6 KB | ~1.6 KB | ~80 B typed columns + ~1 KB vector |
-
-### LongMemEval-S (retrieval accuracy)
-
-500 records, Jina v5 Small 1024d, Kaggle T4 GPU, 2026-04-19. Public kernel (full logs, in-browser reproducible): [kaggle.com/code/superkaiii/graphstore-jina-v5-small](https://www.kaggle.com/code/superkaiii/graphstore-jina-v5-small).
+500 records, Jina v5 Small 1024d, Kaggle T4 GPU, run on 2026-04-19. The kernel is public, the logs are public, the kernel runs in-browser if you want to reproduce: [kaggle.com/code/superkaiii/graphstore-jina-v5-small](https://www.kaggle.com/code/superkaiii/graphstore-jina-v5-small).
 
 | Category | n | Retrieval accuracy |
 |---|---|---|
@@ -262,11 +187,11 @@ Median over 30 iters, model2vec 256d, 16-core CPU @ 2-thread BLAS cap (graphstor
 | single-session-preference | 30 | 83.3% |
 | **Overall** | **500** | **97.0%** |
 
-Query p50 46 ms / p95 76 ms, ingest p50 1035 ms / p95 1070 ms. Memory delta +283 MB across 23,867 ingest ops. 5 h 20 m wall, no LLM judge, zero API calls.
+Query p50 46 ms, p95 76 ms. Ingest p50 1035 ms, p95 1070 ms. Memory delta +283 MB across 23,867 ingest ops. 5 h 20 m wall time, no LLM judge, zero API calls. 97% on this benchmark is where Mem0 and MemGPT sit with large readers in the loop. graphstore does it retrieval-only, on a T4.
 
-### LoCoMo (end-to-end F1)
+### LoCoMo, end-to-end F1
 
-50Q random sample, MiniMax M2.7 reader, Jina v5 Small 1024d:
+50Q random sample, MiniMax M2.7 reader, same embedder.
 
 | Category | F1 |
 |---|---|
@@ -277,54 +202,72 @@ Query p50 46 ms / p95 76 ms, ingest p50 1035 ms / p95 1070 ms. Memory delta +283
 | temporal | 0.189 |
 | **Overall** | **0.357** |
 
-For context: GPT-3.5-turbo with full conversation context scores 0.378 on LoCoMo. graphstore hits comparable quality using only retrieved passages (no full context), with a smaller reader LLM.
+For context, GPT-3.5-turbo with the entire conversation in context scores 0.378 on LoCoMo. graphstore gets within a point of that using retrieved passages only, with a smaller reader. This is not a flex. It is the number. Single-hop and temporal are where retrieval alone hurts most, and improving them is an active area.
 
-Retrieval recall at K (no LLM): top-5 60%, top-10 80%, top-20 84%, top-50 96%.
+<details>
+<summary><strong>Micro-latency (one op at a time)</strong></summary>
 
-Full methodology + BEAM + comparison band (Mem0, MemGPT, Zep): [benchmark docs](https://graphstore-docs.orkait.com/benchmarks/overview).
+Median over 30 iters, model2vec 256d, 16-core CPU at 2-thread BLAS cap (graphstore's default). Reproduce: `python benchmarks/micro_latency.py`.
 
----
+| Operation | In-memory | On-disk | Notes |
+|---|---|---|---|
+| Point lookup `NODE "id"` | 5 us | 11 us | hash to slot |
+| Filtered scan | 14 us | 51 us | typed column filter |
+| Semantic search | 87 us | 175 us | usearch HNSW ANN |
+| Graph traversal `RECALL DEPTH 3` | ~1 ms | ~1 ms | spreading activation |
+| Hybrid retrieval `REMEMBER LIMIT 10` | ~6 ms | ~50 ms | 4-signal fusion |
+| `ASSERT` | 11 us | 4 ms | disk pays WAL sync |
+| Memory per node | ~1.6 KB | ~1.6 KB | columns + vector + overhead |
 
-## 📦 Installation
+Disk numbers at 100k nodes, in-memory at 10k. WAL sync dominates at small N; ANN tree depth dominates at large N. REMEMBER scales with the number of candidates the ANN and FTS legs return, which for realistic workloads is far under 100.
+
+</details>
+
+Full methodology, BEAM support, and the comparison band against Mem0 / MemGPT / Zep: [Benchmarks](https://graphstore-docs.orkait.com/benchmarks/overview).
+
+## Installation
 
 ```bash
-pip install graphstore                        # core (always enough to start)
-pip install 'graphstore[ingest]'              # PDF / DOCX / HTML parsing
-pip install 'graphstore[vision]'              # local VLM sidecar for scanned PDFs + images
+pip install graphstore                        # core
+pip install 'graphstore[ingest]'              # PDF / DOCX / HTML
+pip install 'graphstore[vision]'              # local VLM sidecar for images + scanned PDFs
 pip install 'graphstore[audio]'               # faster-whisper speech-to-text
 pip install 'graphstore[playground]'          # FastAPI web UI
-pip install 'graphstore[gpu]'                 # onnxruntime-gpu (Linux x86_64, CUDA 12)
-pip install 'graphstore[ingest,vision,playground]'   # everything heavy
+pip install 'graphstore[gpu]'                 # onnxruntime-gpu, Linux x86_64, CUDA 12
 ```
 
-Core covers the agentic DB contract out of the box: REMEMBER / RECALL (model2vec embedder), SYS CRON (croniter), VAULT SYNC (pyyaml), plus the numpy / scipy / usearch / lark / msgspec / psutil / threadpoolctl foundation. No torch, no PDF parser, no HTTP server.
+Core is 8 deps: numpy, scipy, usearch, lark, msgspec, psutil, threadpoolctl, model2vec. No torch, no PDF parser, no HTTP server until you ask for them. Full extras matrix and install quirks (docling pulling torch, VLM weights on first use, apparmor on Ubuntu 24.04): [Installation docs](https://graphstore-docs.orkait.com/installation).
 
-Full extras table + config layering + single-owner lock semantics: [Installation](https://graphstore-docs.orkait.com/installation) and [Configuration](https://graphstore-docs.orkait.com/configuration).
+> Without `DOCUMENT "text"`, a node is structured data only. `REMEMBER` and `LEXICAL` will not see it. Add a `DOCUMENT` clause whenever the node's content is what you want to retrieve on.
 
-> **Heads up.** `CREATE NODE "id" kind = "X" topic = "..."` without a `DOCUMENT` clause stores typed columns only. REMEMBER and LEXICAL return zero for that node. Use `DOCUMENT "text"` whenever the node's *content* is what you want to retrieve on.
+## What graphstore is not
 
-Everything persists to `./brain/` as SQLite. Reopen with the same path and all memories are back.
+It is not a relational DB. There is no SQL, no joins, no foreign keys, no transactions in the ACID sense. Use Postgres or SQLite directly if that is what you need.
 
----
+It is not a graph DB. There is no Cypher, no openCypher, no gremlin. Graph ops are there because an agent's memory is a graph, not because graphstore wants to compete with Neo4j.
 
-## 🛠️ Development
+It is not a vector DB. Vector search is a leg of retrieval, not the product. If you only need ANN, use usearch or faiss directly and skip the rest.
+
+It is not a service. It is a library. It runs in your process. One Python process holds the lock; a second `GraphStore(path=...)` against the same path raises `StoreInUse` rather than pretending it is safe. If you want multi-tenant, put it behind your own service layer.
+
+It is not finished. The benchmarks are decent, not state of the art in every category. Single-hop and temporal F1 on LoCoMo have room. Fusion weights are tuned by hand. Reranking is opt-in and off by default. Contributions, especially on retrieval quality, are welcome.
+
+## Development
 
 ```bash
 git clone https://github.com/orkait/graphstore.git
 cd graphstore
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,ingest,vision,embedders-extra,playground]"
-pytest     # ~17s on 8-core CPU with -n 4
+pytest    # ~17 s on an 8-core CPU with -n 4
 ```
 
-Docs site lives under `website/` (Docusaurus, Cloudflare Pages). Run locally:
+Docs site lives under `website/` (Docusaurus, deployed to Cloudflare Pages). Run locally:
 
 ```bash
 cd website && bun install && bun run start
 ```
 
----
+## License
 
-## 📄 License
-
-AGPL-3.0, see [LICENSE](LICENSE).
+AGPL-3.0. See [LICENSE](LICENSE).
