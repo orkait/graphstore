@@ -16,10 +16,12 @@ from pathlib import Path
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
-_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "autoresearch" / "config.json"
+_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "tools" / "autoresearch" / "config.json"
 
-# Model preference for LoCoMo QA
-QA_MODEL = "minimax/minimax-m2.7:nitro"
+# Model preference for LoCoMo QA.
+# Dual-name: Ollama cloud tag comes first so local_ollama wins when present;
+# OpenRouter nitro is the paid fallback (same model on both).
+QA_MODEL = "minimax-m2.7:cloud"
 QA_MODEL_OR = "minimax/minimax-m2.7:nitro"
 
 
