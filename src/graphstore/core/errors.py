@@ -119,3 +119,20 @@ class OptimizationInProgress(GraphStoreError):
 
     def __init__(self) -> None:
         super().__init__("Self-balance in progress. Retry after optimization completes.")
+
+
+class StoreInUse(GraphStoreError):
+    """Raised when another process holds the path lock for this database.
+
+    Graphstore stores are single-owner - SQLite WAL mode allows concurrent
+    readers but the compact/snapshot/WAL-replay paths aren't cross-process
+    safe. Close the other owner, or point this instance at a different path.
+    """
+
+    def __init__(self, lock_path: str) -> None:
+        super().__init__(
+            f"Another process holds {lock_path!r}. "
+            "Graphstore is single-owner per path. "
+            "Close the other instance or open a different path."
+        )
+        self.lock_path = lock_path

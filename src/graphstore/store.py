@@ -157,6 +157,14 @@ class GraphStore:
         self._allow_system = allow_system_queries
         self._ingest_root = cfg.server.ingest_root
 
+        # Cross-process single-owner lock. Prevents two processes racing on
+        # WAL replay / compact / checkpoint against the same path. In-memory
+        # stores skip the lock (no shared state on disk).
+        self._path_lock = None
+        if self._path is not None:
+            from graphstore.core.path_lock import acquire_path_lock
+            self._path_lock = acquire_path_lock(self._path)
+
         # Initialize embedder (local; placed into RuntimeState below)
         _embedder = self._build_embedder(cfg, embedder)
 
@@ -605,7 +613,7 @@ class GraphStore:
         return get_metadata(conn, "playground_script")
 
     def close(self) -> None:
-        """Checkpoint + close sqlite connection."""
+        """Checkpoint + close sqlite connection. Idempotent."""
         if self._cron is not None:
             self._cron.stop()
             self._cron = None
@@ -620,6 +628,11 @@ class GraphStore:
         if self._runtime.document_store is not None:
             self._runtime.document_store.close()
             self._runtime.document_store = None
+        # Release the cross-process path lock last so any concurrent opener
+        # sees a fully-released store.
+        if getattr(self, "_path_lock", None) is not None:
+            self._path_lock.release()
+            self._path_lock = None
 
     def reset_memory(self) -> Result:
         """Reset the in-memory graph (nodes, edges) to empty. SQLite is left alone."""

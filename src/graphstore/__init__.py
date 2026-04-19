@@ -19,7 +19,7 @@ from .core.errors import (
     CeilingExceeded, VersionMismatch, SchemaError,
     CostThresholdExceeded, BatchRollback, AggregationError,
     VectorError, EmbedderRequired, VectorNotFound,
-    OptimizationInProgress,
+    OptimizationInProgress, StoreInUse,
 )
 from .core.memory import DEFAULT_CEILING_BYTES
 from .config import (
@@ -36,6 +36,7 @@ __all__ = [
     "CeilingExceeded", "VersionMismatch", "SchemaError",
     "CostThresholdExceeded", "BatchRollback", "AggregationError",
     "VectorError", "EmbedderRequired", "VectorNotFound",
+    "StoreInUse",
     "DEFAULT_CEILING_BYTES",
     "GraphStoreConfig", "load_config", "save_config",
     "CoreConfig", "VectorConfig", "DocumentConfig", "DslConfig",

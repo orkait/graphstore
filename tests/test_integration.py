@@ -109,9 +109,14 @@ def test_wal_recovery(tmp_path):
     g.execute('CREATE NODE "b" kind = "x" name = "beta"')
 
     # Simulate a crash: close the sqlite connection directly and
-    # prevent close() from doing a full checkpoint.
+    # prevent close() from doing a full checkpoint. Release the
+    # single-owner path lock the same way a crashed process would
+    # (OS cleanup; we do it explicitly here).
     g._conn.close()
     g._runtime.conn = None
+    if g._path_lock is not None:
+        g._path_lock.release()
+        g._path_lock = None
 
     # Reopen - the constructor should replay the WAL
     with GraphStore(path=db_path) as g2:
