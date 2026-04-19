@@ -4,7 +4,7 @@ description: How to inject data into graphstore correctly. Covers the three stor
 compatibility: Requires a local graphstore install. Works against any graphstore >= 0.3.0.
 metadata:
   author: orkait
-  version: "2.0"
+  version: "2.1"
 ---
 
 # Graphstore ingestion
@@ -37,14 +37,14 @@ A single node can live in **all three at once**: row in numpy columns + vector i
 **Plus feature layers on top:**
 
 - **DSL** (`graphstore/dsl/`) - Lark LALR(1) grammar compiled to 70+ AST dataclasses, handler-registry dispatch. The unified interface to all three engines.
-- **Embedding** (`graphstore/embedding/`) - pluggable embedder protocol (model2vec default, FastEmbed, OnnxHF for Jina v5/Harrier/EmbeddingGemma, GGUF via llama-cpp-python). Registry at `graphstore/registry/models.py`.
+- **Embedding** (`graphstore/embedding/`) - pluggable embedder protocol. Default is **model2vec** (core dep since the extras consolidation - no extra install needed). Alternatives under `[embedders-extra]`: FastEmbed and GGUF via llama-cpp-python. OnnxHF for Jina v5 / Harrier / EmbeddingGemma ships separately via `graphstore install-embedder`. Registry at `graphstore/registry/models.py`.
 - **Reranking** (`graphstore/embedding/reranker.py`) - pluggable cross-encoder reranker (FlashRank, ONNX, GGUF backends). Used by `remember_rerank` and `full_rerank` retrieval strategies.
 - **Beliefs** - `ASSERT` / `RETRACT` / `PROPAGATE` write reserved columns (`__confidence__`, `__retracted__`, `__source__`) on the Graph engine.
 - **Evolution** (`graphstore/core/evolve/`) - `EvolutionEngine`, opt-in. WHEN/THEN rules that self-tune graphstore's own runtime parameters based on live signals.
 - **Ingest pipeline** (`graphstore/ingest/`) - file-to-graph routing (MarkItDown → PyMuPDF4LLM → Docling), chunker, vision. Used by the `INGEST` DSL verb.
 - **Algos** (`graphstore/algos/`) - 17 pure numpy/scipy primitives under a strict purity gate. Tunable in isolation.
 
-**Optional subsystems** (off by default): **Vault** (markdown notebook, `graphstore/vault/`) and **Voice** (Moonshine STT + Piper TTS).
+**Optional subsystems** (via extras): **Vault** (markdown notebook, `graphstore/vault/`, core since pyyaml moved in), **Vision** (`[vision]` extra: local llama.cpp sidecar + SmolVLM2-2.2B by default for image captioning), **Audio** (`[audio]` extra: in-process faster-whisper STT). No voice / TTS subsystem - graphstore is a DB, not an engine (see PR #104 rationale).
 
 ## The mental model
 
@@ -195,19 +195,25 @@ Now RECALL surfaces every message that mentions Max across every session. No vec
 
 ### 8. For BM25 to work, text must be in `doc_fts`
 
-`LEXICAL SEARCH` and the BM25 leg of `REMEMBER` both query `doc_fts` (the FTS5 virtual table). This table is only populated by:
+`LEXICAL SEARCH` and the BM25 leg of `REMEMBER` both query `doc_fts` (the FTS5 virtual table). As of PR #102, this table is populated by **any** of:
 
 - `INGEST "file.pdf" ...` (via the ingest engine)
 - `DocumentStore.put_summary(slot, text, ...)` (direct Python API)
-- `CREATE NODE ... DOCUMENT "text"` does NOT add to `doc_fts` - it only writes to the `documents` blob table
+- **`CREATE NODE ... DOCUMENT "text"`** - auto-populates BM25 + stores the blob in one shot (this is the simplest path for bulk conversational data)
+- `CREATE NODE ... kind = "K"` with a schema that has `EMBED content` - still only embeds; FTS is populated only when the text is passed via the `DOCUMENT` clause.
 
-If you use plain `CREATE NODE` (no INGEST, no put_summary), **you have no BM25 signal**. REMEMBER degrades to vector + recency + confidence + recall_count.
+If you call plain `CREATE NODE kind = "X" content = "..."` without `DOCUMENT`, you still get a vector (via `EMBED content` schema directive) but no BM25 row. REMEMBER degrades to vector + recency + confidence + recall_count.
 
-Fixes:
+**Fastest BM25-ready path for bulk conversational data:**
 
-- Use the INGEST DSL command if you have files
-- Call `put_summary(slot, content)` directly from Python after CREATE for bulk non-file content
-- Accept that BM25 is off and tune the REMEMBER weights accordingly
+```python
+gs.execute(
+    f'CREATE NODE "{msg_id}" kind = "message" '
+    f'session = "{s}" role = "{role}" '
+    f'DOCUMENT "{escape(content)}"'
+)
+# One line: graph row + vector + doc_fts entry all populated.
+```
 
 ## Query primitives: which one to reach for
 
@@ -279,9 +285,9 @@ Deterministic graph walks without activation scoring. Use for structured queries
 
 Set `dsl.graph_signal_enabled=true` (default) to include an entity-degree signal in REMEMBER fusion: chunks mentioning entities that many other chunks also mention get boosted. Not a multi-hop expansion - use `RECALL` for that. The heavy-lift HybridRAG spreading-activation blend was removed in the pipeline refactor; the 5-stage pipeline now does rerank instead. Building an entity graph still directly improves REMEMBER results via this channel.
 
-### G2. The BM25 signal is off unless you populate `doc_fts`
+### G2. BM25 requires `doc_fts` to be populated (PR #102 updated path)
 
-`CREATE NODE ... DOCUMENT "text"` writes to the `documents` blob table, not to `doc_fts`. REMEMBER's BM25 leg returns empty. You have to go through INGEST or call `put_summary` directly.
+As of PR #102, `CREATE NODE ... DOCUMENT "text"` DOES populate `doc_fts` in addition to the blob table. So BM25 works out of the box for nodes you write with a `DOCUMENT` clause. Plain `CREATE NODE kind = "X" content = "..."` (no DOCUMENT) still only writes columns + vector - BM25 is empty for those. If you want BM25 and do not want the full INGEST pipeline, use `DOCUMENT "..."` on your CREATE NODE statements or call `DocumentStore.put_summary` directly.
 
 ### G3. Real timestamps can hurt as much as they help
 
@@ -324,6 +330,28 @@ The context manager is per-call. If you have 500 records and call `ingest(record
 
 `store.columns.set_reserved(slot, field, value)` writes straight to numpy. The `_dirty_columns` flag does not get set. This means the next checkpoint might not persist your write. For benchmark runs (where we close without persisting) this is fine. For production, either use `UPDATE NODE` (which does set the flag) or manually set `store._dirty_columns = True` after your direct writes.
 
+### G11. NER emits duplicate entity names per message (PR #128)
+
+The batched NER call returns a list of entity strings per message. Multi-span matches can produce the SAME entity name multiple times for one message. A naive `CREATE EDGE msg -> ent kind = "mentions"` loop over that list raises `BatchRollback: Duplicate edge`, killing the entire BEGIN...COMMIT block.
+
+Fix: dedupe per message before emitting the edge. See Pattern A above. This is load-bearing for any benchmark that runs for more than ~100 records - the failure mode is "benchmark progresses fine for an hour, then crashes at record 92".
+
+### G12. `USING VISION` auto-starts the sidecar only if `[vision]` is installed
+
+`INGEST "scan.pdf" USING VISION "<model>"` calls `VisionHandler(base_url=None)` which resolves: env `GRAPHSTORE_VISION_URL` → PID-file live check → probe default port 8418 → auto-spawn sidecar (iff `[vision]` extra is importable). If none of those yield a URL, you get a `RuntimeError` pointing at `pip install 'graphstore[vision]'`. Do not catch-and-swallow that error - it means vision is genuinely unavailable and the caption will be empty.
+
+For production, pre-start via CLI so the first ingest doesn't pay the weight-download cost:
+
+```bash
+graphstore vision serve --pull-only    # download weights only (~1.5 GB for SmolVLM2-2.2B default)
+graphstore vision serve                # spawn sidecar, block until ready
+graphstore vision status               # verify
+```
+
+### G13. Audio ingest is in-process, not sidecar
+
+Unlike vision which uses a sidecar (VLM inference is long, benefits from server-side batching), whisper transcription is short enough that IPC overhead would dominate. `[audio]` extra installs `faster-whisper` and the `WhisperIngestor` caches one `WhisperModel` per `(size, device, compute_type)` tuple. First call downloads the model from HF Hub (~40 MB for `tiny`, ~150 MB for `base`). Default is `base`. Segments are fused into chunks with `[mm:ss-mm:ss]` headings so retrieval can cite timestamps.
+
 ### G10. Single-writer is a hard rule
 
 There is no concurrency in the write path. `queued=True` installs a submission queue with a single worker (the flag name is honest - it's a queue, not parallelism). If you try to call `execute` from two threads on a `queued=False` GraphStore, you will get silent corruption of `id_to_slot` and `_edges_by_type`. This is architectural and will not be fixed - see `skills/.../docs/single-writer.md` (TODO) or the README thread safety section.
@@ -332,6 +360,8 @@ There is no concurrency in the write path. `queued=True` installs a submission q
 
 ### Pattern A: conversational memory benchmark (LongMemEval, LoCoMo)
 
+**Use the `DOCUMENT` clause on messages.** This is the current best practice - it hits all three engines in a single CREATE and populates BM25 automatically (PR #102). Dedupe entity mentions per message (PR #128) to avoid the "Duplicate edge" BatchRollback when NER emits the same entity name from multiple spans.
+
 ```python
 # Per record: reset, ingest haystack, query, score
 gs = GraphStore(path=tmpdir, embedder=my_embedder)
@@ -339,38 +369,50 @@ gs = GraphStore(path=tmpdir, embedder=my_embedder)
 gs.execute('SYS REGISTER NODE KIND "session" REQUIRED session_id:string')
 gs.execute(
     'SYS REGISTER NODE KIND "message" '
-    'REQUIRED session:string, role:string, content:string '
-    'OPTIONAL position:int '
-    'EMBED content'
+    'REQUIRED session:string, role:string '
+    'OPTIONAL position:int'
 )
 gs.execute('SYS REGISTER NODE KIND "entity" REQUIRED name:string')  # no EMBED
 
+# Use a real NER (TinyBERT ONNX is in the box; see G11 below).
+from graphstore.ingest.entity_extract import extract_batch
+
 for session in record.haystack:
+    # One big batched transaction per session: NER batch + single DSL blob
+    # executed under deferred_embeddings so the embedder runs once.
+    msg_contents = [m.content for m in session.messages]
+    per_msg_entities = extract_batch(msg_contents)   # list[list[str]] aligned to msg_contents
+
+    dsl = ["BEGIN"]
+    dsl.append(f'CREATE NODE "sess:{session.id}" kind = "session" session_id = "{session.id}"')
+    for i, msg in enumerate(session.messages):
+        msg_id = f"{session.id}:msg{i}"
+        dsl.append(
+            f'CREATE NODE "{msg_id}" kind = "message" '
+            f'session = "{session.id}" role = "{msg.role}" '
+            f'position = {i} '
+            f'DOCUMENT "{escape(msg.content)}"'      # <-- populates BM25 + blob + vector in one shot
+        )
+        dsl.append(f'CREATE EDGE "sess:{session.id}" -> "{msg_id}" kind = "has_message"')
+
+        # PR #128: dedupe per message. NER can emit the same entity multiple
+        # times from multi-span hits; re-creating the same "mentions" edge
+        # raises Duplicate edge and rolls the whole session back.
+        msg_ent_seen: set[str] = set()
+        for ent in per_msg_entities[i]:
+            ent_id = f"ent:{slug(ent)}"
+            if ent_id in msg_ent_seen:
+                continue
+            msg_ent_seen.add(ent_id)
+            dsl.append(f'UPSERT NODE "{ent_id}" kind = "entity" name = "{ent}"')
+            dsl.append(f'CREATE EDGE "{msg_id}" -> "{ent_id}" kind = "mentions"')
+
+    for i in range(len(session.messages) - 1):
+        dsl.append(f'CREATE EDGE "{session.id}:msg{i}" -> "{session.id}:msg{i+1}" kind = "next"')
+    dsl.append("COMMIT")
+
     with gs.deferred_embeddings(batch_size=128):
-        # Session node
-        gs.execute(f'CREATE NODE "sess:{session.id}" kind = "session" session_id = "{session.id}"')
-
-        # Messages
-        for i, msg in enumerate(session.messages):
-            gs.execute(
-                f'CREATE NODE "{session.id}:msg{i}" kind = "message" '
-                f'session = "{session.id}" role = "{msg.role}" '
-                f'content = "{escape(msg.content)}" position = {i}'
-            )
-            gs.execute(f'CREATE EDGE "sess:{session.id}" -> "{session.id}:msg{i}" kind = "has_message"')
-
-            # Entity extraction
-            for ent in extract_entities(msg.content):
-                ent_id = f"ent:{slug(ent)}"
-                try:
-                    gs.execute(f'CREATE NODE "{ent_id}" kind = "entity" name = "{ent}"')
-                except NodeExists:
-                    pass
-                gs.execute(f'CREATE EDGE "{session.id}:msg{i}" -> "{ent_id}" kind = "mentions"')
-
-        # Next edges
-        for i in range(len(session.messages) - 1):
-            gs.execute(f'CREATE EDGE "{session.id}:msg{i}" -> "{session.id}:msg{i+1}" kind = "next"')
+        gs.execute("\n".join(dsl))
 ```
 
 Query time - REMEMBER handles fusion + optional rerank internally:
@@ -431,6 +473,66 @@ gs.execute('SYS CONTRADICTIONS WHERE kind = "fact" FIELD value GROUP BY topic')
 ### Pattern D: temporal data (logs, events, time series)
 
 Override `__updated_at__` on ingest with real timestamps, use REMEMBER for recency-weighted retrieval, use `NODES WHERE __created_at__ > NOW() - 7d` for time-range filtering. See G3 for the caveats.
+
+### Pattern E: image + scanned PDF ingest (vision)
+
+Requires `[vision]` extra. The sidecar auto-starts on first call, but pre-pulling weights avoids a mid-ingest surprise.
+
+```bash
+pip install 'graphstore[vision]'
+graphstore vision serve --pull-only    # cache weights; SmolVLM2-2.2B Q4_K_M default (~1.5 GB)
+```
+
+```python
+# Scanned-PDF fallback: tier-4 route when earlier tiers produce empty text
+gs.execute('INGEST "scan.pdf" USING VISION "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"')
+
+# Standalone image with VLM caption stored on the node + embedded
+gs.execute('INGEST "chart.png" USING VISION "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf" AS "img:q3-chart"')
+```
+
+Switch preset / runtime:
+
+```bash
+export GRAPHSTORE_VISION_MODEL=smolvlm-500m      # faster, lower quality (400 MB)
+export GRAPHSTORE_VISION_URL=http://my-vllm/v1   # bring-your-own endpoint (Ollama, vLLM, OpenAI cloud)
+```
+
+Cap generation length via config:
+
+```json
+{ "document": { "vision_max_tokens": 512 } }
+```
+
+Captions flow into the image node's `summary` field and get embedded so REMEMBER / LEXICAL SEARCH hit them like any other chunk.
+
+### Pattern F: audio ingest (speech-to-text)
+
+Requires `[audio]` extra. In-process, no sidecar.
+
+```bash
+pip install 'graphstore[audio]'
+```
+
+```python
+# Interview / voicememo -> transcript chunks with timestamp headings
+gs.execute('INGEST "interview.mp3"')
+gs.execute('INGEST "standup.m4a" AS "mem:standup-2026-04-15" KIND "standup"')
+```
+
+Chunks surface as:
+
+```
+heading: [00:12-00:34]
+text: "... actual segment transcript ..."
+```
+
+so REMEMBER citations land inside the audio timeline. Format support: wav, mp3, ogg, flac, m4a, opus, webm. Default model is `base` (multilingual, ~150 MB on first use). Override:
+
+```python
+from graphstore.ingest.whisper_ingestor import WhisperIngestor
+WhisperIngestor().convert("clip.wav", model="small", language="en", beam_size=5)
+```
 
 ## Debug checklist: "my retrieval is bad"
 
@@ -517,6 +619,14 @@ graphstore config --schema      # JSON Schema for graphstore.json
 
 ## TL;DR
 
-graphstore is three storage engines (graph, vector, document) unified by a DSL, with REMEMBER's 5-stage pipeline (gather → fuse → temporal → rerank → optional nucleus) fusing all three at query time. Schema first, deferred embeddings, entity graph for multi-hop via `RECALL`, `put_summary` for BM25, `graph_signal_enabled` pulls the entity graph into REMEMBER fusion as a channel. All retrieval knobs are configurable via JSON/env/kwargs.
+graphstore = three storage engines (graph + vector + document) behind one DSL. REMEMBER fuses all three via a 5-stage pipeline (gather → fuse → temporal → rerank → optional nucleus). Ingestion rules:
 
-When in doubt, reach for Pattern A above and adapt.
+1. Register schema first.
+2. Wrap bulk writes in `deferred_embeddings`.
+3. Use `CREATE NODE ... DOCUMENT "text"` for conversational data - one line, populates BM25 + blob + vector (PR #102).
+4. Dedupe entity mentions per message before emitting `mentions` edges (PR #128).
+5. `graph_signal_enabled=true` folds the entity graph into REMEMBER fusion; use `RECALL` for actual multi-hop.
+6. Image ingest = `INGEST ... USING VISION "<model>"` under `[vision]`; sidecar auto-starts. Default SmolVLM2-2.2B.
+7. Audio ingest = just `INGEST "clip.mp3"` under `[audio]`; in-process faster-whisper.
+
+When in doubt: Pattern A for conversations, Pattern B for documents, Pattern E for images, Pattern F for audio.
