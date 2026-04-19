@@ -699,7 +699,7 @@ q.sys.evolve.rule("r1",
 ).execute(gs)
 ```
 
-Full reference: [docs/query-builder.md](../../../docs/query-builder.md).
+Full reference: [Query builder docs](https://graphstore-docs.orkait.com/query-builder).
 
 **Why prefer the builder for adapters:**
 - **Escape-safe by construction.** Every user string flows through the single ``dsl_literal`` helper. ``q.create_node(id, kind="memory", document=untrusted_text)`` is injection-proof regardless of what's in ``untrusted_text``.

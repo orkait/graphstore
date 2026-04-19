@@ -6,7 +6,7 @@ __pycache__/
 .benchmarks/
 dist/
 build/
-docs/superpowers/
+docs/
 logs/
 zen-graph-db/
 .worktrees/

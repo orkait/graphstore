@@ -1,64 +1,82 @@
-# 🧩 How to Kaggle
-
-Everything you need to push, run, monitor, and debug GraphStore benchmarks on Kaggle.
-
+---
+name: graphstore-kaggle
+description: How to push, run, monitor, and debug graphstore benchmarks on Kaggle. Covers free-tier limits (max 2 concurrent runs), KGAT + legacy auth, validate-before-push protocol, model caching via Kaggle datasets, kernel_ctl.py control plane, and the top 5 error classes you will hit (module not found, circular import, tokenizer path, empty error message, token secrets). Use whenever you are about to push a Kaggle kernel, debug a failing run, or wire a new embedder into the cache.
+compatibility: Requires graphstore repo checked out, kaggle CLI + kagglesdk installed, ~/.kaggle credentials provisioned.
+metadata:
+  author: orkait
+  version: "1.0"
 ---
 
-## ⚠️ Free Tier Limits & Push Protocol
+# Graphstore on Kaggle
+
+Everything you need to push, run, monitor, and debug graphstore benchmarks on Kaggle.
+
+## When to use this skill
+
+- About to push a Kaggle kernel (REQUIRED: ask permission first)
+- Debugging a failing run
+- Adding a new embedder or model that needs caching
+- Hitting Kaggle auth / token / module errors
+
+## Free tier limits + push protocol
 
 **CRITICAL:** Free tier allows **max 2 concurrent kernel runs** at any time.
 
 **ALWAYS ASK FOR PERMISSION BEFORE PUSHING TO KAGGLE.**
 
 Before pushing:
-1. **Ask user for permission** - Never push without explicit approval
+
+1. **Ask user for permission** - never push without explicit approval
 2. Check current run status: `python3 benchmarks/kaggle/kernel_ctl.py status`
 3. Wait for previous run to complete (COMPLETE or ERROR status)
 4. Do NOT push new versions while one is running
 5. Validate locally first: `python3 benchmarks/kaggle/validate_before_push.py`
 6. Each push increments kernel version; wasted pushes = wasted runs on free tier
 
----
-
-## 🔑 Authentication
+## Authentication
 
 Two auth methods. **KGAT is preferred** (new bearer token format).
 
-### KGAT Token (new)
+### KGAT token (new)
+
 ```bash
 echo "KGAT_xxxxxxxxxxxx" > ~/.kaggle/access_token
 chmod 600 ~/.kaggle/access_token
 ```
+
 Used automatically by `kagglesdk` (`kernel_ctl.py`).
 
-### Legacy API Key (fallback)
+### Legacy API key (fallback)
+
 ```bash
 # ~/.kaggle/kaggle.json
 {"username": "superkaiii", "key": "YOUR_API_KEY"}
 chmod 600 ~/.kaggle/kaggle.json
 ```
+
 Used by `kaggle` CLI (`kaggle kernels push`, `kaggle kernels status`).
 
-> Both can coexist. KGAT is used by `kernel_ctl.py`, legacy key is used by `kaggle` CLI.
+Both can coexist. KGAT is used by `kernel_ctl.py`; legacy key is used by `kaggle` CLI.
 
----
+## Validate before every push
 
-## ✅ Validate Before Every Push
+**REQUIRED:** run validation locally before pushing. Catches errors before wasting GPU time and limited free-tier runs.
 
-**REQUIRED:** Run validation locally before pushing to Kaggle. Catches errors before wasting GPU time and limited free-tier runs.
+### Quick validation (imports + structure only)
 
-### Quick Validation (imports + structure only):
 ```bash
 python3 benchmarks/kaggle/validate_before_push.py --skip-run
 ```
 
-### Full Validation (includes 1-record benchmark):
+### Full validation (includes 1-record benchmark)
+
 ```bash
 python3 benchmarks/kaggle/validate_before_push.py
-# (mini run is ON by default, takes ~2-3min)
+# (mini run is ON by default, takes ~2-3 min)
 ```
 
 **What it checks:**
+
 | Check | What |
 |---|---|
 | imports | graphstore, onnxruntime, huggingface_hub, docker_runner |
@@ -68,27 +86,29 @@ python3 benchmarks/kaggle/validate_before_push.py
 | mini-run | 1 record through full pipeline (CPU, local models) |
 
 **Exit codes:**
-- `0` = All checks pass, safe to push
-- `1` = Failure detected, fix issues before pushing
 
----
+- `0` = all checks pass, safe to push
+- `1` = failure detected, fix before pushing
 
-## 💾 Model Caching (skip downloads)
+## Model caching (skip downloads)
 
 Models are uploaded as Kaggle datasets once and reused across runs. Saves ~5 min per run.
 
 **Cached datasets:**
-| Kaggle Dataset | Model | Size |
+
+| Kaggle dataset | Model | Size |
 |---|---|---|
-| `superkaiii/tinybert-ner-onnx` | TinyBERT NER (entity extractor) | 15MB |
-| `superkaiii/jina-v5-small-onnx` | Jina v5 Small ONNX (embedder) | ~260MB |
+| `superkaiii/tinybert-ner-onnx` | TinyBERT NER (entity extractor) | 15 MB |
+| `superkaiii/jina-v5-small-onnx` | Jina v5 Small ONNX (embedder) | ~260 MB |
 
 **How it works:**
+
 - Datasets attached in `kernel-metadata.json` under `dataset_sources`
-- Script checks `/kaggle/input/<slug>/` first - if found, symlinks it (no download)
+- Script checks `/kaggle/input/<slug>/` first. If found, symlinks it (no download)
 - Falls back to HF download if not attached
 
-**To add/update a cached model:**
+**To add or update a cached model:**
+
 ```bash
 # 1. Download model locally
 .venv/bin/python3 -c "
@@ -105,26 +125,23 @@ kaggle datasets create -p /tmp/my-model --dir-mode zip
 # 4. Add slug to EMBEDDER_KAGGLE_SLUG or NER_KAGGLE_SLUG in kaggle_benchmark.py CONFIG
 ```
 
----
-
-## 🚀 Push a Kernel
+## Push a kernel
 
 ```bash
 # Push default kernel (graphstore-jina-v5-small)
 kaggle kernels push -p benchmarks/kaggle/
 
-# Pushed version is confirmed in output:
+# Output confirms pushed version:
 # Kernel version 16 successfully pushed.
 ```
 
-Kernel metadata files in `benchmarks/kaggle/`:
+Kernel metadata files live in `benchmarks/kaggle/`:
+
 | File | Kernel |
 |---|---|
 | `kernel-metadata.json` | `graphstore-jina-v5-small` (default, active) |
 
----
-
-## 🎛 Kernel Control (`kernel_ctl.py`)
+## Kernel control (`kernel_ctl.py`)
 
 Full programmatic control via `kagglesdk` (KGAT auth, no CLI needed).
 
@@ -145,9 +162,7 @@ python3 benchmarks/kaggle/kernel_ctl.py run
 python3 benchmarks/kaggle/kernel_ctl.py logs --kernel graphstore-pipeline-refactored
 ```
 
----
-
-## 📋 Monitor a Run
+## Monitor a run
 
 ```bash
 # Check status
@@ -164,64 +179,60 @@ python3 benchmarks/kaggle/kernel_ctl.py logs 2>&1 | grep "\[ERR\]"
 python3 benchmarks/kaggle/kernel_ctl.py logs 2>&1 | grep -E "system:|config:|evaluating|interrupted|PASS|FAIL|ERROR"
 ```
 
----
+## Common errors + fixes
 
-## 🐛 Common Errors & Fixes
-
-<details>
-<summary><strong>ModuleNotFoundError: No module named 'graphstore'</strong></summary>
+### `ModuleNotFoundError: No module named 'graphstore'`
 
 Subprocess doesn't inherit `sys.path`. Fix: pass `PYTHONPATH` explicitly.
 
 ```python
 env = os.environ.copy()
 env["PYTHONPATH"] = "/kaggle/working/graphstore"
-subprocess.check_call([sys.executable, "scripts/some_script.py"],
-    cwd="/kaggle/working/graphstore", env=env)
+subprocess.check_call(
+    [sys.executable, "scripts/some_script.py"],
+    cwd="/kaggle/working/graphstore",
+    env=env,
+)
 ```
 
-</details>
+### `ImportError: cannot import name 'GraphStore' from partially initialized module` (circular import)
 
-<details>
-<summary><strong>ImportError: cannot import name 'GraphStore' from partially initialized module (circular import)</strong></summary>
+Caused by absolute imports in `graphstore/graphstore/__init__.py`. Fix: switch to relative.
 
-Caused by absolute imports in `graphstore/graphstore/__init__.py`. Fixed by switching to relative imports.
-
-`graphstore/graphstore/__init__.py` must use:
 ```python
-from .store import GraphStore   # relative - correct
-from .core.store import CoreStore    # relative - correct
+from .store import GraphStore           # relative - correct
+from .core.store import CoreStore       # relative - correct
 ```
 
 NOT:
+
 ```python
 from graphstore.store import GraphStore  # absolute - circular when on PYTHONPATH
 ```
 
-</details>
-
-<details>
-<summary><strong>FileNotFoundError: tokenizer.json not found in models/tinybert-ner</strong></summary>
+### `FileNotFoundError: tokenizer.json not found in models/tinybert-ner`
 
 Two causes:
 
-1. TinyBERT not downloaded yet - add to script:
-```python
-snapshot_download("onnx-community/TinyBERT-finetuned-NER-ONNX",
-    local_dir="/kaggle/working/models/tinybert-ner", token=HF_TOKEN)
-```
+1. TinyBERT not downloaded. Add to script:
 
-2. Path mismatch - `--entity-model-dir` must point to actual download location:
-```python
-sys.argv = [..., "--entity-model-dir", "/kaggle/working/models/tinybert-ner", ...]
-```
+   ```python
+   snapshot_download(
+       "onnx-community/TinyBERT-finetuned-NER-ONNX",
+       local_dir="/kaggle/working/models/tinybert-ner",
+       token=HF_TOKEN,
+   )
+   ```
+
+2. Path mismatch. `--entity-model-dir` must point to the actual download location:
+
+   ```python
+   sys.argv = [..., "--entity-model-dir", "/kaggle/working/models/tinybert-ner", ...]
+   ```
 
 The extractor checks both `{model_dir}/tokenizer.json` and `{model_dir}/onnx/tokenizer.json`.
 
-</details>
-
-<details>
-<summary><strong>KernelWorkerStatus.ERROR with empty failure message</strong></summary>
+### `KernelWorkerStatus.ERROR` with empty failure message
 
 Kaggle doesn't always populate `failure_message`. Get the real error from logs:
 
@@ -229,12 +240,9 @@ Kaggle doesn't always populate `failure_message`. Get the real error from logs:
 python3 benchmarks/kaggle/kernel_ctl.py logs 2>&1 | grep "\[ERR\]" | tail -20
 ```
 
-</details>
+### Push rejected / HF_TOKEN secrets issue
 
-<details>
-<summary><strong>Push rejected / HF_TOKEN secrets issue</strong></summary>
-
-Never hardcode tokens in scripts. Read from Kaggle Secrets or private dataset:
+Never hardcode tokens in scripts. Read from Kaggle Secrets or private dataset.
 
 ```python
 # Option 1: Private dataset (preferred)
@@ -248,11 +256,7 @@ from kaggle_secrets import UserSecretsClient
 HF_TOKEN = UserSecretsClient().get_secret("HF_TOKEN")
 ```
 
-</details>
-
----
-
-## 🏗 Typical Workflow
+## Typical workflow
 
 ```bash
 # 1. Make code changes
@@ -271,17 +275,15 @@ kaggle kernels push -p benchmarks/kaggle/
 python3 benchmarks/kaggle/kernel_ctl.py status
 python3 benchmarks/kaggle/kernel_ctl.py logs 2>&1 | tail -30
 
-# 6. If failed - check logs, fix, repeat from step 1
+# 6. If failed, check logs, fix, repeat from step 1
 python3 benchmarks/kaggle/kernel_ctl.py logs 2>&1 | grep "\[ERR\]"
 ```
 
----
-
-## 📁 Key Files
+## Key files
 
 | File | Purpose |
 |---|---|
-| `benchmarks/kaggle/kaggle_benchmark.py` | Main benchmark runner (configurable - edit CONFIG block at top) |
+| `benchmarks/kaggle/kaggle_benchmark.py` | Main benchmark runner (edit CONFIG block at top) |
 | `benchmarks/kaggle/kernel_ctl.py` | kagglesdk kernel control |
 | `benchmarks/kaggle/validate_before_push.py` | Pre-push local validator |
 | `benchmarks/kaggle/kernel-metadata.json` | Kaggle kernel config (maps script to kernel) |
