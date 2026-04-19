@@ -88,19 +88,45 @@ collect_ignore = [
 ]
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--run-slow",
+        action="store_true",
+        default=False,
+        help="Include slow tests (pytest.mark.slow). Default is skip. "
+             "Also enabled by GRAPHSTORE_RUN_SLOW=1.",
+    )
+
+
 def pytest_configure(config: pytest.Config) -> None:
     for marker in _EXTRA_TO_DEP:
         config.addinivalue_line(
             "markers",
             f"{marker}: skipped unless the matching graphstore extra is installed",
         )
+    config.addinivalue_line(
+        "markers",
+        "slow: skipped unless --run-slow or GRAPHSTORE_RUN_SLOW=1 is set",
+    )
+
+
+def _slow_enabled(config: pytest.Config) -> bool:
+    return (
+        bool(config.getoption("--run-slow"))
+        or os.environ.get("GRAPHSTORE_RUN_SLOW") == "1"
+    )
 
 
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
     available = _extras_available()
+    run_slow = _slow_enabled(config)
     for item in items:
+        if not run_slow and item.get_closest_marker("slow") is not None:
+            item.add_marker(
+                pytest.mark.skip(reason="slow; pass --run-slow to include")
+            )
         for marker, ok in available.items():
             if ok:
                 continue

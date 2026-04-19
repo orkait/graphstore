@@ -11,6 +11,10 @@ import pytest
 from graphstore import GraphStore
 from graphstore.core.types import Result
 
+# Slow suite (~25s). Skip by default; opt in via --run-slow or
+# GRAPHSTORE_RUN_SLOW=1. See conftest.py for the gating logic.
+pytestmark = pytest.mark.slow
+
 
 # ============================================================
 # Infrastructure: Result.meta (Step 1)
