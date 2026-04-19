@@ -305,7 +305,7 @@ class GraphStore:
         self._last_evolution_events: list = []
 
         # Evolution engine (Layer 5: metacognitive memory)
-        from graphstore.evolve import EvolutionEngine
+        from graphstore.core.evolve import EvolutionEngine
         self._evolution_engine = EvolutionEngine(self, self._runtime.conn, cfg.evolution)
         # Wire into scheduler and sys_executor
         self._optimizer._evolution_engine = self._evolution_engine

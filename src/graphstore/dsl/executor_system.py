@@ -1200,7 +1200,7 @@ class SystemExecutor:
         return self._evolution_engine
 
     def _evolve_rule(self, q: SysEvolveRule) -> Result:
-        from graphstore.evolve import EvolutionRule, Condition, Action
+        from graphstore.core.evolve import EvolutionRule, Condition, Action
         engine = self._get_engine()
         rule = EvolutionRule(
             name=q.name,
