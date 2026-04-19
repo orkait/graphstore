@@ -39,45 +39,71 @@ Most agent memory systems are wrappers around a vector database. That works for 
 Three storage engines, one typed DSL, and a hybrid retrieval pipeline that fuses all of them.
 
 ```text
-              ┌─────────────────────────────────────────┐
-              │        DSL - Lark LALR(1) grammar       │
-              │    one query language for everything    │
-              └────────────────────┬────────────────────┘
-                                   │
-              ┌────────────────────┼────────────────────┐
-              ▼                    ▼                    ▼
-        ┌──────────┐         ┌──────────┐         ┌──────────┐
-        │  Graph   │         │  Vector  │         │ Document │
-        ├──────────┤         ├──────────┤         ├──────────┤
-        │ numpy    │         │ usearch  │         │ SQLite   │
-        │ columns  │         │  HNSW    │         │ FTS5 BM25│
-        │ scipy CSR│         │  cosine  │         │ blobs    │
-        │ + indices│         │          │         │ + summary│
-        └──────────┘         └──────────┘         └──────────┘
+                   ┌──────────────────────────────────────┐
+                   │    DSL  -  Lark LALR(1) grammar      │
+                   │    one query language, 70+ commands  │
+                   └──────────────────┬───────────────────┘
+                                      │
+                ┌─────────────────────┼─────────────────────┐
+                ▼                     ▼                     ▼
+        ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+        │    Graph      │     │    Vector     │     │   Document    │
+        ├───────────────┤     ├───────────────┤     ├───────────────┤
+        │ numpy columns │     │ usearch HNSW  │     │ SQLite + FTS5 │
+        │ scipy CSR     │     │ cosine        │     │ BM25 + blobs  │
+        │ edge index    │     │ int8 / fp32   │     │ summaries     │
+        └───────────────┘     └───────────────┘     └───────────────┘
+                ▲                     ▲                     ▲
+                └─────────────────────┼─────────────────────┘
+                                      │
+                    ┌─────────────────┴─────────────────┐
+                    │    Ingest pipeline (tiered)       │
+                    │  txt/md  ─▶ direct                │
+                    │  html/docx/xlsx ─▶ markitdown     │
+                    │  pdf  ─▶ pymupdf4llm ─▶ docling   │
+                    │  png/jpg ─▶ vision sidecar (VLM)  │
+                    │  wav/mp3 ─▶ whisper (in-process)  │
+                    └───────────────────────────────────┘
 ```
 
 ### REMEMBER - the retrieval engine
 
-`REMEMBER` is the core command. It fuses five signals into a single ranked result set:
+`REMEMBER` is the core command. It runs a five-stage pipeline and fuses four signals into a single ranked result set.
 
+```text
+  REMEMBER "European architecture" LIMIT 10
+                                │
+     ┌──────────────────────────┴──────────────────────────┐
+     │                                                     │
+     ▼              Stage 1 — Gather                       │
+┌─────────────┐   union of top candidates                  │
+│  vec ANN    │   ─▶ sentence-level cosine over usearch    │
+│  BM25 FTS5  │   ─▶ chunk-level keyword match             │
+└─────────────┘                                            │
+                                                           │
+                  Stage 2 — Fuse  (weighted or RRF)        │
+  ┌─────────────────────────────────────────────────────┐  │
+  │  vec_signal      max sentence cosine         0.52   │  │
+  │  bm25_signal     FTS5 normalised              0.25   │  │
+  │  recency         exp(-age/half_life)         0.15   │  │
+  │  graph_signal    entity-degree (opt-in)      0.08   │  │
+  │  + co-occurrence boost  (found by both vec AND bm25) │  │
+  │  + recall-frequency nudge  (log-scaled)              │  │
+  └─────────────────────────────────────────────────────┘  │
+                                                           │
+                  Stage 3 — Temporal filter                │
+                  (hard zero outside AT window)            │
+                                                           │
+                  Stage 4 — Rerank  (optional)             │
+                  cross-encoder: GGUF or ONNX              │
+                                                           │
+                  Stage 5 — Nucleus walk  (optional)       │
+                  structural-edge context expansion        │
+                                                           │
+                  Ranked nodes  ◀──────────────────────────┘
 ```
-REMEMBER "European architecture" LIMIT 10
 
-  ┌─────────────────────────────────────────────────────────┐
-  │  vec_signal     cosine similarity (usearch ANN)         │  0.52
-  │  bm25_signal    keyword match (SQLite FTS5)             │  0.25
-  │  recency        decay from event time                   │  0.15
-  │  graph_signal   entity-degree boost (opt-in)            │  0.08
-  │                                                         │
-  │  + co-occurrence boost (found by both vec AND bm25)     │
-  │  + recall-frequency nudge (log-scaled)                  │
-  │  + temporal hard filter (when AT anchor present)        │
-  │  + optional reranker (GGUF / ONNX) after fusion         │
-  │  + optional nucleus expansion (structural edges only)   │
-  └─────────────────────────────────────────────────────────┘
-```
-
-Weights are configurable. The pipeline is 5 stages: gather → fuse → temporal → rerank → (optional nucleus).
+All weights, the fusion method (`weighted` / `rrf`), half-life, reranker, and nucleus expansion are configurable via `graphstore.json`, `GRAPHSTORE_DSL_*` env vars, or constructor kwargs.
 
 ---
 
@@ -128,25 +154,39 @@ from graphstore import GraphStore
 
 g = GraphStore(path="./brain")
 
-# Store memories
-g.execute('CREATE NODE "mem:paris" kind = "memory" topic = "travel" importance = 0.9')
-g.execute('CREATE NODE "mem:eiffel" kind = "memory" topic = "travel" importance = 0.8')
-g.execute('CREATE EDGE "mem:paris" -> "mem:eiffel" kind = "associated"')
+# Store memories. DOCUMENT "..." is the right clause for "this is the text
+# I want retrievable" - it populates the vector index AND BM25 in one shot.
+g.execute('CREATE NODE "mem:paris" kind = "memory" topic = "travel" '
+          'DOCUMENT "Paris is the capital of France, famous for the Eiffel Tower and Louvre."')
+g.execute('CREATE NODE "mem:rome" kind = "memory" topic = "travel" '
+          'DOCUMENT "Rome is the capital of Italy, home to the Colosseum and the Vatican."')
+g.execute('CREATE NODE "mem:tokyo" kind = "memory" topic = "travel" '
+          'DOCUMENT "Tokyo is the capital of Japan, known for the Shibuya crossing and sushi."')
 
-# Retrieve by meaning (fuses vector + BM25 + recency + graph)
-result = g.execute('REMEMBER "European architecture" TOKENS 4000')
+# Link related memories (graph edges for spreading activation)
+g.execute('CREATE EDGE "mem:paris" -> "mem:rome" kind = "both_european_capitals"')
+
+# Retrieve by meaning (hybrid: vector + BM25 + recency + graph fusion)
+r = g.execute('REMEMBER "European architecture and history" LIMIT 5')
+#  -> mem:paris, mem:rome  (tokyo drops out)
 
 # Retrieve by association (spreading activation through edges)
-result = g.execute('RECALL FROM "mem:paris" DEPTH 2 LIMIT 10')
+r = g.execute('RECALL FROM "mem:paris" DEPTH 2 LIMIT 10')
+#  -> mem:rome  (via "both_european_capitals" edge)
 
-# Retrieve by keywords
-result = g.execute('LEXICAL SEARCH "Eiffel Tower" LIMIT 5')
+# Retrieve by keywords (pure BM25 over document text)
+r = g.execute('LEXICAL SEARCH "Eiffel Tower" LIMIT 5')
+#  -> mem:paris
 
-# Retrieve with temporal anchor
-result = g.execute('REMEMBER "trip plans" AT "2024-03" LIMIT 10')
+# Retrieve with a temporal anchor (recency-weighted)
+r = g.execute('REMEMBER "trip plans" AT "2024-03" LIMIT 10')
+
+g.close()
 ```
 
-Everything persists to `./brain/` as SQLite. Reopen with the same path and all memories are back.
+Everything persists to `./brain/` as SQLite. Reopen with the same path and all memories are back. Run the snippet verbatim and REMEMBER / RECALL / LEXICAL all return non-empty results (core install covers it, no extras needed).
+
+> **Heads up.** Plain `CREATE NODE "id" kind = "X" topic = "..."` without a `DOCUMENT` clause stores typed columns only - REMEMBER and LEXICAL will return zero for that node. Use `DOCUMENT "text"` whenever the node's *content* is what you want to retrieve on.
 
 ---
 
@@ -155,21 +195,23 @@ Everything persists to `./brain/` as SQLite. Reopen with the same path and all m
 ### Store and recall memories
 
 ```sql
-CREATE NODE "mem:123" kind = "memory" topic = "finance" importance = 0.8
+-- Store a retrievable memory: DOCUMENT populates vector + BM25 + blob in one shot.
+CREATE NODE "mem:123" kind = "memory" topic = "finance"
+  DOCUMENT "Q3 revenue beat expectations driven by enterprise renewals."
 
--- Hybrid retrieval (5-signal fusion)
+-- Hybrid retrieval (5-signal fusion over vector + BM25 + recency + graph + confidence)
 REMEMBER "quarterly revenue trends" TOKENS 4000
 
--- Graph traversal (spreading activation)
+-- Graph traversal (spreading activation along edges)
 RECALL FROM "concept:finance" DEPTH 3 LIMIT 10
 
--- Keyword search (BM25)
+-- Keyword search (BM25 over FTS5)
 LEXICAL SEARCH "Q3 revenue" LIMIT 10
 
--- Vector similarity
+-- Vector similarity (pure cosine, no fusion)
 SIMILAR TO "budget forecasting" LIMIT 10
 
--- Temporal retrieval
+-- Temporal retrieval (recency-weighted + hard filter on AT window)
 REMEMBER "what happened in May" AT "2024-05" LIMIT 10
 ```
 
