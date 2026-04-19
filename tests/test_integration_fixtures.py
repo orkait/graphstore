@@ -12,6 +12,10 @@ from pathlib import Path
 from graphstore import GraphStore
 from graphstore.embedding.base import Embedder
 
+# Slow suite (~40s). Skip by default; opt in via --run-slow or
+# GRAPHSTORE_RUN_SLOW=1. See conftest.py for the gating logic.
+pytestmark = pytest.mark.slow
+
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
