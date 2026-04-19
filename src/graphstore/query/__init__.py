@@ -16,7 +16,89 @@ from typing import Any
 from graphstore.query import plugins
 from graphstore.query.filters import F
 from graphstore.query.runtime import Query
-from graphstore.query.verbs import reads as _reads, writes as _writes, traversal as _traversal
+from graphstore.query.verbs import (
+    reads as _reads,
+    writes as _writes,
+    traversal as _traversal,
+    sys as _sys,
+    cron as _cron,
+    evolve as _evolve,
+    vault as _vault,
+)
+
+
+class _CronNamespace:
+    add     = staticmethod(_cron.add)
+    delete  = staticmethod(_cron.delete)
+    enable  = staticmethod(_cron.enable)
+    disable = staticmethod(_cron.disable)
+    run     = staticmethod(_cron.run)
+    list    = staticmethod(_cron.list_)
+
+
+class _EvolveNamespace:
+    rule    = staticmethod(_evolve.rule)
+    show    = staticmethod(_evolve.show)
+    enable  = staticmethod(_evolve.enable)
+    disable = staticmethod(_evolve.disable)
+    delete  = staticmethod(_evolve.delete)
+    history = staticmethod(_evolve.history)
+    reset   = staticmethod(_evolve.reset)
+    list    = staticmethod(_evolve.list_)
+
+
+class _SysNamespace:
+    # Scalar / inspection
+    status       = staticmethod(_sys.status)
+    stats        = staticmethod(_sys.stats)
+    health       = staticmethod(_sys.health)
+    kinds        = staticmethod(_sys.kinds)
+    edge_kinds   = staticmethod(_sys.edge_kinds)
+    describe     = staticmethod(_sys.describe)
+    embedders    = staticmethod(_sys.embedders)
+    # Query introspection
+    slow_queries     = staticmethod(_sys.slow_queries)
+    frequent_queries = staticmethod(_sys.frequent_queries)
+    failed_queries   = staticmethod(_sys.failed_queries)
+    explain          = staticmethod(_sys.explain)
+    # Schema
+    register_node_kind = staticmethod(_sys.register_node_kind)
+    register_edge_kind = staticmethod(_sys.register_edge_kind)
+    unregister         = staticmethod(_sys.unregister)
+    # Maintenance
+    checkpoint       = staticmethod(_sys.checkpoint)
+    rebuild_indices  = staticmethod(_sys.rebuild_indices)
+    clear            = staticmethod(_sys.clear)
+    wal              = staticmethod(_sys.wal)
+    expire           = staticmethod(_sys.expire)
+    contradictions   = staticmethod(_sys.contradictions)
+    snapshot         = staticmethod(_sys.snapshot)
+    rollback_to      = staticmethod(_sys.rollback_to)
+    snapshots        = staticmethod(_sys.snapshots)
+    duplicates       = staticmethod(_sys.duplicates)
+    connect          = staticmethod(_sys.connect)
+    consolidate      = staticmethod(_sys.consolidate)
+    reembed          = staticmethod(_sys.reembed)
+    retain           = staticmethod(_sys.retain)
+    optimize         = staticmethod(_sys.optimize)
+    evict            = staticmethod(_sys.evict)
+    log              = staticmethod(_sys.log)
+    # Nested namespaces
+    cron             = _CronNamespace()
+    evolve           = _EvolveNamespace()
+
+
+class _VaultNamespace:
+    new       = staticmethod(_vault.new)
+    read      = staticmethod(_vault.read)
+    write     = staticmethod(_vault.write)
+    append    = staticmethod(_vault.append)
+    search    = staticmethod(_vault.search)
+    backlinks = staticmethod(_vault.backlinks)
+    list      = staticmethod(_vault.list_)
+    sync      = staticmethod(_vault.sync)
+    daily     = staticmethod(_vault.daily)
+    archive   = staticmethod(_vault.archive)
 
 register_verb = plugins.register_verb
 
@@ -82,6 +164,10 @@ class _QNamespace:
     begin          = staticmethod(_writes.begin)
     commit         = staticmethod(_writes.commit)
     batch          = staticmethod(_writes.batch)
+
+    # --- Namespaces ---
+    sys            = _SysNamespace()
+    vault          = _VaultNamespace()
 
     # --- Escape hatch ---
     @staticmethod
