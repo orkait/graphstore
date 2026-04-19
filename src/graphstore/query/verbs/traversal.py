@@ -240,10 +240,18 @@ register_compiler("common_neighbors", _compile_common_neighbors)
 # match_q: "MATCH" pattern limit?
 # pattern is raw; users pass the string directly.
 
-def match(pattern: str, *, limit: int | None = None) -> Query:
-    if not isinstance(pattern, str) or not pattern.strip():
-        raise ValueError("match() requires a non-empty pattern string")
-    params: dict = {"pattern": pattern}
+def match(pattern, *, limit: int | None = None) -> Query:
+    """Accepts a typed Pattern object OR a raw string."""
+    from graphstore.query.pattern import Pattern
+    if isinstance(pattern, Pattern):
+        text = pattern.to_dsl()
+    elif isinstance(pattern, str):
+        if not pattern.strip():
+            raise ValueError("match() requires a non-empty pattern string")
+        text = pattern
+    else:
+        raise TypeError(f"match() expects Pattern or str, got {type(pattern).__name__}")
+    params: dict = {"pattern": text}
     if limit is not None: params["limit"] = limit
     return Query(_verb="match", _params=params, _kind="read")
 
@@ -284,16 +292,26 @@ register_compiler("what_if_retract", _compile_what_if_retract)
 
 def aggregate_nodes(
     *,
-    select: list[str],
+    select,
     where: F | dict | None = None,
     group_by: list[str] | None = None,
-    having: str | None = None,
-    order_by: str | None = None,
+    having=None,
+    order_by=None,
     order_dir: str | None = None,
     limit: int | None = None,
 ) -> Query:
+    """Accepts typed ``agg.count()`` etc. or raw strings in select/having/order_by."""
+    from graphstore.query.agg import AggFunc, HavingExpr
     if not isinstance(select, (list, tuple)) or not select:
-        raise ValueError("aggregate_nodes() requires select=[...] non-empty list of agg_func strings")
+        raise ValueError("aggregate_nodes() requires select=[...] non-empty list")
+    select_strs = []
+    for item in select:
+        if isinstance(item, AggFunc):
+            select_strs.append(item.to_dsl())
+        elif isinstance(item, str):
+            select_strs.append(item)
+        else:
+            raise TypeError(f"select items must be AggFunc or str, got {type(item).__name__}")
     if group_by is not None:
         if not isinstance(group_by, (list, tuple)) or not group_by:
             raise ValueError("aggregate_nodes() group_by must be non-empty list if given")
@@ -301,7 +319,12 @@ def aggregate_nodes(
             dsl_identifier(g)
     if order_dir is not None and order_dir.upper() not in ("ASC", "DESC"):
         raise ValueError("aggregate_nodes() order_dir must be 'ASC' or 'DESC'")
-    params: dict = {"select": list(select)}
+    # Normalise having + order_by (accept typed)
+    if isinstance(having, HavingExpr):
+        having = having.to_dsl()
+    if isinstance(order_by, AggFunc):
+        order_by = order_by.to_dsl()
+    params: dict = {"select": select_strs}
     if where is not None: params["where"] = where
     if group_by is not None: params["group_by"] = list(group_by)
     if having is not None: params["having"] = having

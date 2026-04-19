@@ -27,16 +27,35 @@ from graphstore.query.runtime import Query, register_compiler
 def rule(
     name: str,
     *,
-    when: list[str],
-    then: list[str],
+    when,
+    then,
     cooldown: int | None = None,
     priority: int | None = None,
 ) -> Query:
+    """Accepts typed ``EvolveCondition`` / ``EvolveAction`` or raw strings."""
+    from graphstore.query.evolve_expr import EvolveCondition, EvolveAction
     if not isinstance(when, (list, tuple)) or not when:
-        raise ValueError("evolve.rule() requires when=[...] non-empty list of condition exprs")
+        raise ValueError("evolve.rule() requires when=[...] non-empty list")
     if not isinstance(then, (list, tuple)) or not then:
-        raise ValueError("evolve.rule() requires then=[...] non-empty list of action exprs")
-    params: dict = {"name": name, "when": list(when), "then": list(then)}
+        raise ValueError("evolve.rule() requires then=[...] non-empty list")
+
+    def _norm_when(item):
+        if isinstance(item, EvolveCondition):
+            return item.to_dsl()
+        if isinstance(item, str):
+            return item
+        raise TypeError(f"when items must be EvolveCondition or str, got {type(item).__name__}")
+
+    def _norm_then(item):
+        if isinstance(item, EvolveAction):
+            return item.to_dsl()
+        if isinstance(item, str):
+            return item
+        raise TypeError(f"then items must be EvolveAction or str, got {type(item).__name__}")
+
+    when_strs = [_norm_when(c) for c in when]
+    then_strs = [_norm_then(a) for a in then]
+    params: dict = {"name": name, "when": when_strs, "then": then_strs}
     if cooldown is not None: params["cooldown"] = cooldown
     if priority is not None: params["priority"] = priority
     return Query(_verb="sys_evolve_rule", _params=params, _kind="sys")

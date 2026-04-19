@@ -9,7 +9,7 @@ from graphstore.query.runtime import Query, register_compiler
 
 
 # Reserved clause keywords handled separately from arbitrary field kwargs.
-_CREATE_NODE_RESERVED = {"kind", "event_at", "expires_in", "document", "vector"}
+_CREATE_NODE_RESERVED = {"kind", "event_at", "expires_in", "expires_at", "document", "vector"}
 
 
 def _format_field(name: str, value: Any) -> str:
@@ -35,12 +35,15 @@ def create_node(
     kind: str,
     event_at: Any = None,
     expires_in: str | None = None,
+    expires_at: str | None = None,
     document: str | None = None,
     vector: list[float] | None = None,
     **fields: Any,
 ) -> Query:
     if not isinstance(kind, str) or not kind:
         raise ValueError("create_node() requires kind= as a non-empty str")
+    if expires_in is not None and expires_at is not None:
+        raise ValueError("create_node(): pass expires_in OR expires_at, not both")
     overlap = _CREATE_NODE_RESERVED & set(fields)
     if overlap:
         raise TypeError(
@@ -54,6 +57,7 @@ def create_node(
     }
     if event_at is not None: params["event_at"] = event_at
     if expires_in is not None: params["expires_in"] = expires_in
+    if expires_at is not None: params["expires_at"] = expires_at
     if document is not None: params["document"] = document
     if vector is not None: params["vector"] = list(vector)
     return Query(_verb="create_node", _params=params, _kind="write")
@@ -69,6 +73,8 @@ def _compile_create_node(p: dict) -> str:
     if "expires_in" in p:
         n, u = _parse_expires_in(p["expires_in"])
         parts.append(f"EXPIRES IN {n}{u}")
+    if "expires_at" in p:
+        parts.append(f"EXPIRES AT {dsl_literal(p['expires_at'])}")
     if "event_at" in p:
         parts.append(f"EVENT_AT {dsl_literal(p['event_at'])}")
     if "document" in p:
@@ -87,16 +93,16 @@ def create_node_auto(
     kind: str,
     event_at: Any = None,
     expires_in: str | None = None,
+    expires_at: str | None = None,
     document: str | None = None,
     vector: list[float] | None = None,
     **fields: Any,
 ) -> Query:
-    """``CREATE NODE AUTO ...`` - graphstore generates the node id.
-
-    Same clause ordering as ``create_node``; only the id is auto.
-    """
+    """``CREATE NODE AUTO ...`` - graphstore generates the node id."""
     if not isinstance(kind, str) or not kind:
         raise ValueError("create_node_auto() requires kind= as a non-empty str")
+    if expires_in is not None and expires_at is not None:
+        raise ValueError("create_node_auto(): pass expires_in OR expires_at, not both")
     overlap = _CREATE_NODE_RESERVED & set(fields)
     if overlap:
         raise TypeError(
@@ -105,6 +111,7 @@ def create_node_auto(
     params: dict = {"kind": kind, "fields": dict(fields)}
     if event_at is not None: params["event_at"] = event_at
     if expires_in is not None: params["expires_in"] = expires_in
+    if expires_at is not None: params["expires_at"] = expires_at
     if document is not None: params["document"] = document
     if vector is not None: params["vector"] = list(vector)
     return Query(_verb="create_node_auto", _params=params, _kind="write")
@@ -120,6 +127,8 @@ def _compile_create_node_auto(p: dict) -> str:
     if "expires_in" in p:
         n, u = _parse_expires_in(p["expires_in"])
         parts.append(f"EXPIRES IN {n}{u}")
+    if "expires_at" in p:
+        parts.append(f"EXPIRES AT {dsl_literal(p['expires_at'])}")
     if "event_at" in p:
         parts.append(f"EVENT_AT {dsl_literal(p['event_at'])}")
     if "document" in p:
@@ -199,7 +208,7 @@ register_compiler("update_node", _compile_update_node)
 # ---------- UPSERT NODE ---------------------------------------------------
 # upsert_node: "UPSERT" "NODE" STRING field_pairs vector? expires? event_at?
 
-_UPSERT_RESERVED = {"vector", "expires_in", "event_at"}
+_UPSERT_RESERVED = {"vector", "expires_in", "expires_at", "event_at"}
 
 
 def upsert_node(
@@ -208,9 +217,12 @@ def upsert_node(
     kind: str | None = None,
     vector: list[float] | None = None,
     expires_in: str | None = None,
+    expires_at: str | None = None,
     event_at: Any = None,
     **fields: Any,
 ) -> Query:
+    if expires_in is not None and expires_at is not None:
+        raise ValueError("upsert_node(): pass expires_in OR expires_at, not both")
     overlap = _UPSERT_RESERVED & set(fields)
     if overlap:
         raise TypeError(
@@ -223,6 +235,7 @@ def upsert_node(
     params: dict = {"id": id, "fields": fp}
     if vector is not None: params["vector"] = list(vector)
     if expires_in is not None: params["expires_in"] = expires_in
+    if expires_at is not None: params["expires_at"] = expires_at
     if event_at is not None: params["event_at"] = event_at
     return Query(_verb="upsert_node", _params=params, _kind="write")
 
@@ -236,6 +249,8 @@ def _compile_upsert_node(p: dict) -> str:
     if "expires_in" in p:
         n, u = _parse_expires_in(p["expires_in"])
         parts.append(f"EXPIRES IN {n}{u}")
+    if "expires_at" in p:
+        parts.append(f"EXPIRES AT {dsl_literal(p['expires_at'])}")
     if "event_at" in p:
         parts.append(f"EVENT_AT {dsl_literal(p['event_at'])}")
     return " ".join(parts)

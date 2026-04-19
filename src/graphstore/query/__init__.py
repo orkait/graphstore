@@ -17,6 +17,11 @@ from graphstore.query import plugins
 from graphstore.query.filters import F
 from graphstore.query.runtime import Query
 from graphstore.query.time_expr import Time, TimeExpr
+from graphstore.query.pattern import P, Pattern
+from graphstore.query.agg import agg, AggFunc, HavingExpr
+from graphstore.query.evolve_expr import (
+    EvolveWhen, EvolveThen, EvolveCondition, EvolveAction,
+)
 from graphstore.query.verbs import (
     reads as _reads,
     writes as _writes,
@@ -217,4 +222,10 @@ class _QNamespace:
 q = _QNamespace()
 
 
-__all__ = ["q", "F", "Query", "Time", "TimeExpr", "register_verb"]
+__all__ = [
+    "q", "F", "Query", "Time", "TimeExpr",
+    "P", "Pattern",
+    "agg", "AggFunc", "HavingExpr",
+    "EvolveWhen", "EvolveThen", "EvolveCondition", "EvolveAction",
+    "register_verb",
+]
