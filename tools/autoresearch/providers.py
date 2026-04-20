@@ -59,13 +59,24 @@ def resolve_providers(
         base_url = p.get("base_url", "")
         if not base_url:
             continue
-        # Each provider config declares `env_key` pointing at an ENV field
-        # (see env.py). Typed: typos raise KeyError from ENV.__getitem__.
-        # Missing `env_key` falls back to "ollama" (works for local Ollama
-        # which accepts any non-empty API key).
-        env_field = p.get("env_key", "")
-        api_key = str(ENV[env_field]) if env_field else "ollama"
         is_local = p.get("is_local", "localhost" in base_url or "127.0.0.1" in base_url)
+        # Each provider config declares `env_key` pointing at an ENV field
+        # (see env.py). Typos raise KeyError from ENV.__getitem__. Non-local
+        # providers MUST declare env_key - silent fallback to a dummy key
+        # would produce bogus auth failures far from the root cause.
+        # Local providers (e.g. Ollama) accept any non-empty string so we
+        # tolerate missing env_key there.
+        env_field = p.get("env_key", "")
+        if not env_field:
+            if not is_local:
+                raise ValueError(
+                    f"provider {pid!r} in config.json is not local and is missing "
+                    f"'env_key'. Add 'env_key' pointing at an env.py field, or mark "
+                    f"the provider is_local=true."
+                )
+            api_key = "ollama"
+        else:
+            api_key = str(ENV[env_field])
         prefix = p.get("litellm_prefix") or ("ollama_chat" if is_local else "")
         available = p.get("models", {})
 
