@@ -549,96 +549,73 @@ def get_llm_proposal(prompt: str, config: dict) -> tuple[str, str, str]:
     """
     import re as _re
     import litellm
+    from tools.autoresearch.providers import resolve_providers
     litellm.suppress_debug_info = True
 
-    providers = config.get("providers", {})
-    active_pid = config.get("active_provider", "")
-    active_model = config.get("active_model", "")
-    provider_order = [active_pid] + [
-        p for p in config.get("provider_fallback_order", []) if p != active_pid
-    ]
-    provider_order = [p for p in dict.fromkeys(provider_order) if p in providers]
-
+    candidates = resolve_providers(config)
     last_error: Exception | None = None
 
-    for pid in provider_order:
-        p = providers.get(pid)
-        if not p:
-            continue
-        base_url = p.get("base_url", "")
-        api_key = (p.get("api_key", "")
-                   or os.environ.get(p.get("api_key_env", ""), "")
-                   or "ollama")
-        is_local = p.get("is_local",
-                         "localhost" in base_url or "127.0.0.1" in base_url)
-        if not base_url:
-            continue
+    for candidate in candidates:
+        pid = candidate["pid"]
+        litellm_model = candidate["litellm_model"]
+        api_base = candidate["api_base"]
+        api_key = candidate["api_key"]
+        model = litellm_model.split("/")[-1]
+        print(f"  -> {pid} / {litellm_model}")
 
-        available = p.get("models", {})
-        model_order = [active_model] + list(p.get("model_fallback_order", []))
-        model_order = [m for m in dict.fromkeys(model_order) if m and m in available]
-        if not model_order:
-            continue
+        for attempt in range(3):
+            try:
+                response = litellm.completion(
+                    model=litellm_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    api_base=api_base,
+                    api_key=api_key,
+                    stream=False,
+                    timeout=800,
+                    temperature=0.7,
+                )
+                raw_response = response.choices[0].message.content or ""
 
-        prefix = p.get("litellm_prefix") or ("ollama_chat" if is_local else "")
-        for model in model_order:
-            litellm_model = f"{prefix}/{model}" if prefix else model
-            print(f"  -> {pid} / {litellm_model}")
+                if not raw_response.strip():
+                    print(f"  Empty response (attempt {attempt+1}/3)")
+                    time.sleep(2)
+                    continue
 
-            for attempt in range(3):
-                try:
-                    response = litellm.completion(
-                        model=litellm_model,
-                        messages=[{"role": "user", "content": prompt}],
-                        api_base=base_url,
-                        api_key=api_key,
-                        stream=False,
-                        timeout=800,
-                        temperature=0.7,
-                    )
-                    raw_response = response.choices[0].message.content or ""
+                # Extract code: strip <think>, then markdown fences,
+                # then any prose before the first import/from/def line.
+                new_code = _re.sub(r"<think>.*?</think>", "", raw_response, flags=_re.DOTALL).strip()
+                if "```python" in new_code:
+                    new_code = new_code.split("```python")[1].split("```")[0].strip()
+                elif "```" in new_code:
+                    new_code = new_code.split("```")[1].split("```")[0].strip()
 
-                    if not raw_response.strip():
-                        print(f"  Empty response (attempt {attempt+1}/3)")
-                        time.sleep(2)
-                        continue
+                # Trim leading prose: find first line starting with
+                # from/import/def/class/@/#!/"""/' and drop everything before it
+                lines = new_code.split("\n")
+                start = 0
+                for idx, ln in enumerate(lines):
+                    s = ln.lstrip()
+                    if s.startswith(("from ", "import ", "def ", "class ",
+                                      "@", "#!", '"""', "'''", "# ")):
+                        start = idx
+                        break
+                new_code = "\n".join(lines[start:]).strip()
 
-                    # Extract code: strip <think>, then markdown fences,
-                    # then any prose before the first import/from/def line.
-                    new_code = _re.sub(r"<think>.*?</think>", "", raw_response, flags=_re.DOTALL).strip()
-                    if "```python" in new_code:
-                        new_code = new_code.split("```python")[1].split("```")[0].strip()
-                    elif "```" in new_code:
-                        new_code = new_code.split("```")[1].split("```")[0].strip()
+                if "def " not in new_code:
+                    print(f"  No function defs in response (attempt {attempt+1}/3)")
+                    time.sleep(2)
+                    continue
 
-                    # Trim leading prose: find first line starting with
-                    # from/import/def/class/@/#!/"""/' and drop everything before it
-                    lines = new_code.split("\n")
-                    start = 0
-                    for idx, ln in enumerate(lines):
-                        s = ln.lstrip()
-                        if s.startswith(("from ", "import ", "def ", "class ",
-                                          "@", "#!", '"""', "'''", "# ")):
-                            start = idx
-                            break
-                    new_code = "\n".join(lines[start:]).strip()
+                print(f"  Got {len(new_code)} chars from {model} (raw: {len(raw_response)})")
+                return new_code, model, raw_response
 
-                    if "def " not in new_code:
-                        print(f"  No function defs in response (attempt {attempt+1}/3)")
-                        time.sleep(2)
-                        continue
+            except Exception as e:
+                last_error = e
+                print(f"  Error (attempt {attempt+1}/3): {e}")
+                if attempt < 2:
+                    time.sleep(2 ** (attempt + 1))
 
-                    print(f"  Got {len(new_code)} chars from {model} (raw: {len(raw_response)})")
-                    return new_code, model, raw_response
-
-                except Exception as e:
-                    last_error = e
-                    print(f"  Error (attempt {attempt+1}/3): {e}")
-                    if attempt < 2:
-                        time.sleep(2 ** (attempt + 1))
-
-            print(f"  Model '{model}' exhausted on '{pid}'.")
-        print(f"  All models on provider '{pid}' exhausted.")
+        print(f"  Candidate '{pid}/{model}' exhausted.")
 
     raise RuntimeError(f"All providers/models failed. Last: {last_error}")
 
