@@ -335,62 +335,251 @@ def test_ingestor_reset_facts_clears_state(tmp_path: Path):
 # Compact mode: parser + DSL synthesis
 # --------------------------------------------------------------------
 
-def test_parse_compact_all_three_sections():
-    out = '''ENTS: "ent:priya"="Priya", "ent:openai"="OpenAI"
-BELIEFS: "fact:color"="blue"
-RETRACTS: "fact:old"'''
+def test_parse_compact_all_three_verbs():
+    out = '''U priya Priya
+U openai OpenAI
+F color blue
+D old'''
     turn = _parse_compact_output(out)
     assert turn.entities == [("ent:priya", "Priya"), ("ent:openai", "OpenAI")]
     assert turn.beliefs == [("fact:color", "blue")]
     assert turn.retracts == ["fact:old"]
 
 
-def test_parse_compact_none_values_are_empty():
-    out = '''ENTS: none
-BELIEFS: none
-RETRACTS: none'''
+def test_parse_compact_empty_output_is_empty_turn():
+    turn = _parse_compact_output("")
+    assert turn.entities == []
+    assert turn.beliefs == []
+    assert turn.retracts == []
+
+
+def test_parse_compact_entities_only():
+    turn = _parse_compact_output("U kailash Kailash")
+    assert turn.entities == [("ent:kailash", "Kailash")]
+    assert turn.beliefs == []
+    assert turn.retracts == []
+
+
+def test_parse_compact_multi_word_name_joined_by_whitespace():
+    """Rest-of-line is the name; split on first 2 whitespace runs only."""
+    turn = _parse_compact_output("U sf San Francisco")
+    assert turn.entities == [("ent:sf", "San Francisco")]
+
+
+def test_parse_compact_case_insensitive_verbs():
+    out = "u priya Priya\nf color blue\nd old"
+    turn = _parse_compact_output(out)
+    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.beliefs == [("fact:color", "blue")]
+    assert turn.retracts == ["fact:old"]
+
+
+def test_parse_compact_aliases_upsert_assert_retract():
+    out = "UPSERT priya Priya\nASSERT color blue\nRETRACT old"
+    turn = _parse_compact_output(out)
+    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.beliefs == [("fact:color", "blue")]
+    assert turn.retracts == ["fact:old"]
+
+
+def test_parse_compact_tolerates_fence_lines():
+    out = "```\nU x X\n```"
+    turn = _parse_compact_output(out)
+    assert turn.entities == [("ent:x", "X")]
+
+
+def test_parse_compact_strips_prefix_if_model_adds_it():
+    """Model sometimes emits 'U ent:x X'; we normalize to slug-only."""
+    turn = _parse_compact_output('U ent:priya Priya')
+    assert turn.entities == [("ent:priya", "Priya")]
+
+    turn2 = _parse_compact_output('F fact:color blue')
+    assert turn2.beliefs == [("fact:color", "blue")]
+
+
+def test_parse_compact_ignores_unknown_verbs():
+    out = "U priya Priya\nFOO some garbage\nD old"
+    turn = _parse_compact_output(out)
+    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.retracts == ["fact:old"]
+
+
+def test_parse_compact_ignores_malformed_short_lines():
+    """Missing required args -> line dropped, no crash."""
+    out = "U justslug\nF onlytopic\nD\n"
     turn = _parse_compact_output(out)
     assert turn.entities == []
     assert turn.beliefs == []
     assert turn.retracts == []
 
 
-def test_parse_compact_missing_sections_default_empty():
-    out = 'ENTS: "ent:x"="X"'
+def test_parse_compact_strips_quotes_if_present():
+    """Model occasionally wraps tokens in quotes; handle both."""
+    turn = _parse_compact_output('U "priya" "Priya"')
+    assert turn.entities == [("ent:priya", "Priya")]
+
+
+# --------------------------------------------------------------------
+# Compact v5: non-ingest verbs (edges, retrieval, walks, sys/vault)
+# --------------------------------------------------------------------
+
+def test_parse_compact_edge_emits_create_edge():
+    turn = _parse_compact_output("E ent:priya ent:flipkart works_at")
+    assert turn.statements == [
+        'CREATE EDGE "ent:priya" -> "ent:flipkart" kind = "works_at"'
+    ]
+    assert turn.entities == []
+
+
+def test_parse_compact_edge_needs_three_args():
+    turn = _parse_compact_output("E ent:a ent:b")
+    assert turn.statements == []
+
+
+def test_parse_compact_remember():
+    turn = _parse_compact_output("RM what I said about coffee")
+    assert turn.statements == ['REMEMBER "what I said about coffee" LIMIT 10']
+
+
+def test_parse_compact_similar():
+    turn = _parse_compact_output("SM joining a startup")
+    assert turn.statements == ['SIMILAR TO "joining a startup" LIMIT 10']
+
+
+def test_parse_compact_lexical():
+    turn = _parse_compact_output("LX python parser bug")
+    assert turn.statements == ['LEXICAL SEARCH "python parser bug" LIMIT 10']
+
+
+def test_parse_compact_answer():
+    turn = _parse_compact_output("AQ where does Priya work")
+    assert turn.statements == ['ANSWER "where does Priya work"']
+
+
+def test_parse_compact_recall_walk():
+    turn = _parse_compact_output("RL ent:priya")
+    assert turn.statements == ['RECALL FROM "ent:priya" DEPTH 2']
+
+
+def test_parse_compact_traverse_walk():
+    turn = _parse_compact_output("TR ent:priya")
+    assert turn.statements == ['TRAVERSE FROM "ent:priya" DEPTH 2']
+
+
+def test_parse_compact_ancestors_walk():
+    turn = _parse_compact_output("AN fact:favorite_color")
+    assert turn.statements == ['ANCESTORS OF "fact:favorite_color" DEPTH 3']
+
+
+def test_parse_compact_subgraph_walk():
+    turn = _parse_compact_output("SG ent:openai")
+    assert turn.statements == ['SUBGRAPH FROM "ent:openai" DEPTH 2']
+
+
+def test_parse_compact_sys_snapshot():
+    turn = _parse_compact_output("SS")
+    assert turn.statements == ['SYS SNAPSHOT']
+
+
+def test_parse_compact_sys_compact_verb():
+    turn = _parse_compact_output("SC")
+    assert turn.statements == ['SYS COMPACT']
+
+
+def test_parse_compact_sys_health():
+    turn = _parse_compact_output("SH")
+    assert turn.statements == ['SYS HEALTH']
+
+
+def test_parse_compact_sys_stats():
+    turn = _parse_compact_output("ST")
+    assert turn.statements == ['SYS STATS']
+
+
+def test_parse_compact_sys_explain():
+    turn = _parse_compact_output("SX what I said about coffee")
+    assert turn.statements == ['SYS EXPLAIN REMEMBER "what I said about coffee"']
+
+
+def test_parse_compact_vault_sync():
+    turn = _parse_compact_output("VS")
+    assert turn.statements == ['VAULT SYNC']
+
+
+def test_parse_compact_mixed_ingest_and_query():
+    out = '''U priya Priya
+U openai OpenAI
+RM what I said about coffee'''
     turn = _parse_compact_output(out)
-    assert turn.entities == [("ent:x", "X")]
-    assert turn.beliefs == []
-    assert turn.retracts == []
+    assert turn.entities == [("ent:priya", "Priya"), ("ent:openai", "OpenAI")]
+    assert turn.statements == ['REMEMBER "what I said about coffee" LIMIT 10']
 
 
-def test_parse_compact_case_insensitive():
-    out = 'ents: "ent:x"="X"\nBELIEFS: "fact:y"="Y"'
-    turn = _parse_compact_output(out)
-    assert turn.entities == [("ent:x", "X")]
-    assert turn.beliefs == [("fact:y", "Y")]
+def test_parse_compact_escapes_quotes_in_query_text():
+    turn = _parse_compact_output('RM she said "go"')
+    assert turn.statements == ['REMEMBER "she said \\"go\\"" LIMIT 10']
 
 
-def test_parse_compact_tolerates_fence_lines():
-    out = '''```
-ENTS: "ent:x"="X"
-```'''
-    turn = _parse_compact_output(out)
-    assert turn.entities == [("ent:x", "X")]
+def test_parse_compact_query_verb_without_body_dropped():
+    turn = _parse_compact_output("RM   \nSM")
+    assert turn.statements == []
 
 
-def test_parse_compact_escaped_quote_in_value():
-    out = 'ENTS: "ent:a"="Alice \\"Ace\\" Smith"'
-    turn = _parse_compact_output(out)
-    assert turn.entities == [("ent:a", 'Alice \\"Ace\\" Smith')]
+def test_parse_compact_walk_verb_without_anchor_dropped():
+    turn = _parse_compact_output("RL\nTR")
+    assert turn.statements == []
 
 
-def test_parse_compact_ignores_unknown_prefixes():
-    out = '''ENTS: "ent:x"="X"
-FOO: not a section
-BELIEFS: "fact:y"="Y"'''
-    turn = _parse_compact_output(out)
-    assert turn.entities == [("ent:x", "X")]
-    assert turn.beliefs == [("fact:y", "Y")]
+def test_parse_compact_plain_verb_ignores_trailing_tokens():
+    """SS foo still fires; plain handler ignores the rest of the line."""
+    turn = _parse_compact_output("SS ignored")
+    assert turn.statements == ['SYS SNAPSHOT']
+
+
+def test_parse_compact_long_verb_aliases():
+    turn = _parse_compact_output(
+        "REMEMBER coffee\nSIMILAR tea\nRECALL ent:a\nTRAVERSE ent:b"
+    )
+    assert turn.statements == [
+        'REMEMBER "coffee" LIMIT 10',
+        'SIMILAR TO "tea" LIMIT 10',
+        'RECALL FROM "ent:a" DEPTH 2',
+        'TRAVERSE FROM "ent:b" DEPTH 2',
+    ]
+
+
+def test_parse_compact_edge_escapes_quotes_in_ids():
+    """Quote-escape applies inside CREATE EDGE even if ids carry weird chars."""
+    turn = _parse_compact_output('E ent:a ent:b weird"kind')
+    assert turn.statements == [
+        'CREATE EDGE "ent:a" -> "ent:b" kind = "weird\\"kind"'
+    ]
+
+
+# --------------------------------------------------------------------
+# DSL synthesis (v5 pre-rendered statements)
+# --------------------------------------------------------------------
+
+def test_synthesize_appends_statements_verbatim():
+    turn = CompactTurn(
+        entities=[("ent:x", "X")],
+        statements=['REMEMBER "hello" LIMIT 3', 'SYS STATS'],
+    )
+    dsl = _synthesize_dsl(turn, msg_id="m:0", session_id="s", role="user", text="hi")
+    assert dsl[-2] == 'REMEMBER "hello" LIMIT 3'
+    assert dsl[-1] == 'SYS STATS'
+
+
+def test_synthesize_statements_only_still_includes_create_node():
+    turn = CompactTurn(statements=['REMEMBER "x" LIMIT 10'])
+    dsl = _synthesize_dsl(turn, msg_id="m:0", session_id="s", role="user", text="x")
+    assert any(d.startswith('CREATE NODE "m:0"') for d in dsl)
+    assert 'REMEMBER "x" LIMIT 10' in dsl
+
+
+def test_compact_turn_default_statements_empty():
+    turn = CompactTurn()
+    assert turn.statements == []
 
 
 def test_dsl_escape_handles_quote_and_backslash():

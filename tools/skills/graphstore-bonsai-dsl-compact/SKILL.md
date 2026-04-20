@@ -1,96 +1,146 @@
 ---
 name: graphstore-bonsai-dsl-compact
-description: Ultra-compact NL->semantic-fields skill. LLM emits only the novel information in three tagged lines (ENTS, BELIEFS, RETRACTS). Python templates build the full DSL deterministically. ~6-7x fewer output tokens than the full-DSL skill, measured on 4B TQ1_0.
+description: Unified verb-positional caveman grammar covering every common GraphStore DSL operation. LLM emits 2-letter verbs + positional args, Python expands to full DSL. ~3-5x fewer output tokens than raw DSL on every path - ingest, query, walk, ops.
 compatibility: graphstore >= 0.4.0
 metadata:
   author: orkait
-  version: "1.0"
-  target_tokens: 320
-  mode: compact
+  version: "5.0"
+  target_tokens: 900
+  mode: unified-positional
 ---
 
-Read the user turn. Output EXACTLY three lines in this order:
+Read the user turn. Output zero or more ops, one per line. No prose, no quotes (unless required inside a query string), no `<think>` tags, no fences.
+
+Each line: `<verb> <arg1> [arg2...]`. Multi-word trailing args (names, query text) are allowed; the verb's shape fixes how Python splits the tokens.
+
+## Ingest (user said something about an entity / themselves)
 
 ```
-ENTS: <comma-separated "ent:<slug>"="<Name>", or "none">
-BELIEFS: <comma-separated "fact:<topic>"="<value>", or "none">
-RETRACTS: <comma-separated "fact:<topic>", or "none">
+U <slug> <Name>              Upsert entity. Python auto-wires mentions edge from msg.
+F <topic> <value>            User's first-person fact ("I", "my"). topic=snake_case.
+D <topic>                    Drop a fact (retract). Requires matching known fact.
 ```
 
-No DSL, no prose, no `<think>` tags, no markdown fences. Three lines. Nothing else.
+## Graph edges (explicit relationships between entities)
 
-- ENTS lists every named person / org / place / product in the message. Slug is lowercase with underscores. One entry per unique entity per message.
-- BELIEFS lists **only** first-person statements about the speaker themselves. The sentence must use "I", "my", "me", "mine", or similar. A third-person observation like "Priya moved to Bangalore" is NOT a belief; those entities go in ENTS. Topic = short snake_case.
-- RETRACTS lists existing fact_ids the new message contradicts. Only valid when `### KNOWN FACTS` appears above and the user overrides one. Use the same fact_id from KNOWN FACTS.
+```
+E <from_id> <to_id> <kind>   Create edge with given kind. IDs include their prefix (ent:X or fact:X).
+```
 
-Use `none` when a category is empty. Escape `"` inside values as `\"`.
+## Semantic retrieval (user asked a question)
+
+```
+RM <query text>              REMEMBER (4-signal NL retrieval, default LIMIT 10)
+SM <query text>              SIMILAR TO (vector only, default LIMIT 10)
+LX <query text>              LEXICAL SEARCH (BM25 only, default LIMIT 10)
+AQ <question text>           ANSWER (LLM-answered recall)
+```
+
+## Structural walks (from a known anchor id)
+
+```
+RL <anchor_id>               RECALL FROM anchor DEPTH 2 (spreading activation)
+TR <anchor_id>               TRAVERSE FROM anchor DEPTH 2 (deterministic walk)
+AN <anchor_id>               ANCESTORS OF anchor DEPTH 3
+SG <anchor_id>               SUBGRAPH FROM anchor DEPTH 2
+```
+
+## SYS / vault ops
+
+```
+SS                           SYS SNAPSHOT
+SC                           SYS COMPACT
+SH                           SYS HEALTH
+ST                           SYS STATS
+SX <query>                   SYS EXPLAIN REMEMBER (dry-run a retrieval)
+VS                           VAULT SYNC
+```
+
+## Rules
+
+- Third-person observations emit `U`, NOT `F`. Beliefs require first-person pronouns.
+- Empty output is valid - emit nothing if nothing applies.
+- If `### KNOWN FACTS` appears above, reuse those topic names exactly when updating same concept.
+- Slugs and topics must be single tokens (lowercase + underscores). Names / values / query text can be multi-word.
+- For query verbs, write the question as free text - no quotes, Python adds them.
 
 ---
 
-**Input (third-person observation; BELIEFS stays empty):**
-Session s1, msg m:s1:0, user: "Kailash joined OpenAI as DB engineer."
+**Input:** "Kailash joined OpenAI."
 
 **Output:**
 ```
-ENTS: "ent:kailash"="Kailash", "ent:openai"="OpenAI"
-BELIEFS: none
-RETRACTS: none
-```
-
-**Input (third-person with a location; still no beliefs):**
-Session s1, msg m:s1:1, user: "Priya moved to Bangalore and joined Flipkart."
-
-**Output:**
-```
-ENTS: "ent:priya"="Priya", "ent:bangalore"="Bangalore", "ent:flipkart"="Flipkart"
-BELIEFS: none
-RETRACTS: none
+U kailash Kailash
+U openai OpenAI
 ```
 
 ---
 
-**Input:**
-Session s2, msg m:s2:0, user: "My favorite color is blue."
+**Input:** "Priya works at Flipkart since 2023 as a frontend engineer."
 
 **Output:**
 ```
-ENTS: none
-BELIEFS: "fact:favorite_color"="blue"
-RETRACTS: none
+U priya Priya
+U flipkart Flipkart
+E ent:priya ent:flipkart works_at
 ```
 
 ---
 
-**Input (user contradicts a prior fact, use its exact fact_id):**
-
-```
-### KNOWN FACTS (reuse these fact_ids; emit RETRACT + ASSERT to update)
-[fact:favorite_drink] kind="belief" value="coffee" confidence=0.90
-
-Session s3, msg m:s3:1, user: "Actually I prefer tea now."
-```
+**Input:** "My favorite color is blue."
 
 **Output:**
 ```
-ENTS: none
-BELIEFS: "fact:favorite_drink"="tea"
-RETRACTS: "fact:favorite_drink"
+F favorite_color blue
 ```
 
 ---
 
-**Input (multi-entity + belief + belief update):**
-
+**Input (correction; known fact exists):**
 ```
 ### KNOWN FACTS
-[fact:lives_in] kind="belief" value="Delhi" confidence=0.90
+[fact:favorite_drink] kind="belief" value="coffee"
 
-Session s4, msg m:s4:2, user: "Priya moved to Bangalore and joined Flipkart. I now live in Pune."
+user: "Actually I prefer tea now."
 ```
+**Output:**
+```
+D favorite_drink
+F favorite_drink tea
+```
+
+---
+
+**Input:** "Remember what I said about coffee."
 
 **Output:**
 ```
-ENTS: "ent:priya"="Priya", "ent:bangalore"="Bangalore", "ent:flipkart"="Flipkart", "ent:pune"="Pune"
-BELIEFS: "fact:lives_in"="Pune"
-RETRACTS: "fact:lives_in"
+RM what I said about coffee
+```
+
+---
+
+**Input:** "Find messages similar to 'joining a startup'."
+
+**Output:**
+```
+SM joining a startup
+```
+
+---
+
+**Input:** "How is Priya connected to OpenAI?"
+
+**Output:**
+```
+RL ent:priya
+```
+
+---
+
+**Input:** "Take a snapshot."
+
+**Output:**
+```
+SS
 ```

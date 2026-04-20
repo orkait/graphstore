@@ -227,64 +227,169 @@ def _scrape_belief_updates(
 
 
 # --------------------------------------------------------------------
-# Compact output mode: LLM emits 3 tagged lines (ENTS/BELIEFS/RETRACTS);
-# we synthesize the full DSL in Python. 3-5x fewer output tokens than the
-# full-DSL mode, measured on 4B TQ1_0. See tools/skills/graphstore-bonsai-
-# dsl-compact/SKILL.md for the exact output contract.
+# Compact output mode ("caveman v5"): LLM emits one verb per line covering
+# the whole DSL surface. Python inflates to full DSL. Measured ~3-5x fewer
+# output tokens than raw DSL on every path. See
+# tools/skills/graphstore-bonsai-dsl-compact/SKILL.md for the contract.
+#
+# Verbs fall into three groups:
+#   1. Fact-state (U / F / D): populate entities / beliefs / retracts slots
+#      so _synthesize_dsl can auto-wire mention edges and cross-message
+#      belief identity works.
+#   2. Edge (E): pre-renders a CREATE EDGE line.
+#   3. Retrieval (RM/SM/LX/AQ), walks (RL/TR/AN/SG), sys/vault
+#      (SS/SC/SH/ST/SX/VS): each pre-renders one full DSL line directly.
+#
+# Groups 2 and 3 accumulate in turn.statements and get appended verbatim
+# after the mention wiring and fact updates.
+#
+# Unknown verbs and malformed lines are silently dropped (LLM may drift;
+# parser is lax so a single bad line doesn't lose the whole turn).
 # --------------------------------------------------------------------
-
-# One "key"="value" pair, capturing both sides. "key" matches ent: or fact:
-# prefixes; "value" is everything between the escaped-quote-aware delimiters.
-_COMPACT_KV_RE = re.compile(r'"([^"\\]+(?:\\.[^"\\]*)*)"\s*=\s*"([^"\\]*(?:\\.[^"\\]*)*)"')
-# Bare-id list item (RETRACTS uses these).
-_COMPACT_ID_RE = re.compile(r'"([^"\\]+(?:\\.[^"\\]*)*)"')
 
 
 @dataclass
 class CompactTurn:
-    """Parsed structured output of a compact-mode LLM call."""
+    """Parsed structured output of a compact-mode LLM call (v5 option A)."""
 
-    entities: list[tuple[str, str]] = field(default_factory=list)  # [(ent_id, name), ...]
-    beliefs: list[tuple[str, str]] = field(default_factory=list)   # [(fact_id, value), ...]
-    retracts: list[str] = field(default_factory=list)              # [fact_id, ...]
+    entities: list[tuple[str, str]] = field(default_factory=list)
+    beliefs: list[tuple[str, str]] = field(default_factory=list)
+    retracts: list[str] = field(default_factory=list)
+    statements: list[str] = field(default_factory=list)
+
+
+def _dsl_escape(s: str) -> str:
+    """Escape a Python string for safe embedding inside a DSL "..." literal."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _h_upsert(turn: CompactTurn, ln: str) -> None:
+    """U <slug> <Name ...>"""
+    parts = ln.split(None, 2)
+    if len(parts) < 3:
+        return
+    slug = parts[1].removeprefix("ent:").strip('"')
+    name = parts[2].strip().strip('"')
+    if slug and name:
+        turn.entities.append((f"ent:{slug}", name))
+
+
+def _h_fact(turn: CompactTurn, ln: str) -> None:
+    """F <topic> <value ...>"""
+    parts = ln.split(None, 2)
+    if len(parts) < 3:
+        return
+    topic = parts[1].removeprefix("fact:").strip('"')
+    value = parts[2].strip().strip('"')
+    if topic and value:
+        turn.beliefs.append((f"fact:{topic}", value))
+
+
+def _h_drop(turn: CompactTurn, ln: str) -> None:
+    """D <topic>"""
+    parts = ln.split()
+    if len(parts) < 2:
+        return
+    topic = parts[1].removeprefix("fact:").strip('"')
+    if topic:
+        turn.retracts.append(f"fact:{topic}")
+
+
+def _h_edge(turn: CompactTurn, ln: str) -> None:
+    """E <from_id> <to_id> <kind>  (ids include ent:/fact: prefix)"""
+    parts = ln.split()
+    if len(parts) < 4:
+        return
+    from_id = parts[1].strip('"')
+    to_id = parts[2].strip('"')
+    kind = parts[3].strip('"')
+    if from_id and to_id and kind:
+        turn.statements.append(
+            f'CREATE EDGE "{_dsl_escape(from_id)}" -> "{_dsl_escape(to_id)}" '
+            f'kind = "{_dsl_escape(kind)}"'
+        )
+
+
+def _h_query(template: str):
+    """Factory for verbs whose argument is free-text (wrapped in DSL quotes)."""
+    def h(turn: CompactTurn, ln: str) -> None:
+        parts = ln.split(None, 1)
+        if len(parts) < 2 or not parts[1].strip():
+            return
+        q = _dsl_escape(parts[1].strip())
+        turn.statements.append(template.replace("{q}", q))
+    return h
+
+
+def _h_walk(template: str):
+    """Factory for verbs whose argument is a single anchor id."""
+    def h(turn: CompactTurn, ln: str) -> None:
+        parts = ln.split()
+        if len(parts) < 2:
+            return
+        anchor = parts[1].strip('"')
+        if anchor:
+            turn.statements.append(template.replace("{id}", _dsl_escape(anchor)))
+    return h
+
+
+def _h_plain(template: str):
+    """Factory for zero-arg verbs (SS/SC/SH/ST/VS)."""
+    def h(turn: CompactTurn, _ln: str) -> None:
+        turn.statements.append(template)
+    return h
+
+
+_COMPACT_HANDLERS: dict[str, Any] = {
+    "U": _h_upsert, "UP": _h_upsert, "UPSERT": _h_upsert,
+    "F": _h_fact, "FACT": _h_fact, "B": _h_fact, "ASSERT": _h_fact,
+    "D": _h_drop, "DROP": _h_drop, "R": _h_drop, "RETRACT": _h_drop,
+    "E": _h_edge, "EDGE": _h_edge,
+    "RM": _h_query('REMEMBER "{q}" LIMIT 10'),
+    "REMEMBER": _h_query('REMEMBER "{q}" LIMIT 10'),
+    "SM": _h_query('SIMILAR TO "{q}" LIMIT 10'),
+    "SIMILAR": _h_query('SIMILAR TO "{q}" LIMIT 10'),
+    "LX": _h_query('LEXICAL SEARCH "{q}" LIMIT 10'),
+    "LEXICAL": _h_query('LEXICAL SEARCH "{q}" LIMIT 10'),
+    "AQ": _h_query('ANSWER "{q}"'),
+    "ANSWER": _h_query('ANSWER "{q}"'),
+    "RL": _h_walk('RECALL FROM "{id}" DEPTH 2'),
+    "RECALL": _h_walk('RECALL FROM "{id}" DEPTH 2'),
+    "TR": _h_walk('TRAVERSE FROM "{id}" DEPTH 2'),
+    "TRAVERSE": _h_walk('TRAVERSE FROM "{id}" DEPTH 2'),
+    "AN": _h_walk('ANCESTORS OF "{id}" DEPTH 3'),
+    "ANCESTORS": _h_walk('ANCESTORS OF "{id}" DEPTH 3'),
+    "SG": _h_walk('SUBGRAPH FROM "{id}" DEPTH 2'),
+    "SUBGRAPH": _h_walk('SUBGRAPH FROM "{id}" DEPTH 2'),
+    "SS": _h_plain('SYS SNAPSHOT'),
+    "SC": _h_plain('SYS COMPACT'),
+    "SH": _h_plain('SYS HEALTH'),
+    "ST": _h_plain('SYS STATS'),
+    "SX": _h_query('SYS EXPLAIN REMEMBER "{q}"'),
+    "VS": _h_plain('VAULT SYNC'),
+}
 
 
 def _parse_compact_output(cleaned: str) -> CompactTurn:
-    """Read the 3-line ENTS/BELIEFS/RETRACTS output.
+    """Parse v5 unified verb-positional output.
 
-    Tolerant: missing sections default to empty, unknown prefixes ignored,
-    case-insensitive on section labels, honors `none` as empty.
+    Each non-blank, non-fence line is one verb + positional args. U/F/D
+    populate the entities/beliefs/retracts slots for fact-state wiring; all
+    other verbs render directly to pre-built DSL lines in turn.statements.
+    Unknown verbs and malformed lines are silently dropped.
     """
     turn = CompactTurn()
     for raw_ln in cleaned.splitlines():
         ln = raw_ln.strip()
         if not ln or _FENCE_RE.match(ln):
             continue
-        lower = ln.lower()
-        if lower.startswith("ents:"):
-            body = ln[5:].strip()
-            if body.lower() in ("none", ""):
-                continue
-            for m in _COMPACT_KV_RE.finditer(body):
-                turn.entities.append((m.group(1), m.group(2)))
-        elif lower.startswith("beliefs:"):
-            body = ln[8:].strip()
-            if body.lower() in ("none", ""):
-                continue
-            for m in _COMPACT_KV_RE.finditer(body):
-                turn.beliefs.append((m.group(1), m.group(2)))
-        elif lower.startswith("retracts:"):
-            body = ln[9:].strip()
-            if body.lower() in ("none", ""):
-                continue
-            for m in _COMPACT_ID_RE.finditer(body):
-                turn.retracts.append(m.group(1))
+        head = ln.split(maxsplit=1)[0]
+        verb = head.upper().rstrip(":")
+        handler = _COMPACT_HANDLERS.get(verb)
+        if handler is None:
+            continue
+        handler(turn, ln)
     return turn
-
-
-def _dsl_escape(s: str) -> str:
-    """Escape a Python string for safe embedding inside a DSL "..." literal."""
-    return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _synthesize_dsl(
@@ -297,13 +402,13 @@ def _synthesize_dsl(
 ) -> list[str]:
     """Build the full DSL statement list from the parsed compact output.
 
-    Deterministic. Same CompactTurn + same identifiers always produce the
-    same list of statements. Emits:
+    Deterministic. Emits in order:
       1. CREATE NODE for the message (DOCUMENT = user text).
       2. UPSERT NODE per entity + matching CREATE EDGE kind = "mentions".
          Entities are deduped by id (first wins).
       3. RETRACT per retract (before any ASSERT).
       4. ASSERT per belief.
+      5. Pre-rendered statements (edges, queries, walks, sys ops) verbatim.
     """
     out: list[str] = []
     text_esc = _dsl_escape(text)
@@ -342,6 +447,8 @@ def _synthesize_dsl(
             f'ASSERT "{_dsl_escape(fact_id)}" kind = "belief" '
             f'value = "{_dsl_escape(value)}" CONFIDENCE 0.9 SOURCE "{msg_esc}"'
         )
+
+    out.extend(turn.statements)
 
     return out
 
