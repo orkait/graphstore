@@ -77,25 +77,26 @@ cost            ingest_tokens, query_tokens
 
 ```
 framework/
-  cli.py                  # Unified CLI (all 3 benchmarks)
-  runner.py               # Generic per-record runner (LongMemEval)
-  run_locomo.py           # LoCoMo protocol (ingest-once, F1 scoring)
-  run_beam.py             # BEAM protocol (chunk + answer generation)
-  run_longmemeval.py      # LongMemEval native runner (NDCG, per-type)
-  adapter.py              # MemoryAdapter protocol
-  adapters/graphstore_.py # GraphStore adapter (5-signal REMEMBER)
-  datasets.py             # Dataset loaders (longmemeval, locomo)
-  metrics.py              # Quality, latency, memory metrics
-  report.py               # JSON, CSV, Markdown output
-  entity_extraction.py    # NER for graph enrichment
-  ratchet_recall.py       # LoCoMo evidence-recall metrics
-  ratchet_test.py         # Ratchet test harness
-  llm_client.py           # LoCoMo LLM client
-  llm_batch.py            # Async batch LLM caller
-  llm_judge.py            # LongMemEval QA judge
-  docker_runner.py        # Docker entry point
-  Dockerfile.bench        # CPU container
-  Dockerfile.bench.gpu    # GPU container
+  cli.py                        # Unified CLI (all 3 benchmarks)
+  runner.py                     # Generic per-record runner (LongMemEval)
+  run_locomo.py                 # LoCoMo protocol (ingest-once, F1 + LLM judge)
+  run_beam.py                   # BEAM protocol (chunk + answer generation)
+  run_longmemeval.py            # LongMemEval native runner (NDCG, per-type)
+  adapter.py                    # MemoryAdapter protocol
+  adapters/graphstore_.py       # Native-DSL adapter (5-signal REMEMBER)
+  adapters/graphstore_skill.py  # Skill-based ingest adapter (LLM-planned DSL)
+  datasets.py                   # Dataset loaders (longmemeval, locomo)
+  metrics.py                    # Quality, latency, memory metrics
+  report.py                     # JSON, CSV, Markdown output
+  entity_extraction.py          # NER for graph enrichment (used by graphstore_.py)
+  ratchet_recall.py             # LoCoMo evidence-recall metrics
+  ratchet_test.py               # Ratchet test harness (50Q random 10/cat)
+  llm_runner.py                 # Shared LLM transport: rate-limit + retry + fallback
+  llm_client.py                 # LoCoMo reader/judge wrappers (delegates to llm_runner)
+  llm_judge.py                  # LongMemEval per-category judge prompts
+  docker_runner.py              # Docker entry point
+  Dockerfile.bench              # CPU container
+  Dockerfile.bench.gpu          # GPU container
 ```
 
 ## Docker
