@@ -31,6 +31,8 @@ SIMILAR TO [0.1, 0.2, ...] LIMIT 10
 LEXICAL SEARCH "phrase" LIMIT 10
 REMEMBER "query" LIMIT 10
 REMEMBER "query" AT "2024-03" TOKENS 4000
+ANSWER "question" LIMIT 5
+ANSWER "question" LIMIT 5 USING "reader-name"
 WHAT IF RETRACT "id"
 ```
 
@@ -100,6 +102,25 @@ REMEMBER "quarterly revenue trends" TOKENS 4000
 ```
 
 5-signal fusion over vector + BM25 + recency + graph + confidence. See [REMEMBER pipeline](../concepts/remember-pipeline).
+
+Every result carries per-signal scores on every node (`_remember_score`, `_vector_sim`, `_bm25_score`, `_recency_score`, `_graph_score`, `_co_bonus`, `_recall_boost`, `_rank_stage`) and a rich `Result.meta["signals"]` block describing fusion weights, recency half-life, per-stage candidate counts, reranker state, and nucleus state.
+
+### Dry-run the pipeline
+
+```sql
+SYS EXPLAIN REMEMBER "quarterly revenue trends" LIMIT 3
+```
+
+Returns the candidate plan with per-signal scores without materializing nodes, running the reranker, triggering nucleus, or mutating recall counts. Safe for iterative tuning.
+
+### Retrieval-augmented answer
+
+```sql
+ANSWER "What were the biggest Q3 revenue drivers?" LIMIT 5
+ANSWER "Who attended the LGBTQ support group?" LIMIT 5 USING "careful-reader"
+```
+
+Runs REMEMBER internally, hands retrieved passages + question to a reader LLM configured at GraphStore construction (`reader=` or `readers={...}`), returns `{answer, cited_slots, candidates, reader}` plus the same `meta["signals"]` telemetry. Graphstore ships no LLM dependency; the reader is a user-supplied callable.
 
 ### Temporal retrieval
 
