@@ -50,6 +50,14 @@ LOCAL_DEFAULT_RPM = 0
 
 _WINDOW_SECONDS = 60.0
 
+# Canonical QA model priority used by get_shared_runner. Deterministic
+# non-reasoning model first, cloud paid fallback second. Kept here so
+# benches + autoresearch agree on what "the" eval model is.
+QA_MODEL_PRIORITY: list[str] = [
+    "gemma4:31b-cloud",       # Ollama cloud tag - primary for QA
+    "google/gemma-4-31b-it",  # OpenRouter paid fallback
+]
+
 
 @dataclass(slots=True)
 class _Concurrency:
@@ -253,8 +261,7 @@ def get_shared_runner() -> "LLMRunner":
     global _SHARED
     if _SHARED is None:
         from tools.autoresearch.providers import load_config, resolve_providers
-        _QA_MODELS = ["gemma4:31b-cloud", "google/gemma-4-31b-it"]
-        providers = resolve_providers(load_config(), model_priority=_QA_MODELS)
+        providers = resolve_providers(load_config(), model_priority=QA_MODEL_PRIORITY)
         if not providers:
             raise RuntimeError(
                 "No LLM providers resolved. Check tools/autoresearch/config.json "
