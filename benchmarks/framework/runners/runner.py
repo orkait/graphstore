@@ -15,9 +15,9 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from .adapter import MemoryAdapter
-from .datasets import BenchmarkDataset
-from .metrics import RunResult
+from ..adapters.base import MemoryAdapter
+from ..datasets import BenchmarkDataset
+from ..metrics import RunResult
 
 
 def _now_iso() -> str:
@@ -70,7 +70,7 @@ def run_benchmark(
     result.memory.start()
     t0 = time.perf_counter()
 
-    from .adapter import QueryContext
+    from ..adapters.base import QueryContext
 
     n_records = len(records)
     print(f"[{adapter.name}] evaluating {n_records} records from {dataset.name}")
@@ -119,7 +119,7 @@ def run_benchmark(
                 result.cost.query_tokens += qres.tokens_used
 
             if qa_eval and qres.retrieved_memories:
-                from .llm_judge import generate_answer, judge_answer
+                from ..transport.llm_judge import generate_answer, judge_answer
                 answer = generate_answer(rec.question.question, qres.retrieved_memories)
                 correct = judge_answer(
                     rec.question.question,

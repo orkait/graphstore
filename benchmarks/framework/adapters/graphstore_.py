@@ -26,7 +26,7 @@ import numpy as np
 from graphstore import GraphStore, __version__ as _GS_VERSION
 from graphstore.core.errors import NodeExists
 
-from ..adapter import QueryContext, QueryResult, Session, TimedOperation
+from .base import QueryContext, QueryResult, Session, TimedOperation
 from ..entity_extraction import build_entity_extractor
 
 

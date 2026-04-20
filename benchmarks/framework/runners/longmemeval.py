@@ -18,7 +18,7 @@ try:
     download_all()
 except ImportError:
     import sys
-    scripts_path = Path(__file__).parent.parent.parent / "tools" / "scripts"
+    scripts_path = Path(__file__).parent.parent.parent.parent / "tools" / "scripts"
     if scripts_path.exists():
         sys.path.append(str(scripts_path))
         try:

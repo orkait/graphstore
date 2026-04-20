@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "autoresearch" / "config.json"
+_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "autoresearch" / "config.json"
 
 QA_MODEL = "gemma4:31b-cloud"
 QA_FALLBACK = "qwen3.5:cloud"
@@ -29,7 +29,7 @@ def llm_call(prompt: str, config: dict | None = None, temperature: float = 0.0, 
     or the async ``LLMRunner.call_one`` / ``call_many``. The ``config``
     parameter is ignored (runner reads autoresearch config itself).
     """
-    from benchmarks.framework.llm_runner import get_shared_runner
+    from benchmarks.framework.transport.llm_runner import get_shared_runner
     return get_shared_runner().call_sync(prompt, max_tokens=max_tokens, temperature=temperature)
 
 

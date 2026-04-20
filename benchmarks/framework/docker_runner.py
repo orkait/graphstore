@@ -15,7 +15,7 @@ from pathlib import Path
 from .adapters import get_adapter
 from .datasets import load_longmemeval
 from .report import write_csv, write_json, write_markdown
-from .runner import run_benchmark
+from .runners.runner import run_benchmark
 
 
 def _is_mount(path: str) -> bool:

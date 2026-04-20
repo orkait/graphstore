@@ -1,7 +1,7 @@
 """Ratchet test runner for LoCoMo retrieval improvements.
 
 Runs 50Q (random 10/cat, seed=42) with configurable retrieval settings.
-Usage: uv run python3 -m benchmarks.framework.ratchet_test --label baseline
+Usage: uv run python3 -m benchmarks.framework.runners.ratchet_test --label baseline
 """
 
 from __future__ import annotations
@@ -16,9 +16,9 @@ from pathlib import Path
 
 os.environ['GRAPHSTORE_MODEL_CACHE_DIR'] = '/tmp/gs_models'
 
-from .run_locomo import run_locomo
-from .datasets import load_locomo
-from .adapters.graphstore_ import GraphStoreAdapter
+from .locomo import run_locomo
+from ..datasets import load_locomo
+from ..adapters.graphstore_ import GraphStoreAdapter
 
 
 def run_test(label: str, config: dict, k: int = 10, reranker=None) -> dict:

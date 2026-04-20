@@ -9,7 +9,7 @@ Metrics:
     - pragmatic_coverage: fraction of evidence sessions represented in top-k
 
 Usage:
-    uv run python3 -m benchmarks.framework.ratchet_recall
+    uv run python3 -m benchmarks.framework.runners.ratchet_recall
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ from pathlib import Path
 os.environ.setdefault("GRAPHSTORE_MODEL_CACHE_DIR", "/tmp/gs_models")
 logging.getLogger("graphstore.events").setLevel(logging.WARNING)
 
-from .datasets import load_locomo
-from .adapters.graphstore_ import GraphStoreAdapter
+from ..datasets import load_locomo
+from ..adapters.graphstore_ import GraphStoreAdapter
 
 
 def build_evidence_lookup(conv: dict) -> dict[str, str]:

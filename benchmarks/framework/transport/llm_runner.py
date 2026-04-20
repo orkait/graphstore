@@ -21,8 +21,8 @@ Design:
 
 Usage:
 
-    from benchmarks.framework.llm_runner import LLMRunner
-    from benchmarks.framework.llm_client import _resolve_providers
+    from benchmarks.framework.transport.llm_runner import LLMRunner
+    from benchmarks.framework.transport.llm_client import _resolve_providers
 
     runner = LLMRunner(_resolve_providers())
     answers = await runner.call_many(prompts, max_tokens=1000)
@@ -287,7 +287,7 @@ def get_shared_runner() -> "LLMRunner":
     """
     global _SHARED
     if _SHARED is None:
-        from benchmarks.framework.llm_client import _resolve_providers
+        from benchmarks.framework.transport.llm_client import _resolve_providers
         providers = _resolve_providers()
         if not providers:
             raise RuntimeError(

@@ -25,8 +25,8 @@ from typing import Any
 
 from graphstore.dsl.parser import parse as dsl_parse
 
-from ..adapter import Session, TimedOperation
-from ..llm_client import llm_call
+from .base import Session, TimedOperation
+from ..transport.llm_client import llm_call
 from .graphstore_ import GraphStoreAdapter
 
 

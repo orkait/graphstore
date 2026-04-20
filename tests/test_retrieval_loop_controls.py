@@ -4,8 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from benchmarks.framework.adapters.graphstore_ import GraphStoreAdapter
-from benchmarks.framework.adapter import QueryContext
-from benchmarks.framework import ratchet_recall, ratchet_test
+from benchmarks.framework.adapters.base import QueryContext
+from benchmarks.framework.runners import ratchet_recall, ratchet_test
 
 
 def test_adapter_routes_categories_when_no_explicit_strategy():
