@@ -344,17 +344,19 @@ def apply_env_overrides(config: GraphStoreConfig) -> GraphStoreConfig:
 
 
 def merge_kwargs(config: GraphStoreConfig, **kwargs) -> GraphStoreConfig:
-    """Override config fields from constructor kwargs.
+    """Override config fields from GraphStore(...) constructor kwargs.
 
-    Supports flat shortcuts for common tuning knobs:
-        ceiling_mb, eviction_target_ratio, remember_weights, recall_decay,
-        search_oversample, similarity_threshold, duplicate_threshold, fts_tokenizer
+    Two shapes of kwargs are accepted:
 
-    Plus legacy kwargs: embedder, ingest_root, vault, retention (dict).
+    1. Flat shortcuts for tuning knobs (see _KWARG_SHORTCUTS), e.g.
+       ceiling_mb, remember_weights, recall_decay, search_oversample.
+    2. Top-level convenience kwargs that map to multi-field config
+       updates: embedder, ingest_root, vault, retention (dict).
+       These are the primary public API - GraphStore(embedder=...) is
+       how users construct the store.
     """
     updates: dict[str, dict[str, object]] = {}
 
-    # Flat shortcuts -> section overrides
     for kwarg_name, (section, field) in _KWARG_SHORTCUTS.items():
         if kwarg_name in kwargs:
             val = kwargs[kwarg_name]
@@ -362,7 +364,6 @@ def merge_kwargs(config: GraphStoreConfig, **kwargs) -> GraphStoreConfig:
             if val != current_val:
                 updates.setdefault(section, {})[field] = val
 
-    # Legacy: embedder (string or object -> vector.embedder name)
     if "embedder" in kwargs:
         emb = kwargs["embedder"]
         emb_name = emb if isinstance(emb, str) else "custom"
@@ -370,16 +371,13 @@ def merge_kwargs(config: GraphStoreConfig, **kwargs) -> GraphStoreConfig:
             emb_name = "none"
         updates.setdefault("vector", {})["embedder"] = emb_name
 
-    # Legacy: ingest_root -> server.ingest_root
     if "ingest_root" in kwargs and kwargs["ingest_root"] is not None:
         updates.setdefault("server", {})["ingest_root"] = kwargs["ingest_root"]
 
-    # Legacy: vault -> vault.enabled + vault.path
     if "vault" in kwargs and kwargs["vault"] is not None:
         updates.setdefault("vault", {})["enabled"] = True
         updates["vault"]["path"] = kwargs["vault"]
 
-    # Legacy: retention (dict)
     if "retention" in kwargs and kwargs["retention"] is not None:
         r = kwargs["retention"]
         for key in ("blob_warm_days", "blob_archive_days", "blob_delete_days"):
