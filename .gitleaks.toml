@@ -1,0 +1,28 @@
+# gitleaks config - https://github.com/gitleaks/gitleaks
+#
+# Run: gitleaks detect --source . --verbose --no-banner
+# Run (staged only): gitleaks protect --source . --staged --verbose --no-banner
+#
+# Extends the default ruleset; only adds allowlist entries for known
+# benign matches so future scans stay quiet.
+
+[extend]
+useDefault = true
+
+
+[allowlist]
+description = "project-level allowlist"
+
+# Wikipedia HTML dump fixtures bundle the public hCaptcha SITE key
+# (wgConfirmEditHCaptchaSiteKey). Site keys are served to every browser
+# that loads Wikipedia - public by design. Ignore the fixtures dir entirely.
+paths = [
+  '''tests/fixtures/html/.*\.html''',
+]
+
+# Revoked key from commit 5c54c9c (PR #93). Must stay allowlisted to keep
+# the revoked value out of "leaks found" noise - rotation already happened
+# out-of-band, history rewrite was deliberately skipped.
+regexes = [
+  '''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''',
+]
