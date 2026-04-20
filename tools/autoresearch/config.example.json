@@ -6,7 +6,7 @@
   "providers": {
     "local_ollama": {
       "base_url": "http://localhost:11434",
-      "api_key": "REPLACE_WITH_OLLAMA_KEY_OR_LEAVE_EMPTY",
+      "env_key": "ollama_key",
       "is_local": true,
       "litellm_prefix": "ollama_chat",
       "models": {
@@ -21,7 +21,7 @@
     },
     "openrouter": {
       "base_url": "https://openrouter.ai/api/v1",
-      "api_key": "REPLACE_WITH_OPENROUTER_KEY_sk-or-v1-...",
+      "env_key": "openrouter_key",
       "is_local": false,
       "litellm_prefix": "openrouter",
       "models": {
@@ -45,5 +45,5 @@
   "noise_tolerance": 1.02,
   "full_bench_repeats": 3,
   "attempts_per_hypothesis": 3,
-  "notes": "Copy to config.json and fill in api_key fields. config.json is gitignored. To swap models, edit active_model. Max LLM calls per (algo, model) = 6 hypotheses × attempts_per_hypothesis."
+  "notes": "Copy to config.json. API keys come from /.env (never embed them here). See /.env.example + env.py for the typed ENV loader. To swap models, edit active_model."
 }

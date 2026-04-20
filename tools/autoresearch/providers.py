@@ -7,8 +7,9 @@ and the autoresearch run_loop.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
+
+from env import ENV
 
 CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
 
@@ -58,11 +59,12 @@ def resolve_providers(
         base_url = p.get("base_url", "")
         if not base_url:
             continue
-        api_key = (
-            p.get("api_key", "")
-            or os.environ.get(p.get("api_key_env", ""), "")
-            or "ollama"
-        )
+        # Each provider config declares `env_key` pointing at an ENV field
+        # (see env.py). Typed: typos raise KeyError from ENV.__getitem__.
+        # Missing `env_key` falls back to "ollama" (works for local Ollama
+        # which accepts any non-empty API key).
+        env_field = p.get("env_key", "")
+        api_key = str(ENV[env_field]) if env_field else "ollama"
         is_local = p.get("is_local", "localhost" in base_url or "127.0.0.1" in base_url)
         prefix = p.get("litellm_prefix") or ("ollama_chat" if is_local else "")
         available = p.get("models", {})
