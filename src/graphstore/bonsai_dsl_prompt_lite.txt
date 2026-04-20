@@ -3,9 +3,12 @@ Read user turn. Output zero or more ops, one per line. Every op MUST start with 
 VERB PICK RULE (read first!)
 - Sentence about someone else ("Maria", "Kailash", "they", proper names) -> @UPSERT each named entity + optional @EDGE between them. NEVER @BELIEF.
 - Sentence about the user ("I", "my", "me") -> @BELIEF topic value.
-- User asks a question -> @REMEMBER / @SIMILAR / @LEXICAL / @ANSWER.
-- User corrects a prior belief (KNOWN FACTS block present) -> @RETRACT topic + @BELIEF topic new_value.
-- User asks about connections -> @RECALL / @TRAVERSE / @ANCESTORS / @DESCENDANTS / @SUBGRAPH / @PATH / @SHORTEST_PATH / @COMMON.
+- Question asking for a personal fact ("Where did I ...?", "What is my ...?", "When did I ...?", "Which X did I ...?") -> @ANSWER question.
+- Question asking to recall messages/wording ("remember", "what did I say", "tell me again") -> @REMEMBER query.
+- Question asking for messages that feel similar -> @SIMILAR query.
+- Question asking about connections BETWEEN NAMED entities ("how is X linked to Y", "what connects X and Y") -> @RECALL ent:x  or  @PATH ent:x ent:y.
+- Walk / path verbs REQUIRE prefixed anchor ids (ent:X or fact:X or msg:X). NEVER pass a bare topic or plain word like "location" as an anchor.
+- @RETRACT fires ONLY when the user explicitly corrects a prior fact. Trigger words: "actually", "not anymore", "never mind", "changed to", "now prefer", "instead". A new unrelated turn about a different topic must NOT emit @RETRACT even if a related @BELIEF is in KNOWN FACTS.
 
 VERB TABLE (pick one per line; emit exactly the shape shown)
 
@@ -57,13 +60,20 @@ My dentist is Dr. Chen.
 I prefer tea to coffee.
 @BELIEF drink_preference tea
 
-(correction via KNOWN FACTS block)
+(correction via KNOWN FACTS - trigger word "Actually")
 KNOWN FACTS:
 [fact:lunch_spot] kind="belief" value="cafe_paloma"
 
 user: Actually I go to Cafe Centro for lunch now.
 @RETRACT lunch_spot
 @BELIEF lunch_spot Cafe Centro
+
+(NO correction: unrelated turn, do NOT retract prior fact)
+KNOWN FACTS:
+[fact:location] kind="belief" value="Seattle"
+
+user: I bought a new guitar yesterday.
+@BELIEF purchase guitar
 
 (retrieval: "remember" -> NL recall)
 Remember what I told you last week.
@@ -73,11 +83,19 @@ Remember what I told you last week.
 Find messages that feel like the argument we had.
 @SIMILAR the argument we had
 
-(retrieval: direct question -> synthesized answer)
+(retrieval: direct question about named entity -> synthesized answer)
 Where does Maria work?
 @ANSWER where does Maria work
 
-(walk: "connected" / "linked" from an anchor)
+(retrieval: personal-fact question -> @ANSWER, NOT @RECALL)
+Which city did I move to last year?
+@ANSWER which city did I move to last year
+
+(retrieval: personal-fact question -> @ANSWER)
+What is my favorite color?
+@ANSWER what is my favorite color
+
+(walk: "connected" / "linked" BETWEEN NAMED entities - note prefixed anchor)
 How is Nikhil linked to Stripe?
 @RECALL ent:nikhil
 
