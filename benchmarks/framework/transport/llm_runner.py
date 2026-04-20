@@ -1,5 +1,5 @@
-"""Re-export from canonical location: tools/autoresearch/llm_runner.py."""
-from tools.autoresearch.llm_runner import (  # noqa: F401
+"""Re-export from canonical location: src/graphstore/llm_runner.py."""
+from graphstore.llm_runner import (  # noqa: F401
     LLMRunner,
     get_shared_runner,
     reset_shared_runner,

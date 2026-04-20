@@ -548,7 +548,7 @@ def get_llm_proposal(prompt: str, config: dict) -> tuple[str, str, str]:
     Returns (extracted_code, model_used, raw_response).
     """
     import re as _re
-    from tools.autoresearch.llm_runner import LLMRunner
+    from graphstore.llm_runner import LLMRunner
     from tools.autoresearch.providers import resolve_providers
 
     runner = LLMRunner(resolve_providers(config), timeout_s=800)
