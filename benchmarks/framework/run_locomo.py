@@ -22,7 +22,10 @@ from collections import defaultdict
 
 from .adapter import QueryContext, TimedOperation
 from .datasets import load_locomo
-from .llm_client import generate_answer, compute_f1, health_check, _resolve_providers, llm_call_on_provider
+from .llm_client import (
+    generate_answer, compute_f1, compute_llm_judge,
+    health_check, _resolve_providers, llm_call_on_provider,
+)
 
 # Official LoCoMo category IDs
 _CAT_TO_ID = {
@@ -34,6 +37,76 @@ _CAT_TO_ID = {
 _CAT_ORDER = ["open-domain", "single-hop", "multi-hop", "temporal", "adversarial"]
 
 
+# ---------------------------------------------------------------------------
+# LoCoMo-specific QA prompt. Single unified prompt - NO category routing.
+#
+# The question category (single-hop / multi-hop / temporal / open-domain /
+# adversarial) is a label ON the question, not information the system would
+# have at inference time in production. Using it to switch prompts would be
+# oracle routing - a form of test-time leakage. We avoid it. Peer systems
+# (Mem0, Zep, MemMachine) all use a single-prompt reader too.
+#
+# Rules below cover every category in one prompt. The reader infers question
+# shape from the question text, same as it would in real deployment.
+#
+# Lives in the bench, not in graphstore core. graphstore stays dataset-
+# agnostic; LoCoMo's phrasing requirements stay here.
+# ---------------------------------------------------------------------------
+_LOCOMO_QA_PROMPT = """\
+You have memory of a user's conversations. A hybrid retrieval engine
+(semantic + keyword + recency + graph) returned the top-{k} items most
+relevant to the question. Each item is one fact from one session,
+prefixed with [date] speaker:.
+
+Facts may interleave across items. Any single item is often incomplete.
+Your job: cross-reference across items to assemble the answer. The
+session [date] on one item grounds relative words ("yesterday",
+"last week") in that same item's text. Overlapping names or events
+between items let you link claims.
+
+Think silently through these steps:
+  1. Which items bear on the question?
+  2. Link overlapping entities/events across items.
+  3. Resolve relative dates using the session [date] in the same item.
+  4. If no combination of items supports a precise answer, abstain.
+
+Then output ONLY the answer. Rules:
+- Minimum words. One phrase. No explanation, no hedging, no quotes,
+  no citation markers.
+- If the question asks for multiple things, return a comma-separated list.
+- If asked WHEN, output a date as "D Month YYYY" (or "YYYY" alone).
+- If the retrieved items do NOT support a precise answer, output
+  EXACTLY: "no information available". Do not guess, infer, or
+  default to a session date.
+- Prefer the exact wording from the context for names and places.
+
+Retrieved items (top-{k}, by combined retrieval score):
+{context}
+
+Question: {question}
+
+Answer:"""
+
+
+def _build_locomo_prompt(question: str, retrieved: list[str]) -> str:
+    """Assemble the LoCoMo QA prompt for a single question.
+
+    Single prompt, category-blind. The reader sees only the question text
+    and retrieved context - no per-question category hints, since category
+    would not be known at inference time in production.
+
+    Explicit cross-reference framing: the prompt tells the reader that
+    context items are the top-K retrieval results (not self-contained
+    candidates to pick between) and invites combining facts across items.
+    """
+    context = "\n\n".join(f"[{j + 1}]: {t}" for j, t in enumerate(retrieved))
+    return _LOCOMO_QA_PROMPT.format(
+        k=len(retrieved) if retrieved else 0,
+        context=context if context else "(no retrieved context)",
+        question=question,
+    )
+
+
 def run_locomo(
     adapter,
     dataset,
@@ -41,6 +114,8 @@ def run_locomo(
     max_questions: int | None = None,
     reranker=None,
     llm_workers: int = 8,
+    judge: str = "token-f1",
+    verbose: bool = False,
 ) -> dict:
     """Run LoCoMo: ingest once per conversation, query all QAs.
 
@@ -115,49 +190,74 @@ def run_locomo(
             total_query_ms += t.elapsed_ms
             retrieval_results.append(qres)
 
-        # Phase 2: LLM answer generation (async batch with provider rotation)
-        from .llm_batch import generate_all_answers
-        from .llm_client import _resolve_providers
+        # Phase 2: LLM answer generation via the shared LLMRunner
+        # (rate-limit + retry + provider fallback handled centrally).
+        from .llm_runner import get_shared_runner
         import asyncio
 
-        providers = _resolve_providers()
-        print(f"[{conv_id}] Retrieval done ({total_query_ms:.0f}ms). Generating {len(qas)} answers ({len(providers)} providers)...")
+        runner = get_shared_runner()
+        print(
+            f"[{conv_id}] Retrieval done ({total_query_ms:.0f}ms). "
+            f"Generating {len(qas)} answers (rpm={runner.rpm or 'unlimited'})..."
+        )
 
-        questions = []
-        for i, rec in enumerate(qas):
-            context = "\n\n".join(f"[{j+1}]: {t}" for j, t in enumerate(retrieval_results[i].retrieved_memories))
-            prompt = (
-                f"Based on the below context, write an answer in the form of a short phrase "
-                f"for the following question. Answer with exact words from the context whenever possible.\n\n"
-                f"Context:\n{context}\n\n"
-                f"Question: {rec.question.question} Short answer:"
+        prompts = [
+            _build_locomo_prompt(
+                question=rec.question.question,
+                retrieved=retrieval_results[i].retrieved_memories,
             )
-            questions.append({"idx": i, "prompt": prompt})
+            for i, rec in enumerate(qas)
+        ]
 
-        answers = asyncio.run(generate_all_answers(questions, providers))
+        def _on_progress(done: int, total: int) -> None:
+            if done == total or done % 20 == 0:
+                print(f"    answers {done}/{total}", flush=True)
+
+        answers = asyncio.run(runner.call_many(prompts, max_tokens=1000, on_progress=_on_progress))
         answered_total = sum(1 for a in answers if a)
         print(f"  [{conv_id}] LLM complete: {answered_total}/{len(qas)} answered")
 
-        # Phase 3: Score (official F1 with category-aware handling)
+        # Phase 3: Score (official F1 with category-aware handling + optional LLM judge)
+        want_token = judge in ("token-f1", "both")
+        want_llm = judge in ("llm", "both")
         for i, rec in enumerate(qas):
             answer = answers[i] or ""
             gold = rec.question.gold_answers[0] if rec.question.gold_answers else ""
             cat_id = _CAT_TO_ID.get(rec.question.category)
-            f1 = compute_f1(answer, gold, category=cat_id)
+            token_f1 = compute_f1(answer, gold, category=cat_id) if want_token else None
+            judge_score = (
+                compute_llm_judge(answer, gold, rec.question.question, category=cat_id)
+                if want_llm else None
+            )
+            primary = judge_score if judge == "llm" else token_f1
 
-            all_f1.append(f1)
-            results_by_category[rec.question.category].append(f1)
-            all_details.append({
+            all_f1.append(primary)
+            results_by_category[rec.question.category].append(primary)
+            detail = {
                 "conversation": conv_id,
                 "question": rec.question.question,
                 "gold": gold,
                 "answer": answer,
-                "f1": round(f1, 4),
                 "category": rec.question.category,
                 "category_id": cat_id,
                 "retrieved": retrieval_results[i].retrieved_memories[:3],
-            })
+            }
+            # Always record which was computed, never drop data.
+            if token_f1 is not None:
+                detail["token_f1"] = round(token_f1, 4)
+            if judge_score is not None:
+                detail["llm_judge"] = round(judge_score, 4)
+            detail["f1"] = round(primary, 4)  # back-compat: primary under "f1"
+            all_details.append(detail)
             q_count += 1
+            if verbose:
+                cat = rec.question.category or "?"
+                ret0 = retrieval_results[i].retrieved_memories[0] if retrieval_results[i].retrieved_memories else ""
+                tf = f"{token_f1:.2f}" if token_f1 is not None else "-"
+                jf = f"{judge_score:.2f}" if judge_score is not None else "-"
+                print(f"  Q{i+1:>3} [{cat:<12}] tok={tf} llm={jf} "
+                      f"gold={gold!r:<45} pred={(answer or '')[:80]!r}")
+                print(f"         ret[0]: {ret0[:100]!r}")
 
         conv_f1 = sum(all_f1[-len(qas):]) / len(qas) if qas else 0
         print(f"  [{conv_id}] {len(qas)} Qs, conv_f1={conv_f1:.3f}, running_avg={sum(all_f1)/len(all_f1):.3f}")
@@ -184,7 +284,15 @@ def run_locomo(
         "ingest_ms": round(total_ingest_ms, 1),
         "query_avg_ms": round(total_query_ms / max(q_count, 1), 1),
         "adapter": adapter.name,
+        "judge": judge,
     }
+    if judge == "both":
+        tok_vals = [d["token_f1"] for d in all_details if "token_f1" in d]
+        llm_vals = [d["llm_judge"] for d in all_details if "llm_judge" in d]
+        if tok_vals:
+            summary["overall_token_f1"] = round(sum(tok_vals) / len(tok_vals), 4)
+        if llm_vals:
+            summary["overall_llm_judge"] = round(sum(llm_vals) / len(llm_vals), 4)
 
     return summary, all_details
 
@@ -209,7 +317,15 @@ def main():
                         help="Feed raw dialogue turns (~20/session) instead of "
                              "author-distilled observations (~9/session). Required "
                              "for fair A/B of LLM-ingest adapters.")
+    parser.add_argument("--judge", default="token-f1",
+                        choices=["token-f1", "llm", "both"],
+                        help="Scoring metric. token-f1 = snap-research official. "
+                             "llm = LLM-as-judge (semantic equivalence, matches "
+                             "Mem0/Zep publish style, costs +1 LLM call per QA). "
+                             "both = compute + report both.")
     parser.add_argument("--out-dir", default="benchmarks/framework/results")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="Print per-question gold/pred/F1/judge/retrieved[0].")
     args = parser.parse_args()
 
     ds = load_locomo(
@@ -239,17 +355,24 @@ def main():
         from .adapters.graphstore_ import GraphStoreAdapter
         adapter = GraphStoreAdapter(config=config)
 
-    summary, details = run_locomo(adapter, ds, k=args.k, max_questions=args.max_questions)
+    summary, details = run_locomo(
+        adapter, ds, k=args.k, max_questions=args.max_questions,
+        judge=args.judge, verbose=args.verbose,
+    )
 
     print(f"\n{'='*60}")
     print(f"LOCOMO RESULTS")
     print(f"  System:      {summary['adapter']}")
     print(f"  Convs:       {summary['n_conversations']}")
     print(f"  Questions:   {summary['n_questions']}")
-    print(f"  Overall F1:  {summary['overall_f1']:.4f}")
+    print(f"  Judge:       {summary['judge']}")
+    print(f"  Overall:     {summary['overall_f1']:.4f}")
+    if summary.get("overall_token_f1") is not None and summary["judge"] == "both":
+        print(f"    token F1:  {summary['overall_token_f1']:.4f}")
+        print(f"    LLM judge: {summary['overall_llm_judge']:.4f}")
     print(f"  By category (official order):")
     for cat, v in summary["by_category"].items():
-        print(f"    {cat:<20} (cat-{v['category_id']}) n={v['n']:<4} f1={v['f1']:.4f}")
+        print(f"    {cat:<20} (cat-{v['category_id']}) n={v['n']:<4} score={v['f1']:.4f}")
     print(f"  Ingest:      {summary['ingest_ms']:.0f}ms total")
     print(f"  Query avg:   {summary['query_avg_ms']:.1f}ms")
     print(f"{'='*60}")

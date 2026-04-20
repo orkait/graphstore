@@ -21,69 +21,16 @@ QA_MODEL = "gemma4:31b-cloud"
 QA_FALLBACK = "qwen3.5:cloud"
 
 
-def _load_llm_config() -> dict:
-    if _CONFIG_PATH.exists():
-        return json.loads(_CONFIG_PATH.read_text())
-    return {}
-
-
 def llm_call(prompt: str, config: dict | None = None, temperature: float = 0.0, max_tokens: int = 512) -> str:
-    """Call LLM using litellm with autoresearch-style provider fallback."""
-    import litellm
-    litellm.suppress_debug_info = True
+    """Sync LLM call. Delegates to the shared LLMRunner.
 
-    if config is None:
-        config = _load_llm_config()
-    config = {**config, "active_model": QA_MODEL}
-
-    providers = config.get("providers", {})
-    active_pid = config.get("active_provider", "")
-    active_model = config.get("active_model", "")
-    provider_order = [active_pid] + [
-        p for p in config.get("provider_fallback_order", []) if p != active_pid
-    ]
-    provider_order = [p for p in dict.fromkeys(provider_order) if p in providers]
-
-    for pid in provider_order:
-        p = providers.get(pid)
-        if not p:
-            continue
-        base_url = p.get("base_url", "")
-        api_key = (p.get("api_key", "")
-                   or os.environ.get(p.get("api_key_env", ""), "")
-                   or "ollama")
-        if not base_url:
-            continue
-
-        available = p.get("models", {})
-        model_order = [active_model, QA_FALLBACK]
-        model_order = [m for m in dict.fromkeys(model_order) if m and m in available]
-        if not model_order:
-            continue
-
-        is_local = p.get("is_local", "localhost" in base_url or "127.0.0.1" in base_url)
-        prefix = p.get("litellm_prefix") or ("ollama_chat" if is_local else "")
-        for model in model_order:
-            litellm_model = f"{prefix}/{model}" if prefix else model
-            try:
-                response = litellm.completion(
-                    model=litellm_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    api_base=base_url,
-                    api_key=api_key,
-                    stream=False,
-                    timeout=30,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-                content = response.choices[0].message.content or ""
-                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-                if content:
-                    return content
-            except Exception:
-                continue
-
-    return ""
+    Retained for back-compat with callers that imported from ``llm_judge``
+    directly. New code should use ``benchmarks.framework.llm_client.llm_call``
+    or the async ``LLMRunner.call_one`` / ``call_many``. The ``config``
+    parameter is ignored (runner reads autoresearch config itself).
+    """
+    from benchmarks.framework.llm_runner import get_shared_runner
+    return get_shared_runner().call_sync(prompt, max_tokens=max_tokens, temperature=temperature)
 
 
 # ---------------------------------------------------------------------------
