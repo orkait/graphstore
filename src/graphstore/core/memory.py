@@ -4,7 +4,10 @@ Math lives in graphstore.algos.measure. This module adapts it to the
 graphstore store/vector/document types.
 """
 
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 from graphstore.core.errors import CeilingExceeded
 from graphstore.algos.measure import (
     estimate_bytes as _algo_estimate_bytes,
@@ -81,8 +84,8 @@ def measure(store, vector_store=None, document_store=None, skip_csr: bool = Fals
         try:
             stats = document_store.stats()
             report["document_store_disk"] = stats.get("total_bytes", 0)
-        except Exception:
-            pass
+        except Exception as err:
+            logger.debug("document_store.stats() failed during memory accounting: %s", err)
 
     return report
 

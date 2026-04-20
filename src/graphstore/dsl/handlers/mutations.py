@@ -1,7 +1,10 @@
 """Mutation handlers for the DSL executor (create, update, delete, merge, batch)."""
 
+import logging
 import time
 from collections import deque
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 from scipy.sparse import csr_matrix
@@ -311,12 +314,12 @@ class MutationHandlers:
                         ent_id = f"ent:{ent_slug_val}"
                         try:
                             self.store.put_node(ent_id, "entity", {"name": ent_display})
-                        except Exception:
-                            pass
+                        except Exception as err:
+                            logger.debug("put_node(%s) skipped during mutation entity link: %s", ent_id, err)
                         try:
                             self.store.put_edge(sent_id, ent_id, "mentions")
-                        except Exception:
-                            pass
+                        except Exception as err:
+                            logger.debug("put_edge(%s -> %s) skipped during mutation entity link: %s", sent_id, ent_id, err)
 
             if batch_embed_sentences:
                 self._batch_embed_and_store(list(zip(sent_slots, sentences)))

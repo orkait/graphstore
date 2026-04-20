@@ -6,7 +6,11 @@ The caller (GraphStore.execute) enforces this via the _optimizing lock.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from graphstore.algos.compact import (
     apply_slot_remap_to_edges as _algo_apply_slot_remap,
@@ -632,8 +636,8 @@ def _evict_nodes(store: CoreStore, slots_to_evict: list[int], vector_store=None,
         if document_store is not None:
             try:
                 document_store.delete_document(slot)
-            except Exception:
-                pass
+            except Exception as err:
+                logger.debug("document_store.delete_document(%s) failed during eviction: %s", slot, err)
 
         # Tombstone
         store.columns.clear(slot)

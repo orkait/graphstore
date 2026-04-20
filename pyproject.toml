@@ -128,7 +128,14 @@ testpaths = ["tests"]
 # -n 4: 4 xdist workers. With the 2-thread BLAS cap set in conftest.py
 # that's 4 * 2 = 8 threads max. Measured: 118s single -> 66s (-44%).
 # Override per run via `pytest -n 0` (serial) or `pytest -n auto`.
-addopts = "-n 4 --timeout=60"
+#
+# --dist loadgroup: respect @pytest.mark.xdist_group so modules that share
+# a module-scoped fixture (e.g. tests/test_e2e_real_embedder.py with a
+# persistent GraphStore across classes) stay on one worker. Default
+# LoadScheduling ignored the marker and fragmented module state across
+# workers, breaking tests that depended on ingest state established in
+# an earlier test class in the same module.
+addopts = "-n 4 --timeout=60 --dist loadgroup"
 markers = [
     "needs_embedder: embedder test (model2vec is now core, kept for compat)",
     "needs_fastembed: requires graphstore[embedders-extra] (fastembed)",

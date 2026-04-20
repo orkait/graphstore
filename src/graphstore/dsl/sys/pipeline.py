@@ -248,8 +248,8 @@ class SysPipelineHandlers:
                     if ev_id:
                         try:
                             store.put_edge(obs_id, ev_id, "evidence")
-                        except Exception:
-                            pass
+                        except Exception as err:
+                            logger.debug("evidence edge %s -> %s skipped: %s", obs_id, ev_id, err)
 
                 created += 1
             except Exception:
