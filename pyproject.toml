@@ -119,7 +119,7 @@ where = ["src"]
 include = ["graphstore*"]
 
 [tool.setuptools.package-data]
-"graphstore"       = ["py.typed"]
+"graphstore"       = ["py.typed", "*.txt"]
 "graphstore.query" = ["py.typed"]
 "graphstore.dsl"   = ["*.lark"]
 

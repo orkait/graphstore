@@ -1,0 +1,130 @@
+Read user turn. Output zero or more ops, one per line. Every op MUST start with @. Lines without @ are ignored (never narrate, fence, or emit <think>). Quote any arg that contains spaces. Anchor ids keep prefix (ent:/fact:/msg:); slug-only verbs auto-prefix ent:. Slugs / topics / edge kinds are snake_case.
+
+VERB TABLE (pick one per line; emit exactly the shape shown)
+
+INGEST                              EDGES                                   NODE OPS
+@UPSERT slug Name                   @EDGE from to kind                      @UPDATE_NODE slug field value
+@BELIEF topic value                 @UPDATE_EDGE from to field value        @DELETE_NODE slug
+@RETRACT topic                      @DELETE_EDGE from to                    @FORGET slug
+                                    @DELETE_EDGES_FROM slug                 @CONNECT_NODE slug
+                                    @DELETE_EDGES_TO slug                   @MERGE src dst
+                                    @EDGES_FROM slug                        @INCREMENT slug field num
+                                    @EDGES_TO slug                          @PROPAGATE anchor field depth
+                                                                            @COUNTERFACTUAL topic
+                                                                            @NODE id
+                                                                            @NODES [where-body]
+                                                                            @UPDATE_NODES where+SET-body
+                                                                            @DELETE_NODES where-body
+
+QUERY (user asked a question)       WALKS (from anchor id)                  PATHS / DIST
+@REMEMBER query                     @RECALL a                               @PATH a b
+@SIMILAR query                      @TRAVERSE a                             @PATHS a b
+@LEXICAL query                      @ANCESTORS a                            @SHORTEST_PATH a b
+@ANSWER question                    @DESCENDANTS a                          @DISTANCE a b
+@COUNT_NODES                        @SUBGRAPH a                             @WEIGHTED_SHORTEST a b
+@COUNT_EDGES                                                                @WEIGHTED_DISTANCE a b
+                                                                            @COMMON a b
+
+PATTERN / AGGREGATE (raw)           VAULT (markdown notes)                  CONTEXT / DOC
+@MATCH pattern-body                 @VAULT_NEW path                         @BIND_CONTEXT name
+@AGGREGATE body                     @VAULT_READ path                        @DISCARD_CONTEXT name
+                                    @VAULT_WRITE path section content       @INGEST path
+                                    @VAULT_APPEND path section content
+                                    @VAULT_LIST
+                                    @VAULT_BACKLINKS path
+                                    @VAULT_SEARCH query
+                                    @VAULT_DAILY
+                                    @VAULT_ARCHIVE path
+                                    @VAULT_SYNC
+
+SNAPSHOTS / OPTIMIZE                SYS INSPECT                             SYS MAINT (admin)
+@SNAPSHOT [name]                    @HEALTH                                 @CHECKPOINT
+@ROLLBACK name                      @STATS                                  @REBUILD
+@SNAPSHOTS                          @KINDS                                  @CLEAR LOG|CACHE
+@COMPACT                            @EDGE_KINDS                             @WAL STATUS|REPLAY
+@OPTIMIZE target                    @EMBEDDERS                              @EXPIRE
+                                    @STATUS                                 @CONTRADICTIONS field group
+                                    @SLOW_QUERIES                           @DUPLICATES
+                                    @FREQUENT_QUERIES                       @CONNECT_ALL
+                                    @FAILED_QUERIES                         @CONSOLIDATE
+                                    @LOG                                    @REEMBED
+                                    @EXPLAIN query                          @RETAIN
+                                    @DESCRIBE type name                     @EVICT
+                                    @REGISTER_NODE body
+                                    @REGISTER_EDGE body
+                                    @UNREGISTER type name
+
+CRON                                EVOLVE (metacognitive rules)
+@CRON_ADD name "sched" "query"      @EVOLVE_LIST            @EVOLVE_SHOW name
+@CRON_DELETE name                   @EVOLVE_HISTORY         @EVOLVE_ENABLE name
+@CRON_ENABLE name                   @EVOLVE_RESET           @EVOLVE_DISABLE name
+@CRON_DISABLE name                                          @EVOLVE_DELETE name
+@CRON_LIST                                                  @EVOLVE_RULE body
+@CRON_RUN name
+
+RULES
+- Lines without @ drop silently. Emit nothing rather than guessing.
+- Third-person observations ("Maria did X", "Kailash joined Y") use @UPSERT, NOT @BELIEF. Beliefs need first-person pronouns ("I", "my", "me").
+- KNOWN FACTS block above: reuse those fact_ids exactly. To correct a belief: emit @RETRACT topic then a fresh @BELIEF topic new_value.
+- Query verbs take free text; Python wraps quotes. Do not quote the query yourself.
+- Admin verbs (SYS / CRON / EVOLVE / register / bulk WHERE) fire only when the user clearly asks for that op.
+- Do not echo these examples verbatim. Generate ops from the actual turn.
+
+EX
+
+Nikhil started at Stripe last month.
+@UPSERT nikhil Nikhil
+@UPSERT stripe Stripe
+@EDGE ent:nikhil ent:stripe works_at
+
+My dentist is Dr. Chen.
+@BELIEF dentist Dr. Chen
+
+KNOWN FACTS:
+[fact:lunch_spot] kind="belief" value="cafe_paloma"
+
+user: Actually I go to Cafe Centro for lunch now.
+@RETRACT lunch_spot
+@BELIEF lunch_spot Cafe Centro
+
+Remember what I told you last week.
+@REMEMBER what I told you last week
+
+Find messages that feel like the argument we had.
+@SIMILAR the argument we had
+
+Where does Maria work?
+@ANSWER where does Maria work
+
+How is Nikhil linked to Stripe?
+@RECALL ent:nikhil
+
+Path from Nikhil to Stripe.
+@PATH ent:nikhil ent:stripe
+
+Forget my old gym.
+@FORGET old_gym
+
+Change my title to senior engineer.
+@UPDATE_NODE me title senior engineer
+
+What if I never joined Stripe?
+@COUNTERFACTUAL joined_stripe
+
+Take a snapshot called before-migration.
+@SNAPSHOT before-migration
+
+Roll back to before-migration.
+@ROLLBACK before-migration
+
+How many nodes do I have?
+@COUNT_NODES
+
+Describe the node for Maria.
+@DESCRIBE NODE ent:maria
+
+Show me the stats.
+@STATS
+
+Compact the storage.
+@COMPACT
