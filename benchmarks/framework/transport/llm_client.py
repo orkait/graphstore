@@ -6,22 +6,15 @@ Primary: minimax-m2.7:cloud (Ollama) or minimax/minimax-m2.7:nitro (OpenRouter)
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
 import string
-from pathlib import Path
+
+from tools.autoresearch.providers import load_config, resolve_providers as _resolve_providers_base
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
-_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "autoresearch" / "config.json"
-
-# Model preference for LoCoMo QA.
-# Dual-name: Ollama cloud tag comes first so local_ollama wins when present;
-# OpenRouter is the paid fallback.
-#
 # gemma4:31b-cloud chosen over minimax-m2.7 because gemma4 is a
 # non-reasoning model. Reasoning models (minimax) emit variable-length
 # thinking tokens that introduce jitter even at temperature=0.0; this
@@ -29,12 +22,6 @@ _CONFIG_PATH = Path(__file__).resolve().parent.parent.parent.parent / "tools" / 
 # between smoke runs. gemma4 produces deterministic single-shot answers.
 QA_MODEL = "gemma4:31b-cloud"
 QA_MODEL_OR = "google/gemma-4-31b-it"  # paid fallback when Ollama unreachable
-
-
-def _load_config() -> dict:
-    if _CONFIG_PATH.exists():
-        return json.loads(_CONFIG_PATH.read_text())
-    return {}
 
 
 def llm_call(prompt: str, max_tokens: int = 1000, temperature: float = 0.0, _retries: int | None = None) -> str:
@@ -54,43 +41,7 @@ def _resolve_providers() -> list[dict]:
 
     Returns list of provider dicts with keys: litellm_model, api_base, api_key.
     """
-    import litellm
-    litellm.suppress_debug_info = True
-
-    config = _load_config()
-    providers = config.get("providers", {})
-    active_pid = config.get("active_provider", "")
-    provider_order = [active_pid] + [
-        p for p in config.get("provider_fallback_order", []) if p != active_pid
-    ]
-    provider_order = [p for p in dict.fromkeys(provider_order) if p in providers]
-
-    resolved = []
-    for pid in provider_order:
-        p = providers.get(pid)
-        if not p:
-            continue
-        base_url = p.get("base_url", "")
-        api_key = (p.get("api_key", "")
-                   or os.environ.get(p.get("api_key_env", ""), "")
-                   or "ollama")
-        if not base_url:
-            continue
-        available = p.get("models", {})
-        model_order = [m for m in [QA_MODEL, QA_MODEL_OR] if m in available]
-        if not model_order:
-            continue
-        is_local = p.get("is_local", "localhost" in base_url or "127.0.0.1" in base_url)
-        prefix = p.get("litellm_prefix") or ("ollama_chat" if is_local else "")
-        model = model_order[0]
-        litellm_model = f"{prefix}/{model}" if prefix else model
-        resolved.append({
-            "pid": pid,
-            "litellm_model": litellm_model,
-            "api_base": base_url,
-            "api_key": api_key,
-        })
-    return resolved
+    return _resolve_providers_base(load_config(), model_priority=[QA_MODEL, QA_MODEL_OR])
 
 
 def llm_call_on_provider(prompt: str, provider: dict, max_tokens: int = 1000, temperature: float = 0.0) -> str:
