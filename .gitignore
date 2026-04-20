@@ -67,3 +67,7 @@ website/.cache-loader/
 /bench_*.py
 /bonsai_*.py
 /test_reasoning.py
+
+# Secrets. .env holds API keys + local overrides. Never commit it.
+# .env.example is the tracked template - copy to .env and fill in values.
+/.env

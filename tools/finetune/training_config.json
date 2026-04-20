@@ -6,7 +6,7 @@
   "providers": {
     "openrouter": {
       "base_url": "https://openrouter.ai/api/v1",
-      "api_key": "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",
+      "env_key": "openrouter_key",
       "is_local": false,
       "litellm_prefix": "openrouter",
       "models": {
