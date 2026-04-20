@@ -33,7 +33,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 ALGO_DIR = REPO_ROOT / "src" / "graphstore" / "algos"
 VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
-CONFIG_FILE = Path(__file__).resolve().parent / "config.json"
+from tools.autoresearch.providers import CONFIG_PATH as CONFIG_FILE
 PROGRAM_FILE = Path(__file__).resolve().parent / "program.md"
 
 _current_algo: str = ""

@@ -10,12 +10,18 @@ import json
 import os
 from pathlib import Path
 
-_CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
+CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
 
 
 def load_config() -> dict:
-    if _CONFIG_PATH.exists():
-        return json.loads(_CONFIG_PATH.read_text())
+    """One-shot read of config.json. No caching, no migration.
+
+    Use when you want the providers section now. For the long-running
+    autoresearch loop use run_loop.load_config which caches + applies
+    schema migration.
+    """
+    if CONFIG_PATH.exists():
+        return json.loads(CONFIG_PATH.read_text())
     return {}
 
 

@@ -130,8 +130,8 @@ class GraphStore:
 
         # Layer 4: constructor kwargs (highest priority). Every kwarg listed
         # here must also appear in config._KWARG_SHORTCUTS or be one of the
-        # legacy keys (embedder, ingest_root, vault, retention, auto_optimize,
-        # enable_wal) that merge_kwargs handles separately.
+        # top-level convenience keys (embedder, ingest_root, vault, retention,
+        # auto_optimize, enable_wal) that merge_kwargs handles separately.
         _kwarg_names = (
             "ceiling_mb", "embedder", "ingest_root", "vault", "retention",
             "remember_weights", "recall_decay", "search_oversample",
