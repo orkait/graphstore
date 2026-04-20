@@ -1,7 +1,9 @@
-"""Unified LLM client for LoCoMo benchmark QA.
+"""LoCoMo bench scoring helpers.
 
-Uses litellm with autoresearch config for provider fallback.
-Primary: minimax-m2.7:cloud (Ollama) or minimax/minimax-m2.7:nitro (OpenRouter)
+All LLM transport goes through `graphstore.llm_runner` (shared across
+benches + autoresearch). This module holds LoCoMo-specific scoring:
+token F1 (official snap-research/locomo protocol) and a semantic LLM
+judge prompt.
 """
 
 from __future__ import annotations
@@ -10,64 +12,18 @@ import logging
 import re
 import string
 
-from tools.autoresearch.providers import load_config, resolve_providers as _resolve_providers_base
-
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-
-# gemma4:31b-cloud chosen over minimax-m2.7 because gemma4 is a
-# non-reasoning model. Reasoning models (minimax) emit variable-length
-# thinking tokens that introduce jitter even at temperature=0.0; this
-# caused LLM-judge verdicts to flip on identical (pred, gold) pairs
-# between smoke runs. gemma4 produces deterministic single-shot answers.
-QA_MODEL = "gemma4:31b-cloud"
-QA_MODEL_OR = "google/gemma-4-31b-it"  # paid fallback when Ollama unreachable
 
 
 def llm_call(prompt: str, max_tokens: int = 1000, temperature: float = 0.0, _retries: int | None = None) -> str:
     """Sync LLM call. Delegates to the shared LLMRunner.
 
-    Keeps the legacy signature for in-tree callers (`compute_llm_judge`,
-    `llm_judge.llm_call`, existing tests). The runner handles rate limit +
-    retry + provider fallback centrally. The ``_retries`` kwarg is kept
-    for back-compat but ignored (runner retries internally).
+    The ``_retries`` kwarg is ignored (runner retries internally). Kept
+    in the signature only because older in-tree callers pass it.
     """
-    from benchmarks.framework.transport.llm_runner import get_shared_runner
+    from graphstore.llm_runner import get_shared_runner
     return get_shared_runner().call_sync(prompt, max_tokens=max_tokens, temperature=temperature)
-
-
-def _resolve_providers() -> list[dict]:
-    """Resolve available LLM providers with model + litellm config.
-
-    Returns list of provider dicts with keys: litellm_model, api_base, api_key.
-    """
-    return _resolve_providers_base(load_config(), model_priority=[QA_MODEL, QA_MODEL_OR])
-
-
-def llm_call_on_provider(prompt: str, provider: dict, max_tokens: int = 1000, temperature: float = 0.0) -> str:
-    """Call LLM on a specific provider with streaming. Returns empty string on failure."""
-    import litellm
-    litellm.suppress_debug_info = True
-    try:
-        response = litellm.completion(
-            model=provider["litellm_model"],
-            messages=[{"role": "user", "content": prompt}],
-            api_base=provider["api_base"],
-            api_key=provider["api_key"],
-            stream=True,
-            timeout=90,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        chunks = []
-        for chunk in response:
-            delta = chunk.choices[0].delta.content or ""
-            if delta:
-                chunks.append(delta)
-        content = "".join(chunks)
-        return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-    except Exception:
-        return ""
 
 
 def health_check() -> bool:
@@ -76,25 +32,10 @@ def health_check() -> bool:
     if not result:
         raise RuntimeError(
             "LLM health check failed: got empty response. "
-            "Check that minimax-m2.7:cloud (Ollama) or minimax/minimax-m2.7:nitro (OpenRouter) is available."
+            "Check tools/autoresearch/config.json that active_provider + "
+            "provider_fallback_order resolve to at least one reachable model."
         )
     return True
-
-
-def generate_answer(question: str, context_texts: list[str], scored_nodes: list[dict] | None = None) -> str:
-    """Generate answer from retrieved context.
-
-    Prompt matches official LoCoMo QA_PROMPT from snap-research/locomo.
-    """
-    context = "\n\n".join(f"[{i+1}]: {t}" for i, t in enumerate(context_texts))
-    # Matches official LoCoMo QA_PROMPT
-    prompt = (
-        f"Based on the below context, write an answer in the form of a short phrase "
-        f"for the following question. Answer with exact words from the context whenever possible.\n\n"
-        f"Context:\n{context}\n\n"
-        f"Question: {question} Short answer:"
-    )
-    return llm_call(prompt, max_tokens=1000, temperature=0.0)
 
 
 def _normalize_answer(s: str) -> str:
@@ -150,10 +91,6 @@ def compute_f1(prediction: str, gold: str, category: int | None = None) -> float
     return _f1_score(prediction, gold)
 
 
-# ---------------------------------------------------------------------------
-# LLM-as-judge scoring (semantic equivalence, more lenient than token F1)
-# ---------------------------------------------------------------------------
-
 _JUDGE_PROMPT = """\
 You are grading a short-answer question.
 
@@ -187,13 +124,9 @@ def compute_llm_judge(
     Returns 1.0 if LLM says CORRECT, 0.0 if INCORRECT, 0.0 on parse failure.
     Costs 1 LLM call per QA. Used with --judge llm on run_locomo.
 
-    Empty predictions short-circuit to 0.0 (nothing to judge). Adversarial
-    category: if gold is None / empty / "no information available" and pred
-    is similarly empty-sounding, credit without calling the LLM.
-
-    Reasoning models (like minimax-m2.7) need a generous max_tokens so
-    reasoning tokens don't starve the verdict. Parsing looks for CORRECT
-    or INCORRECT anywhere in the verdict, not just the first token.
+    Reasoning models need a generous max_tokens so thinking tokens don't
+    starve the verdict. Parsing looks for CORRECT or INCORRECT anywhere
+    in the verdict, not just the first token.
     """
     pred = (prediction or "").strip()
     if not pred:
@@ -212,22 +145,19 @@ def compute_llm_judge(
         gold=(gold or "").strip(),
         prediction=pred,
     )
-    # 2000 tokens: plenty for reasoning-model thinking + the final verdict word.
     verdict = llm_call(prompt, max_tokens=2000, temperature=0.0)
     if debug:
         print(f"  [judge] raw verdict: {verdict!r}")
     if not verdict:
         return 0.0
-    # Search the whole verdict for CORRECT vs INCORRECT. Reasoning models
-    # may emit thinking before the final word; we take the LAST occurrence.
     upper = verdict.upper()
     last_incorrect = upper.rfind("INCORRECT")
     last_correct = upper.rfind("CORRECT")
     if last_incorrect == -1 and last_correct == -1:
         return 0.0
-    # "INCORRECT" contains "CORRECT" as a substring, so prefer whichever
-    # appears later as a standalone word. If INCORRECT is found at position
-    # P, then CORRECT will be found at position P+2; discount that.
+    # "INCORRECT" contains "CORRECT" as substring. If INCORRECT is at position
+    # P, CORRECT would match at P+2; prefer whichever appears later as a
+    # standalone word.
     if last_incorrect != -1 and (last_correct == -1 or last_correct <= last_incorrect + 2):
         return 0.0
     return 1.0

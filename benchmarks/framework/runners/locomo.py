@@ -23,8 +23,7 @@ from collections import defaultdict
 from ..adapters.base import QueryContext, TimedOperation
 from ..datasets import load_locomo
 from ..transport.llm_client import (
-    generate_answer, compute_f1, compute_llm_judge,
-    health_check, _resolve_providers, llm_call_on_provider,
+    compute_f1, compute_llm_judge, health_check,
 )
 
 # Official LoCoMo category IDs
