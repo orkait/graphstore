@@ -8,7 +8,7 @@ _LOCOMO_PATH = Path("/tmp/locomo/raw/locomo10.json")
 
 @pytest.mark.skipif(not _LOCOMO_PATH.exists(), reason="LoCoMo dataset not present")
 def test_build_evidence_lookup_maps_observation_ids_to_message_ids():
-    from benchmarks.framework.ratchet_recall import build_evidence_lookup
+    from benchmarks.framework.runners.ratchet_recall import build_evidence_lookup
 
     raw = json.loads(_LOCOMO_PATH.read_text())
     conv = raw[0]
@@ -20,7 +20,7 @@ def test_build_evidence_lookup_maps_observation_ids_to_message_ids():
 
 
 def test_score_evidence_support_reports_strict_and_pragmatic_hits():
-    from benchmarks.framework.ratchet_recall import score_evidence_support
+    from benchmarks.framework.runners.ratchet_recall import score_evidence_support
 
     evidence_lookup = {
         "D1:3": "s1:msg0",
@@ -41,7 +41,7 @@ def test_score_evidence_support_reports_strict_and_pragmatic_hits():
 
 
 def test_score_evidence_support_ignores_unknown_evidence_ids():
-    from benchmarks.framework.ratchet_recall import score_evidence_support
+    from benchmarks.framework.runners.ratchet_recall import score_evidence_support
 
     scores = score_evidence_support(
         evidence_ids=["UNKNOWN"],
@@ -56,7 +56,7 @@ def test_score_evidence_support_ignores_unknown_evidence_ids():
 
 
 def test_build_evidence_lookups_by_sample_id():
-    from benchmarks.framework.ratchet_recall import build_evidence_lookups
+    from benchmarks.framework.runners.ratchet_recall import build_evidence_lookups
 
     raw = [
         {

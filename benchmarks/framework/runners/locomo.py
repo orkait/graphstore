@@ -8,8 +8,8 @@ Protocol (matches snap-research/locomo):
     - Use ALL 10 conversations, ALL questions (no sampling)
 
 Usage:
-    python -m benchmarks.framework.run_locomo --data-path /path/to/locomo
-    python -m benchmarks.framework.run_locomo --max-conversations 1 --max-questions 20
+    python -m benchmarks.framework.runners.locomo --data-path /path/to/locomo
+    python -m benchmarks.framework.runners.locomo --max-conversations 1 --max-questions 20
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ import time
 from pathlib import Path
 from collections import defaultdict
 
-from .adapter import QueryContext, TimedOperation
-from .datasets import load_locomo
-from .llm_client import (
+from ..adapters.base import QueryContext, TimedOperation
+from ..datasets import load_locomo
+from ..transport.llm_client import (
     generate_answer, compute_f1, compute_llm_judge,
     health_check, _resolve_providers, llm_call_on_provider,
 )
@@ -192,7 +192,7 @@ def run_locomo(
 
         # Phase 2: LLM answer generation via the shared LLMRunner
         # (rate-limit + retry + provider fallback handled centrally).
-        from .llm_runner import get_shared_runner
+        from ..transport.llm_runner import get_shared_runner
         import asyncio
 
         runner = get_shared_runner()
@@ -345,14 +345,14 @@ def main():
         config["embedder"] = args.embedder
 
     if args.adapter == "skill":
-        from .adapters.graphstore_skill import GraphStoreSkillAdapter
+        from ..adapters.graphstore_skill import GraphStoreSkillAdapter
         if args.skill_dump_dir:
             config["skill_dump_raw_dir"] = args.skill_dump_dir
         if args.no_carry_facts:
             config["skill_carry_facts"] = False
         adapter = GraphStoreSkillAdapter(config=config)
     else:
-        from .adapters.graphstore_ import GraphStoreAdapter
+        from ..adapters.graphstore_ import GraphStoreAdapter
         adapter = GraphStoreAdapter(config=config)
 
     summary, details = run_locomo(

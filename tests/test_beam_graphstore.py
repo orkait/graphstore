@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def test_beam_pair_chunking_builds_user_assistant_pairs():
-    from benchmarks.framework.run_beam import create_chunking
+    from benchmarks.framework.runners.beam import create_chunking
 
     messages = [
         {
@@ -28,7 +28,7 @@ def test_beam_pair_chunking_builds_user_assistant_pairs():
 
 
 def test_beam_turn_chunking_builds_whole_turn():
-    from benchmarks.framework.run_beam import create_chunking
+    from benchmarks.framework.runners.beam import create_chunking
 
     messages = [
         {
@@ -49,7 +49,7 @@ def test_beam_turn_chunking_builds_whole_turn():
 
 
 def test_answer_payload_preserves_question_structure_and_adds_llm_response(tmp_path):
-    from benchmarks.framework.run_beam import build_answer_payload
+    from benchmarks.framework.runners.beam import build_answer_payload
 
     probing = {
         "abstention": [

@@ -16,7 +16,7 @@ from pathlib import Path
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
-_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "tools" / "autoresearch" / "config.json"
+_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "autoresearch" / "config.json"
 
 # Model preference for LoCoMo QA.
 # Dual-name: Ollama cloud tag comes first so local_ollama wins when present;
@@ -45,7 +45,7 @@ def llm_call(prompt: str, max_tokens: int = 1000, temperature: float = 0.0, _ret
     retry + provider fallback centrally. The ``_retries`` kwarg is kept
     for back-compat but ignored (runner retries internally).
     """
-    from benchmarks.framework.llm_runner import get_shared_runner
+    from benchmarks.framework.transport.llm_runner import get_shared_runner
     return get_shared_runner().call_sync(prompt, max_tokens=max_tokens, temperature=temperature)
 
 

@@ -16,7 +16,7 @@ from pathlib import Path
 from .adapters import AVAILABLE, get_adapter
 from .datasets import DATASET_LOADERS
 from .report import write_csv, write_json, write_markdown
-from .runner import run_benchmark
+from .runners.runner import run_benchmark
 
 SUPPORTED_DATASETS = ["longmemeval", "locomo", "beam"]
 
@@ -42,7 +42,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def _run_beam(args: argparse.Namespace) -> int:
     """Dispatch to BEAM benchmark runner (own protocol)."""
-    from .run_beam import main as beam_main
+    from .runners.beam import main as beam_main
 
     beam_argv = [
         "--beam-root", args.data_path,

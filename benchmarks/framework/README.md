@@ -44,18 +44,18 @@ Each benchmark also has a standalone runner for finer control:
 
 ```bash
 # LongMemEval with native INGEST pipeline, hybrid retrieval, per-type NDCG
-python -m benchmarks.framework.run_longmemeval \
+python -m benchmarks.framework.runners.longmemeval \
     data/longmemeval_s_cleaned.json \
     --mode remember --granularity session --top-k 10
 
 # LoCoMo with async LLM batch scoring
-python -m benchmarks.framework.run_locomo \
+python -m benchmarks.framework.runners.locomo \
     --data-path ./data/locomo \
     --embedder installed:jina-v5-small-retrieval \
     --k 10
 
 # BEAM answer generation
-python -m benchmarks.framework.run_beam \
+python -m benchmarks.framework.runners.beam \
     --beam-root /tmp/BEAM \
     --chat-size 100K \
     --start-index 1 --end-index 3 \

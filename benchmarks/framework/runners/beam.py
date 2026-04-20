@@ -100,7 +100,7 @@ def _load_reader(base_url: str | None, model_name: str, api_key: str | None):
     ad-hoc provider dict. Same rate-limit / retry / fallback code path as
     the other benches.
     """
-    from .llm_runner import LLMRunner
+    from ..transport.llm_runner import LLMRunner
     # litellm needs "openai/<model>" to route to an openai-compatible HTTP
     # endpoint when we pass base_url. Without the prefix litellm may try
     # a native provider.
