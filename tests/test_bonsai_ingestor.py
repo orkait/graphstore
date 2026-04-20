@@ -13,15 +13,19 @@ import pytest
 
 from graphstore.bonsai_ingestor import (
     BonsaiIngestor,
+    CompactTurn,
     FactState,
     IngestEmpty,
     IngestOverflow,
     IngestResult,
     _dedupe_upserts,
+    _dsl_escape,
+    _parse_compact_output,
     _render_known_facts_block,
     _scrape_belief_updates,
     _split_lines,
     _strip_think,
+    _synthesize_dsl,
 )
 
 
@@ -325,3 +329,265 @@ def test_ingestor_reset_facts_clears_state(tmp_path: Path):
     ing._facts["fact:x"] = FactState(fact_id="fact:x", value="v")
     ing.reset_facts()
     assert ing._facts == {}
+
+
+# --------------------------------------------------------------------
+# Compact mode: parser + DSL synthesis
+# --------------------------------------------------------------------
+
+def test_parse_compact_all_three_sections():
+    out = '''ENTS: "ent:priya"="Priya", "ent:openai"="OpenAI"
+BELIEFS: "fact:color"="blue"
+RETRACTS: "fact:old"'''
+    turn = _parse_compact_output(out)
+    assert turn.entities == [("ent:priya", "Priya"), ("ent:openai", "OpenAI")]
+    assert turn.beliefs == [("fact:color", "blue")]
+    assert turn.retracts == ["fact:old"]
+
+
+def test_parse_compact_none_values_are_empty():
+    out = '''ENTS: none
+BELIEFS: none
+RETRACTS: none'''
+    turn = _parse_compact_output(out)
+    assert turn.entities == []
+    assert turn.beliefs == []
+    assert turn.retracts == []
+
+
+def test_parse_compact_missing_sections_default_empty():
+    out = 'ENTS: "ent:x"="X"'
+    turn = _parse_compact_output(out)
+    assert turn.entities == [("ent:x", "X")]
+    assert turn.beliefs == []
+    assert turn.retracts == []
+
+
+def test_parse_compact_case_insensitive():
+    out = 'ents: "ent:x"="X"\nBELIEFS: "fact:y"="Y"'
+    turn = _parse_compact_output(out)
+    assert turn.entities == [("ent:x", "X")]
+    assert turn.beliefs == [("fact:y", "Y")]
+
+
+def test_parse_compact_tolerates_fence_lines():
+    out = '''```
+ENTS: "ent:x"="X"
+```'''
+    turn = _parse_compact_output(out)
+    assert turn.entities == [("ent:x", "X")]
+
+
+def test_parse_compact_escaped_quote_in_value():
+    out = 'ENTS: "ent:a"="Alice \\"Ace\\" Smith"'
+    turn = _parse_compact_output(out)
+    assert turn.entities == [("ent:a", 'Alice \\"Ace\\" Smith')]
+
+
+def test_parse_compact_ignores_unknown_prefixes():
+    out = '''ENTS: "ent:x"="X"
+FOO: not a section
+BELIEFS: "fact:y"="Y"'''
+    turn = _parse_compact_output(out)
+    assert turn.entities == [("ent:x", "X")]
+    assert turn.beliefs == [("fact:y", "Y")]
+
+
+def test_dsl_escape_handles_quote_and_backslash():
+    assert _dsl_escape('he said "hi"') == 'he said \\"hi\\"'
+    assert _dsl_escape('c:\\path\\file') == 'c:\\\\path\\\\file'
+
+
+def test_synthesize_minimal_turn_emits_only_message_node():
+    turn = CompactTurn()
+    dsl = _synthesize_dsl(turn, msg_id="m:s1:0", session_id="s1", role="user", text="hi")
+    assert len(dsl) == 1
+    assert 'CREATE NODE "m:s1:0"' in dsl[0]
+    assert 'DOCUMENT "hi"' in dsl[0]
+
+
+def test_synthesize_with_entities_emits_upsert_plus_matching_edge():
+    turn = CompactTurn(entities=[("ent:priya", "Priya"), ("ent:openai", "OpenAI")])
+    dsl = _synthesize_dsl(turn, msg_id="m:s1:0", session_id="s1", role="user", text="x")
+    assert len(dsl) == 1 + 2 + 2
+    assert 'UPSERT NODE "ent:priya"' in dsl[1]
+    assert 'UPSERT NODE "ent:openai"' in dsl[2]
+    assert 'CREATE EDGE "m:s1:0" -> "ent:priya" kind = "mentions"' in dsl[3]
+    assert 'CREATE EDGE "m:s1:0" -> "ent:openai" kind = "mentions"' in dsl[4]
+
+
+def test_synthesize_dedupes_duplicate_entities():
+    turn = CompactTurn(entities=[("ent:x", "X"), ("ent:x", "X")])
+    dsl = _synthesize_dsl(turn, msg_id="m:0", session_id="s", role="user", text="x")
+    upserts = [d for d in dsl if d.startswith("UPSERT")]
+    edges = [d for d in dsl if d.startswith("CREATE EDGE")]
+    assert len(upserts) == 1
+    assert len(edges) == 1
+
+
+def test_synthesize_belief_and_retract_use_same_fact_id():
+    turn = CompactTurn(
+        beliefs=[("fact:drink", "tea")],
+        retracts=["fact:drink"],
+    )
+    dsl = _synthesize_dsl(turn, msg_id="m:1", session_id="s", role="user", text="t")
+    retract = next(d for d in dsl if d.startswith("RETRACT"))
+    assert '"fact:drink"' in retract
+    assert 'superseded by m:1' in retract
+    assert any('ASSERT "fact:drink"' in d and 'value = "tea"' in d for d in dsl)
+
+
+def test_synthesize_escapes_quotes_in_text_and_name():
+    turn = CompactTurn(entities=[("ent:a", 'Alice "Ace"')])
+    dsl = _synthesize_dsl(
+        turn, msg_id="m:0", session_id="s", role="user",
+        text='She said "go".',
+    )
+    # Backslash-escapes in DSL string literal:
+    assert 'DOCUMENT "She said \\"go\\"."' in dsl[0]
+    assert 'name = "Alice \\"Ace\\""' in dsl[1]
+
+
+def test_synthesize_all_together_contract():
+    """End-to-end: messages + entity + belief + retract."""
+    turn = CompactTurn(
+        entities=[("ent:priya", "Priya")],
+        beliefs=[("fact:color", "green")],
+        retracts=["fact:color"],
+    )
+    dsl = _synthesize_dsl(
+        turn, msg_id="m:0", session_id="s1", role="user", text="text",
+    )
+    # Order: CREATE NODE, UPSERTs, EDGEs, RETRACTs, ASSERTs
+    kinds = [d.split(maxsplit=2)[0] for d in dsl]
+    assert kinds == ["CREATE", "UPSERT", "CREATE", "RETRACT", "ASSERT"]
+
+
+def test_compact_mode_requires_msg_id(tmp_path: Path):
+    skill = tmp_path / "skill.md"
+    skill.write_text("compact skill body")
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"")
+
+    ing = BonsaiIngestor(model_path=model, skill_path=skill, compact=True)
+    with pytest.raises(ValueError, match="compact=True ingest requires"):
+        ing.ingest("hello", dry_run=True)
+
+
+def test_compact_mode_defaults_to_compact_skill_path(tmp_path: Path):
+    """When no skill_path is passed and compact=True, uses the compact default."""
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"")
+
+    # Default compact skill path must exist in the repo or this raises; we
+    # accept that and just assert on the chosen path rather than instantiate.
+    from graphstore.bonsai_ingestor import _DEFAULT_COMPACT_SKILL_PATH, _DEFAULT_SKILL_PATH
+    assert _DEFAULT_COMPACT_SKILL_PATH != _DEFAULT_SKILL_PATH
+    assert "compact" in str(_DEFAULT_COMPACT_SKILL_PATH)
+
+
+# --------------------------------------------------------------------
+# Persistent KV cache
+# --------------------------------------------------------------------
+
+def test_save_kv_cache_noop_without_path(tmp_path: Path):
+    skill = tmp_path / "skill.md"
+    skill.write_text("any")
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"")
+
+    ing = BonsaiIngestor(model_path=model, skill_path=skill)
+    # Should silently no-op when no kv_cache_path configured and no Llama
+    ing.save_kv_cache()
+    # no crash = pass
+
+
+def test_save_kv_cache_noop_without_llm(tmp_path: Path):
+    skill = tmp_path / "skill.md"
+    skill.write_text("any")
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"")
+    kv = tmp_path / "kv.bin"
+
+    ing = BonsaiIngestor(model_path=model, skill_path=skill, kv_cache_path=kv)
+    ing.save_kv_cache()
+    assert not kv.exists()
+
+
+def test_try_load_kv_cache_returns_false_when_missing(tmp_path: Path):
+    skill = tmp_path / "skill.md"
+    skill.write_text("any")
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"x")
+    kv = tmp_path / "kv.bin"
+
+    ing = BonsaiIngestor(model_path=model, skill_path=skill, kv_cache_path=kv)
+    # Don't need a real Llama - load returns False on missing file before
+    # reaching the load_state call.
+    assert ing._try_load_kv_cache(None) is False
+
+
+def test_kv_meta_captures_skill_fingerprint(tmp_path: Path):
+    skill = tmp_path / "skill.md"
+    skill.write_text("v1 content")
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"abcdef")
+
+    ing = BonsaiIngestor(model_path=model, skill_path=skill)
+    meta = ing._kv_meta()
+    assert meta["skill_fingerprint"] == ing.skill_fingerprint
+    assert meta["n_ctx"] == 2048
+    assert meta["model_size_bytes"] == 6
+
+
+def test_try_load_kv_cache_rejects_stale_fingerprint(tmp_path: Path):
+    import pickle
+
+    skill = tmp_path / "skill.md"
+    skill.write_text("v1")
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"x")
+    kv = tmp_path / "kv.bin"
+
+    ing = BonsaiIngestor(model_path=model, skill_path=skill, kv_cache_path=kv)
+    stale = {
+        "meta": {
+            "model_path": str(model),
+            "model_size_bytes": 1,
+            "skill_fingerprint": "deadbeef0000",
+            "n_ctx": 2048,
+            "chat_format": "qwen",
+        },
+        "state": "not-a-real-llama-state",
+    }
+    kv.write_bytes(pickle.dumps(stale))
+
+    # Even with a None Llama, stale meta is detected before load_state is
+    # attempted so we return False cleanly.
+    assert ing._try_load_kv_cache(None) is False
+
+
+def test_try_load_kv_cache_handles_corrupt_pickle(tmp_path: Path):
+    skill = tmp_path / "skill.md"
+    skill.write_text("v1")
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"x")
+    kv = tmp_path / "kv.bin"
+    kv.write_bytes(b"not a pickle at all")
+
+    ing = BonsaiIngestor(model_path=model, skill_path=skill, kv_cache_path=kv)
+    assert ing._try_load_kv_cache(None) is False
+
+
+def test_try_load_kv_cache_handles_wrong_shape(tmp_path: Path):
+    import pickle
+
+    skill = tmp_path / "skill.md"
+    skill.write_text("v1")
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"x")
+    kv = tmp_path / "kv.bin"
+    kv.write_bytes(pickle.dumps("just a string"))
+
+    ing = BonsaiIngestor(model_path=model, skill_path=skill, kv_cache_path=kv)
+    assert ing._try_load_kv_cache(None) is False
