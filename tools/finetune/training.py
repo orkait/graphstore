@@ -15,7 +15,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Load OpenRouter config from config.json
-CONFIG_FILE = "./training_config.json"
+# Model training.py targets by default. Override by setting OPENROUTER_TRAINING_MODEL
+# in /.env. Must be a model name available on the configured openrouter provider
+# (see tools/autoresearch/config.json -> providers.openrouter.models).
+_DEFAULT_TRAINING_MODEL = "deepseek/deepseek-v3.2:nitro"
+_TRAINING_TIMEOUT_S = 180
 
 
 @dataclass(frozen=True)
@@ -91,31 +95,35 @@ def _preview_sequence(value, limit=12):
     return value[:limit] + [f"...<{len(value) - limit} more>"]
 
 def load_openrouter_config():
-    if not os.path.exists(CONFIG_FILE):
-        raise FileNotFoundError(f"Missing {CONFIG_FILE}. Please ensure it exists in the directory.")
-    
-    logger.info("[config] loading OpenRouter settings from %s", os.path.abspath(CONFIG_FILE))
-    with open(CONFIG_FILE, 'r') as f:
-        config = json.load(f)
-        
-    or_config = config.get("providers", {}).get("openrouter", {})
-    if not or_config or "api_key" not in or_config or or_config["api_key"].startswith("REPLACE"):
-        raise ValueError("OpenRouter API key is missing or invalid in config.json")
-        
-    target_model = or_config.get("model_fallback_order", ["qwen/qwen3-coder-next:nitro"])[0]
+    """Resolve OpenRouter provider from the shared autoresearch config.
+
+    Single source of truth: tools/autoresearch/config.json + /.env.
+    No separate training_config.json. Picks the OpenRouter provider entry,
+    overrides the model with _DEFAULT_TRAINING_MODEL (or OPENROUTER_TRAINING_MODEL
+    env var if set), returns the shape the AsyncOpenAI client expects.
+    """
+    from tools.autoresearch.providers import load_config, resolve_providers
+
+    config = load_config()
+    providers = resolve_providers(config)
+    openrouter = next((p for p in providers if p["pid"] == "openrouter"), None)
+    if not openrouter:
+        raise RuntimeError(
+            "openrouter provider not resolved. Check tools/autoresearch/config.json "
+            "(providers.openrouter) + /.env (OPENROUTER_API_KEY)."
+        )
+
+    target_model = os.environ.get("OPENROUTER_TRAINING_MODEL", _DEFAULT_TRAINING_MODEL)
     logger.info(
-        "[config] provider=openrouter base_url=%s default_model=%s timeout=%ss fallback_order=%s",
-        or_config.get("base_url"),
-        target_model,
-        config.get("iteration_timeout", 180),
-        or_config.get("model_fallback_order", []),
+        "[config] provider=openrouter base_url=%s model=%s timeout=%ss",
+        openrouter["api_base"], target_model, _TRAINING_TIMEOUT_S,
     )
-    
+
     return {
-        "api_key": or_config["api_key"],
-        "base_url": or_config["base_url"],
+        "api_key": openrouter["api_key"],
+        "base_url": openrouter["api_base"],
         "model": target_model,
-        "timeout": config.get("iteration_timeout", 180)
+        "timeout": _TRAINING_TIMEOUT_S,
     }
 
 # The Locked-in 64-Label MoE Ontology
