@@ -97,6 +97,8 @@ class GraphStore:
                  quantize_binary=_UNSET,
                  use_compression=_UNSET,
                  initial_capacity=_UNSET,
+                 reader=None,
+                 readers=None,
                  ):
         # Load config: explicit object > explicit path > env var > db dir > defaults
         if config is not None:
@@ -239,6 +241,16 @@ class GraphStore:
                                   ingestor_registry=self._ingestor_registry,
                                   chunker=self._chunker)
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
+        # Reader LLM(s) for the ANSWER verb. Pluggable callables, not a
+        # config-layer setting - held as live references on the executor.
+        self._executor._reader = reader
+        self._executor._readers = dict(readers) if readers else {}
+        if reader is not None and not callable(reader):
+            raise TypeError("reader must be a callable: reader(prompt, max_tokens=...) -> str")
+        if readers:
+            for name, r in readers.items():
+                if not callable(r):
+                    raise TypeError(f"readers[{name!r}] must be a callable")
         from graphstore.dsl.parser import set_cache_size
         set_cache_size(cfg.dsl.plan_cache_size)
         self._wire_executor_from_cfg(self._executor, cfg)

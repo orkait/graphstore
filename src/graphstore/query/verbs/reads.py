@@ -114,6 +114,60 @@ def _compile_remember(p: dict) -> str:
 register_compiler("remember", _compile_remember)
 
 
+# ---------- ANSWER --------------------------------------------------------
+# answer_q: "ANSWER" STRING at_clause? tokens_clause? limit_clause? where_clause? using_reader?
+
+def answer(
+    text: str,
+    *,
+    limit: int | None = None,
+    tokens: int | None = None,
+    at: str | None = None,
+    where: F | dict | None = None,
+    using: str | None = None,
+) -> Query:
+    """ANSWER verb: retrieval-augmented answer via a configured reader LLM.
+
+    Emits ``ANSWER "text" [AT ...] [TOKENS n] [LIMIT n] [WHERE ...] [USING "reader"]``.
+
+    The reader is resolved at the GraphStore level:
+        GraphStore(reader=callable)                   - default reader
+        GraphStore(readers={"name": callable})        - named reader registry
+        q.answer("...", using="name")                 - pick a named reader
+
+    Returns a Query that, when executed, produces
+        Result(kind="answer", data={"answer": str, "cited_slots": [id],
+                                    "candidates": [node], "reader": str|None},
+               meta=<REMEMBER signals>)
+    """
+    if not isinstance(text, str) or not text:
+        raise ValueError("answer() requires a non-empty query text")
+    params: dict = {"text": text}
+    if at is not None: params["at"] = at
+    if tokens is not None: params["tokens"] = tokens
+    if limit is not None: params["limit"] = limit
+    if where is not None: params["where"] = where
+    if using is not None: params["using"] = using
+    return Query(_verb="answer", _params=params, _kind="read")
+
+
+def _compile_answer(p: dict) -> str:
+    out = f"ANSWER {dsl_literal(p['text'])}"
+    if p.get("at") is not None:
+        out += f' AT "{p["at"]}"'
+    if p.get("tokens") is not None:
+        out += f" TOKENS {p['tokens']}"
+    if p.get("limit") is not None:
+        out += f" LIMIT {p['limit']}"
+    out += _where_clause(p)
+    if p.get("using") is not None:
+        out += f' USING {dsl_literal(p["using"])}'
+    return out
+
+
+register_compiler("answer", _compile_answer)
+
+
 # ---------- RECALL --------------------------------------------------------
 # recall_q: "RECALL" "FROM" STRING "DEPTH" NUMBER limit_clause? where_clause?
 

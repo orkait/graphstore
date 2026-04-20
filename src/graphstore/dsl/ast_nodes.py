@@ -557,6 +557,25 @@ class RememberQuery:
     at: int | None = None  # epoch ms anchor for temporal scoring
     at_range: tuple[int, int] | None = None
 
+
+@dataclass(slots=True)
+class AnswerQuery:
+    """ANSWER: REMEMBER + reader-LLM synthesis.
+
+    Runs the same retrieval pipeline as REMEMBER internally, then hands the
+    retrieved passages + the question to a configured reader callable. The
+    reader produces free-form answer text; graphstore returns that answer
+    alongside the citing slot ids and the usual ``meta["signals"]`` block.
+    """
+    query: str
+    limit: LimitClause | None = None
+    where: WhereClause | None = None
+    tokens: int | None = None
+    at: int | None = None
+    at_range: tuple[int, int] | None = None
+    using: str | None = None  # named reader from the GraphStore reader registry
+
+
 # --- Forget (hard delete blob + memory) ---
 @dataclass(slots=True)
 class ForgetNode:

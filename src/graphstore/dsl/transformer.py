@@ -100,6 +100,7 @@ from graphstore.dsl.ast_nodes import (
     SysReembed,
     SysStatus,
     LexicalSearchQuery,
+    AnswerQuery,
     RememberQuery,
     ForgetNode,
     SysRetain,
@@ -773,6 +774,29 @@ class DSLTransformer(Transformer):
                 at = int(a[1])
                 at_range = a[2] if len(a) > 2 else None
         return RememberQuery(query=query, limit=limit, where=where, tokens=tokens, at=at, at_range=at_range)
+
+    def answer_q(self, args):
+        query = self._str(args[0])
+        limit = self._find(args[1:], LimitClause)
+        where = self._find(args[1:], WhereClause)
+        tokens = None
+        at = None
+        at_range = None
+        using = None
+        for a in args[1:]:
+            if isinstance(a, tuple):
+                if a[0] == "tokens":
+                    tokens = int(a[1])
+                elif a[0] == "at":
+                    at = int(a[1])
+                    at_range = a[2] if len(a) > 2 else None
+                elif a[0] == "using_reader":
+                    using = a[1]
+        return AnswerQuery(query=query, limit=limit, where=where,
+                           tokens=tokens, at=at, at_range=at_range, using=using)
+
+    def using_reader(self, args):
+        return ("using_reader", self._str(args[0]))
 
     def vector_literal(self, args):
         return [self._num(a) for a in args]
