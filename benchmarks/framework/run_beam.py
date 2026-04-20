@@ -93,16 +93,28 @@ def build_answer_payload(probing_questions: dict, answers: dict[tuple[str, int],
 
 
 def _load_reader(base_url: str | None, model_name: str, api_key: str | None):
-    """Lazy import of openai - script path only, not needed for chunking tests."""
-    from openai import OpenAI
-    kwargs: dict[str, Any] = {}
-    if base_url:
-        kwargs["base_url"] = base_url
-    kwargs["api_key"] = api_key or "ollama"
-    return OpenAI(**kwargs)
+    """Build a one-off LLMRunner targeting the user-supplied OpenAI-compat endpoint.
+
+    BEAM runs the reader against an endpoint the user specifies on the CLI
+    (not the autoresearch config), so we construct a runner from a single
+    ad-hoc provider dict. Same rate-limit / retry / fallback code path as
+    the other benches.
+    """
+    from .llm_runner import LLMRunner
+    # litellm needs "openai/<model>" to route to an openai-compatible HTTP
+    # endpoint when we pass base_url. Without the prefix litellm may try
+    # a native provider.
+    litellm_model = model_name if "/" in model_name else f"openai/{model_name}"
+    provider = {
+        "pid": "beam_reader",
+        "litellm_model": litellm_model,
+        "api_base": base_url or "",
+        "api_key": api_key or "ollama",
+    }
+    return LLMRunner([provider])
 
 
-def _answer_question(client, model_name: str, question: str, context: str) -> str:
+def _answer_question(runner, model_name: str, question: str, context: str) -> str:
     base_prompt = ANSWER_GENERATION_FOR_RAG.replace("<context>", context).replace("<question>", question)
     prompts = [
         base_prompt,
@@ -110,13 +122,7 @@ def _answer_question(client, model_name: str, question: str, context: str) -> st
     ]
     budgets = [256, 768]
     for prompt, budget in zip(prompts, budgets):
-        rsp = client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=budget,
-        )
-        content = (rsp.choices[0].message.content or "").strip()
+        content = runner.call_sync(prompt, max_tokens=budget, temperature=0.0)
         if content:
             return content
     return ""

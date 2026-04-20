@@ -20,9 +20,15 @@ _CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "tools" / "autore
 
 # Model preference for LoCoMo QA.
 # Dual-name: Ollama cloud tag comes first so local_ollama wins when present;
-# OpenRouter nitro is the paid fallback (same model on both).
-QA_MODEL = "minimax-m2.7:cloud"
-QA_MODEL_OR = "minimax/minimax-m2.7:nitro"
+# OpenRouter is the paid fallback.
+#
+# gemma4:31b-cloud chosen over minimax-m2.7 because gemma4 is a
+# non-reasoning model. Reasoning models (minimax) emit variable-length
+# thinking tokens that introduce jitter even at temperature=0.0; this
+# caused LLM-judge verdicts to flip on identical (pred, gold) pairs
+# between smoke runs. gemma4 produces deterministic single-shot answers.
+QA_MODEL = "gemma4:31b-cloud"
+QA_MODEL_OR = "google/gemma-4-31b-it"  # paid fallback when Ollama unreachable
 
 
 def _load_config() -> dict:
@@ -31,70 +37,16 @@ def _load_config() -> dict:
     return {}
 
 
-def llm_call(prompt: str, max_tokens: int = 1000, temperature: float = 0.0, _retries: int = 2) -> str:
-    """Call LLM using litellm with autoresearch provider fallback.
+def llm_call(prompt: str, max_tokens: int = 1000, temperature: float = 0.0, _retries: int | None = None) -> str:
+    """Sync LLM call. Delegates to the shared LLMRunner.
 
-    Retries on empty response (MiniMax sometimes returns empty content
-    when reasoning tokens consume the budget or during transient outages).
+    Keeps the legacy signature for in-tree callers (`compute_llm_judge`,
+    `llm_judge.llm_call`, existing tests). The runner handles rate limit +
+    retry + provider fallback centrally. The ``_retries`` kwarg is kept
+    for back-compat but ignored (runner retries internally).
     """
-    import litellm
-    litellm.suppress_debug_info = True
-
-    config = _load_config()
-    config = {**config, "active_model": QA_MODEL}
-
-    providers = config.get("providers", {})
-    active_pid = config.get("active_provider", "")
-    provider_order = [active_pid] + [
-        p for p in config.get("provider_fallback_order", []) if p != active_pid
-    ]
-    provider_order = [p for p in dict.fromkeys(provider_order) if p in providers]
-
-    for pid in provider_order:
-        p = providers.get(pid)
-        if not p:
-            continue
-        base_url = p.get("base_url", "")
-        api_key = (p.get("api_key", "")
-                   or os.environ.get(p.get("api_key_env", ""), "")
-                   or "ollama")
-        if not base_url:
-            continue
-
-        available = p.get("models", {})
-        # Same model across providers for consistent answers
-        model_order = [m for m in [QA_MODEL, QA_MODEL_OR] if m in available]
-        if not model_order:
-            continue
-
-        is_local = p.get("is_local", "localhost" in base_url or "127.0.0.1" in base_url)
-        prefix = p.get("litellm_prefix") or ("ollama_chat" if is_local else "")
-        for model in model_order:
-            litellm_model = f"{prefix}/{model}" if prefix else model
-            try:
-                response = litellm.completion(
-                    model=litellm_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    api_base=base_url,
-                    api_key=api_key,
-                    stream=False,
-                    timeout=30,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-                content = response.choices[0].message.content or ""
-                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-                if content:
-                    return content
-            except Exception:
-                continue
-
-    # All providers/models returned empty - retry if attempts remain
-    if _retries > 0:
-        import time
-        time.sleep(1)
-        return llm_call(prompt, max_tokens=max_tokens, temperature=temperature, _retries=_retries - 1)
-    return ""
+    from benchmarks.framework.llm_runner import get_shared_runner
+    return get_shared_runner().call_sync(prompt, max_tokens=max_tokens, temperature=temperature)
 
 
 def _resolve_providers() -> list[dict]:
@@ -245,3 +197,86 @@ def compute_f1(prediction: str, gold: str, category: int | None = None) -> float
         return float(np.mean([max([_f1_score(p, g) for p in preds]) for g in golds]))
 
     return _f1_score(prediction, gold)
+
+
+# ---------------------------------------------------------------------------
+# LLM-as-judge scoring (semantic equivalence, more lenient than token F1)
+# ---------------------------------------------------------------------------
+
+_JUDGE_PROMPT = """\
+You are grading a short-answer question.
+
+Question: {question}
+Gold answer: {gold}
+Predicted answer: {prediction}
+
+Mark the predicted answer CORRECT if it is semantically equivalent to the
+gold answer OR captures the same essential fact, even with different
+wording, abbreviation, or paraphrase. Mark it INCORRECT only if it
+contradicts the gold answer, omits the essential fact, or fabricates
+unsupported content.
+
+For adversarial questions (gold answer is "no information available" or
+similar), CORRECT requires the prediction to also acknowledge that no
+information is available. Any confidently-stated answer is INCORRECT.
+
+Respond with a single word: CORRECT or INCORRECT.
+"""
+
+
+def compute_llm_judge(
+    prediction: str,
+    gold: str,
+    question: str,
+    category: int | None = None,
+    debug: bool = False,
+) -> float:
+    """Semantic-equivalence judge via llm_call.
+
+    Returns 1.0 if LLM says CORRECT, 0.0 if INCORRECT, 0.0 on parse failure.
+    Costs 1 LLM call per QA. Used with --judge llm on run_locomo.
+
+    Empty predictions short-circuit to 0.0 (nothing to judge). Adversarial
+    category: if gold is None / empty / "no information available" and pred
+    is similarly empty-sounding, credit without calling the LLM.
+
+    Reasoning models (like minimax-m2.7) need a generous max_tokens so
+    reasoning tokens don't starve the verdict. Parsing looks for CORRECT
+    or INCORRECT anywhere in the verdict, not just the first token.
+    """
+    pred = (prediction or "").strip()
+    if not pred:
+        return 0.0
+    if category == 5:
+        low = pred.lower()
+        if any(phrase in low for phrase in (
+            "no information available", "not mentioned", "cannot answer",
+            "don't know", "do not know", "not enough information",
+        )):
+            return 1.0
+        return 0.0
+
+    prompt = _JUDGE_PROMPT.format(
+        question=(question or "").strip(),
+        gold=(gold or "").strip(),
+        prediction=pred,
+    )
+    # 2000 tokens: plenty for reasoning-model thinking + the final verdict word.
+    verdict = llm_call(prompt, max_tokens=2000, temperature=0.0)
+    if debug:
+        print(f"  [judge] raw verdict: {verdict!r}")
+    if not verdict:
+        return 0.0
+    # Search the whole verdict for CORRECT vs INCORRECT. Reasoning models
+    # may emit thinking before the final word; we take the LAST occurrence.
+    upper = verdict.upper()
+    last_incorrect = upper.rfind("INCORRECT")
+    last_correct = upper.rfind("CORRECT")
+    if last_incorrect == -1 and last_correct == -1:
+        return 0.0
+    # "INCORRECT" contains "CORRECT" as a substring, so prefer whichever
+    # appears later as a standalone word. If INCORRECT is found at position
+    # P, then CORRECT will be found at position P+2; discount that.
+    if last_incorrect != -1 and (last_correct == -1 or last_correct <= last_incorrect + 2):
+        return 0.0
+    return 1.0
