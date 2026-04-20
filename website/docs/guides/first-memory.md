@@ -141,12 +141,12 @@ uv run python3 -m benchmarks.framework.ratchet_recall
 
 ## Full LoCoMo with LLM
 
-Set the model in `benchmarks/framework/llm_client.py`:
-
-```python
-QA_MODEL = "minimax/minimax-m2.7:nitro"   # OpenRouter paid
-QA_MODEL_OR = "minimax/minimax-m2.7:nitro"
-```
+1. Set API keys in `/.env` at the repo root (see `/.env.example`). The
+   shared transport reads `OPENROUTER_API_KEY` + `OLLAMA_API_KEY`.
+2. The preferred QA model is declared in
+   `src/graphstore/llm_runner.py` as `QA_MODEL_PRIORITY`. Edit that list
+   to swap models. Default: `gemma4:31b-cloud` (Ollama) with
+   `google/gemma-4-31b-it` (OpenRouter) as fallback.
 
 Run:
 
@@ -155,7 +155,7 @@ Run:
 uv run python3 -c "
 import os
 os.environ['GRAPHSTORE_MODEL_CACHE_DIR'] = '/tmp/gs_models'
-from benchmarks.framework.run_locomo import run_locomo
+from benchmarks.framework.runners.locomo import run_locomo
 from benchmarks.framework.datasets import load_locomo
 from benchmarks.framework.adapters.graphstore_ import GraphStoreAdapter
 
@@ -173,7 +173,7 @@ print(f'Overall F1: {summary[\"overall_f1\"]:.4f}')
 "
 
 # Full 1986Q (~$0.40 on MiniMax nitro)
-uv run python3 -m benchmarks.framework.run_locomo \
+uv run python3 -m benchmarks.framework.runners.locomo \
   --data-path /tmp/locomo \
   --embedder installed:jina-v5-small-retrieval \
   --k 10

@@ -93,14 +93,15 @@ set_cache_dir('/tmp/gs_models')
 install_embedder('jina-v5-small-retrieval')
 "
 
-# Run full benchmark (requires LLM - set QA_MODEL in benchmarks/framework/llm_client.py)
-python -m benchmarks.framework.run_locomo \
+# Run full benchmark (requires LLM - set OPENROUTER_API_KEY/OLLAMA_API_KEY in /.env;
+# QA_MODEL_PRIORITY lives in src/graphstore/llm_runner.py)
+python -m benchmarks.framework.runners.locomo \
   --data-path /tmp/locomo \
   --embedder installed:jina-v5-small-retrieval \
   --k 10
 
 # Run direct evidence recall test (no LLM needed)
-python -m benchmarks.framework.ratchet_recall
+python -m benchmarks.framework.runners.ratchet_recall
 ```
 
 For a walkthrough of ingestion and querying on a single LoCoMo conversation, see [First memory](../guides/first-memory).
@@ -131,7 +132,7 @@ Disk numbers at **100k nodes**, in-memory at **10k nodes** (disk WAL sync domina
 
 ## BEAM
 
-graphstore includes a benchmark-side BEAM answer-generation runner at `benchmarks/framework/run_beam.py`. Keeps graphstore core untouched and emits BEAM-compatible answer JSON so BEAM's own evaluator can score it.
+graphstore includes a benchmark-side BEAM answer-generation runner at `benchmarks/framework/runners/beam.py`. Keeps graphstore core untouched and emits BEAM-compatible answer JSON so BEAM's own evaluator can score it.
 
 ### Workflow
 
@@ -143,7 +144,7 @@ graphstore includes a benchmark-side BEAM answer-generation runner at `benchmark
 
 ```bash
 # Generate answers for BEAM 100K chats 1..2
-uv run python3 -m benchmarks.framework.run_beam \
+uv run python3 -m benchmarks.framework.runners.beam \
   --beam-root /tmp/BEAM \
   --chat-size 100K \
   --start-index 1 \

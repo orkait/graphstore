@@ -6,9 +6,9 @@ Benchmark GraphStore retrieval quality on three standardized datasets.
 
 | Benchmark | Protocol | Scoring | Runner |
 |---|---|---|---|
-| **LongMemEval** | Per-record: reset - ingest haystack - query - score | Accuracy, R@K, LLM judge | `runner.py` / `run_longmemeval.py` |
-| **LoCoMo** | Per-conversation: ingest once - query all QAs | Token-level F1 (Porter stemming) | `run_locomo.py` |
-| **BEAM** | Per-chat: ingest chunks - answer probing questions | External BEAM evaluator | `run_beam.py` |
+| **LongMemEval** | Per-record: reset - ingest haystack - query - score | Accuracy, R@K, LLM judge | `runners/runner.py` + `runners/longmemeval.py` |
+| **LoCoMo** | Per-conversation: ingest once - query all QAs | Token-level F1 + LLM judge | `runners/locomo.py` |
+| **BEAM** | Per-chat: ingest chunks - answer probing questions | External BEAM evaluator | `runners/beam.py` |
 
 ## Quickstart
 
@@ -78,26 +78,37 @@ cost            ingest_tokens, query_tokens
 ```
 framework/
   cli.py                        # Unified CLI (all 3 benchmarks)
-  runner.py                     # Generic per-record runner (LongMemEval)
-  run_locomo.py                 # LoCoMo protocol (ingest-once, F1 + LLM judge)
-  run_beam.py                   # BEAM protocol (chunk + answer generation)
-  run_longmemeval.py            # LongMemEval native runner (NDCG, per-type)
-  adapter.py                    # MemoryAdapter protocol
-  adapters/graphstore_.py       # Native-DSL adapter (5-signal REMEMBER)
-  adapters/graphstore_skill.py  # Skill-based ingest adapter (LLM-planned DSL)
   datasets.py                   # Dataset loaders (longmemeval, locomo)
   metrics.py                    # Quality, latency, memory metrics
   report.py                     # JSON, CSV, Markdown output
   entity_extraction.py          # NER for graph enrichment (used by graphstore_.py)
-  ratchet_recall.py             # LoCoMo evidence-recall metrics
-  ratchet_test.py               # Ratchet test harness (50Q random 10/cat)
-  llm_runner.py                 # Shared LLM transport: rate-limit + retry + fallback
-  llm_client.py                 # LoCoMo reader/judge wrappers (delegates to llm_runner)
-  llm_judge.py                  # LongMemEval per-category judge prompts
   docker_runner.py              # Docker entry point
   Dockerfile.bench              # CPU container
   Dockerfile.bench.gpu          # GPU container
+
+  runners/
+    runner.py                   # Generic per-record runner (LongMemEval)
+    locomo.py                   # LoCoMo protocol (ingest-once, F1 + LLM judge)
+    beam.py                     # BEAM protocol (chunk + answer generation)
+    longmemeval.py              # LongMemEval native runner (NDCG, per-type)
+    ratchet_recall.py           # LoCoMo evidence-recall metrics
+    ratchet_test.py             # Ratchet test harness (50Q random 10/cat)
+
+  transport/
+    llm_runner.py               # Thin re-export of graphstore.llm_runner
+    llm_client.py               # LoCoMo reader/judge wrappers (delegates to runner)
+    llm_judge.py                # LongMemEval per-category judge prompts
+
+  adapters/
+    base.py                     # MemoryAdapter protocol + shared types
+    graphstore_.py              # Native-DSL adapter (5-signal REMEMBER)
+    graphstore_skill.py         # Skill-based ingest adapter (LLM-planned DSL)
 ```
+
+The canonical LLM transport lives in `src/graphstore/llm_runner.py`. The
+`transport/` re-export keeps bench-side imports stable. Provider chain +
+config.json parsing live in `tools/autoresearch/providers.py`; secrets
+come from `/.env` via `/env.py`.
 
 ## Docker
 

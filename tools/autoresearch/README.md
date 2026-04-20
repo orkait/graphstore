@@ -159,6 +159,11 @@ unverified candidate.
 Two-level hierarchy: **providers** own connection settings, **models** are
 leaves under them. A single API key per provider is reused by all its models.
 
+Secrets never live in `config.json`. Each provider declares an `env_key`
+that points at a field on the typed `ENV` object in `/env.py`; values
+come from `/.env` (gitignored) or the shell. See `/.env.example` for the
+full list of variables.
+
 ```json
 {
   "active_provider": "local_ollama",
@@ -167,7 +172,7 @@ leaves under them. A single API key per provider is reused by all its models.
   "providers": {
     "local_ollama": {
       "base_url": "http://localhost:11434",
-      "api_key": "...",
+      "env_key": "ollama_key",
       "is_local": true,
       "litellm_prefix": "ollama_chat",
       "models": {
@@ -181,7 +186,7 @@ leaves under them. A single API key per provider is reused by all its models.
     },
     "openrouter": {
       "base_url": "https://openrouter.ai/api/v1",
-      "api_key": "sk-or-v1-...",
+      "env_key": "openrouter_key",
       "is_local": false,
       "litellm_prefix": "openrouter",
       "models": {
@@ -211,9 +216,13 @@ auto-migrated in `migrate_config()` at load time.
 ### Setup
 
 ```bash
-# Copy and fill in API keys (config.json is gitignored)
-cp autoresearch/config.example.json autoresearch/config.json
-# edit autoresearch/config.json and add real api_key values
+# Copy the shape-only config template (config.json is gitignored):
+cp tools/autoresearch/config.example.json tools/autoresearch/config.json
+
+# Put real API keys in /.env at the repo root. config.json never holds
+# secrets; it only declares env_key pointers.
+cp .env.example .env
+# edit /.env and set OPENROUTER_API_KEY + OLLAMA_API_KEY
 
 # Run a single loop
 python -m tools.autoresearch.run_loop --algo spreading --iterations 18
@@ -323,7 +332,9 @@ change), and **target-function-only AST comparison** for the others.
 3. Test it: `python -m tools.autoresearch.run_loop --algo X --iterations 1 --model <model>`
 
 If the model is on a new provider (e.g., anthropic), add a new top-level
-provider entry with its `base_url`, `api_key`, and `litellm_prefix`.
+provider entry with its `base_url`, `env_key`, and `litellm_prefix`.
+Declare the matching field on `_Env` in `/env.py` and add the raw env
+var to `/.env.example`.
 
 ## Known limitations
 
