@@ -22,6 +22,47 @@ q.remember("European history", limit=10).execute(gs)
 q.recall("mem:1", depth=2, limit=20).execute(gs)
 
 q.nodes(where=F.eq("kind", "memory") & F.gt("importance", 0.5), limit=10).execute(gs)
+
+# Full retrieve + synthesize loop (needs GraphStore(reader=callable))
+q.answer("What European capitals have I seen?", limit=5).execute(gs)
+```
+
+## Retrieval pipeline (observable by default)
+
+Every `q.remember(...)` result carries per-signal scores on every node (`_remember_score`, `_vector_sim`, `_bm25_score`, `_recency_score`, `_graph_score`, `_co_bonus`, `_recall_boost`, `_rank_stage`) plus a rich `Result.meta["signals"]` block describing fusion weights, recency half-life, per-stage candidate counts, reranker state, and nucleus state.
+
+Dry-run the pipeline with `q.sys.explain(...)` to see the same telemetry without mutating state or calling the reranker:
+
+```python
+plan = q.sys.explain(q.remember("European capitals", limit=3)).execute(gs)
+plan.data["candidates"]   # [{slot, id, fused_score, vector_sim, ...}, ...]
+plan.meta["signals"]      # full pipeline telemetry
+```
+
+## Retrieval + reader synthesis
+
+`q.answer(...)` runs `REMEMBER` internally, hands retrieved passages + question to a user-supplied reader LLM, returns an answer with citations. graphstore ships no LLM dependency; the reader is a plain callable wired at `GraphStore(reader=...)` or `GraphStore(readers={"name": callable})`. Reader exceptions are captured in `data["error"]` rather than raised.
+
+```python
+def my_reader(prompt: str, max_tokens: int = 1000) -> str:
+    # call any LLM backend (openai, litellm, local, ...)
+    ...
+
+gs = GraphStore(reader=my_reader)
+r = q.answer("What is the capital of France?", limit=3).execute(gs)
+
+r.data["answer"]         # "Paris"
+r.data["cited_slots"]    # ["mem:paris", "mem:eiffel", ...]
+r.data["candidates"]     # full REMEMBER nodes with per-signal scores
+r.meta["signals"]        # REMEMBER pipeline telemetry
+```
+
+Use named readers to A/B two LLMs on the same query:
+
+```python
+gs = GraphStore(readers={"fast": fast_llm, "careful": careful_llm})
+q.answer("q", limit=3, using="fast").execute(gs)
+q.answer("q", limit=3, using="careful").execute(gs)
 ```
 
 ## Why use the builder
@@ -156,6 +197,7 @@ Missing or extra params raise at build time.
 | `q.similar(text? / node? / vec?, limit?, where?)` | `SIMILAR TO <target> ...` |
 | `q.lexical(text, limit?, where?)` | `LEXICAL SEARCH "..." ...` |
 | `q.remember(text, limit?, tokens?, at?, where?)` | `REMEMBER "..." [AT ...] [TOKENS n] [LIMIT n] [WHERE ...]` |
+| `q.answer(text, limit?, tokens?, at?, where?, using?)` | `ANSWER "..." [AT ...] [TOKENS n] [LIMIT n] [WHERE ...] [USING "reader"]` |
 | `q.what_if_retract(id)` | `WHAT IF RETRACT "id"` |
 
 ### Writes (20) + Control (3)

@@ -21,10 +21,14 @@ from graphstore.core.edges import resize_csr
 
 from graphstore.dsl.handlers._registry import handles
 from graphstore.dsl.ast_nodes import (
-    RecallQuery, SimilarQuery, LexicalSearchQuery, CounterfactualQuery, RememberQuery,
+    RecallQuery, SimilarQuery, LexicalSearchQuery, CounterfactualQuery,
+    RememberQuery, AnswerQuery,
 )
 from graphstore.core.types import Result
-from graphstore.core.errors import EmbedderRequired, NodeNotFound, VectorError, VectorNotFound
+from graphstore.core.errors import (
+    EmbedderRequired, GraphStoreError,
+    NodeNotFound, VectorError, VectorNotFound,
+)
 
 
 class IntelligenceHandlers:
@@ -913,3 +917,126 @@ class IntelligenceHandlers:
         }
 
         return Result(kind="nodes", data=results, count=len(results), meta=meta)
+
+    # ─────────────────────────────────────────────────────────────────
+    # ANSWER: REMEMBER + reader-LLM synthesis
+    # ─────────────────────────────────────────────────────────────────
+
+    @handles(AnswerQuery, write=True)
+    def _answer(self, q: AnswerQuery) -> Result:
+        """ANSWER: retrieve with REMEMBER, synthesize with a reader LLM.
+
+        Internally runs ``_remember`` with the same ``query`` / ``limit`` /
+        ``where`` / ``at`` / ``tokens`` as a normal REMEMBER call (so recall
+        counts bump, matching real retrieval). Then hands the top-k
+        retrieved passages to a reader callable configured on the
+        GraphStore, or a named reader specified via ``USING "name"``.
+
+        The reader is a plain callable:
+            reader(prompt: str, max_tokens: int = 1000) -> str
+
+        graphstore core ships no LLM dependencies. The caller wires a
+        reader at construction:
+            GraphStore(reader=my_llm_callable, ...)
+            GraphStore(readers={"fast": a, "careful": b}, reader="fast", ...)
+
+        Result shape:
+            Result(
+                kind="answer",
+                data={
+                    "answer": str,                # reader's output
+                    "cited_slots": list[str],     # node ids used as context
+                    "candidates": list[dict],     # full REMEMBER nodes
+                    "reader": str | None,         # reader name used
+                },
+                count=1,
+                meta=<REMEMBER's meta, including meta["signals"]>,
+            )
+
+        If reader is unavailable, raises GraphStoreError. Reader-side
+        errors are caught and returned in ``data["error"]`` without
+        raising so the caller can inspect retrieval state.
+        """
+        reader = self._resolve_reader(q.using)
+        if reader is None:
+            name_hint = f" named {q.using!r}" if q.using else ""
+            raise GraphStoreError(
+                f"ANSWER requires a configured reader{name_hint}. "
+                "Pass reader=<callable> or readers={name: callable} to "
+                "GraphStore() to enable ANSWER verbs."
+            )
+
+        # Build an equivalent RememberQuery and run the real retrieval.
+        inner = RememberQuery(
+            query=q.query,
+            limit=q.limit,
+            where=q.where,
+            tokens=q.tokens,
+            at=q.at,
+            at_range=q.at_range,
+        )
+        retrieval = self._remember(inner)
+
+        cited_slots: list[str] = []
+        context_blocks: list[str] = []
+        for i, node in enumerate(retrieval.data):
+            node_id = node.get("id")
+            if node_id is not None:
+                cited_slots.append(node_id)
+            text = (
+                node.get("content")
+                or node.get("summary")
+                or node.get("text")
+                or ""
+            )
+            if not text:
+                continue
+            src = f" (source: {node_id})" if node_id else ""
+            context_blocks.append(f"[{i + 1}]{src} {text}")
+
+        context_str = "\n\n".join(context_blocks) if context_blocks else "(no retrieved context)"
+
+        prompt = (
+            "Answer the question below using only the context. If the context "
+            "does not contain the answer, say \"no information available\". "
+            "Quote spans from the context when possible.\n\n"
+            f"Context:\n{context_str}\n\n"
+            f"Question: {q.query}\n\n"
+            "Answer:"
+        )
+
+        reader_name = q.using or getattr(self, "_default_reader_name", None)
+        data: dict = {
+            "answer": "",
+            "cited_slots": cited_slots,
+            "candidates": retrieval.data,
+            "reader": reader_name,
+        }
+        try:
+            answer_text = reader(prompt)
+            data["answer"] = answer_text or ""
+        except Exception as e:
+            data["error"] = f"{type(e).__name__}: {e}"
+
+        meta = dict(retrieval.meta or {})
+        return Result(kind="answer", data=data, count=1, meta=meta)
+
+    def _resolve_reader(self, name: str | None):
+        """Look up a reader callable by name, or fall back to the default.
+
+        Lookup order:
+          1. If ``name`` is set, check ``self._readers[name]``.
+          2. Fall back to ``self._reader`` (the default configured at
+             construction).
+          3. Return None if nothing is wired.
+        """
+        readers = getattr(self, "_readers", None) or {}
+        if name is not None:
+            return readers.get(name)
+        default = getattr(self, "_reader", None)
+        if default is not None:
+            return default
+        # Only one registered reader? Use it.
+        if len(readers) == 1:
+            return next(iter(readers.values()))
+        return None

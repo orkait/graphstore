@@ -121,6 +121,7 @@ class _QNamespace:
     node           = staticmethod(_reads.node)
     nodes          = staticmethod(_reads.nodes)
     remember       = staticmethod(_reads.remember)
+    answer         = staticmethod(_reads.answer)
     recall         = staticmethod(_reads.recall)
     similar        = staticmethod(_reads.similar)
     lexical        = staticmethod(_reads.lexical)

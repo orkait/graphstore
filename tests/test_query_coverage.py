@@ -28,7 +28,7 @@ EXPECTED_VERBS = {
     "ancestors", "descendants", "common_neighbors",
     "match", "count_nodes", "count_edges", "aggregate_nodes",
     "recall", "what_if_retract",
-    "similar", "lexical", "remember",
+    "similar", "lexical", "remember", "answer",
     # Writes
     "create_node", "create_node_auto",
     "update_node", "upsert_node",

@@ -80,6 +80,7 @@ Every call returns a `Query`. All keyword args shown; user strings are `dsl_lite
 | `q.node(id, *, with_document=False)` | `NODE "id" [WITH DOCUMENT]` |
 | `q.nodes(*, kind=None, where=None, limit=None, offset=None, order_by=None)` | `NODES [WHERE ...]` |
 | `q.remember(text, *, limit=None, tokens=None, at=None, where=None)` | `REMEMBER "..."` |
+| `q.answer(text, *, limit=None, tokens=None, at=None, where=None, using=None)` | `ANSWER "..." [USING "reader"]` |
 | `q.recall(from_id, *, depth, limit=None, where=None)` | `RECALL FROM "..." DEPTH n` |
 | `q.similar(*, text=None, node=None, vec=None, limit=None, where=None)` | `SIMILAR TO ...` (exactly one target) |
 | `q.lexical(text, *, limit=None, where=None)` | `LEXICAL SEARCH "..."` |
@@ -386,14 +387,85 @@ print(qr.dsl())
 # REMEMBER "question" LIMIT 10 WHERE kind = "message"
 ```
 
-Every REMEMBER result exposes per-signal scores:
+Every REMEMBER result exposes per-signal scores on every returned node:
 
 ```python
 r = q.remember("caroline counseling", limit=1, where=F.eq("kind","message")).execute(gs)
 n = r.data[0]
-print(n["_remember_score"], n["_vector_sim"], n["_bm25_score"],
-      n["_recency_score"], n["_graph_score"], n["_recall_score"])
+print(n["_remember_score"],    # fused final (or rerank score if a reranker ran)
+      n["_vector_sim"],        # max sentence cosine
+      n["_bm25_score"],        # normalised FTS5 score
+      n["_recency_score"],     # exp(-age / half_life)
+      n["_graph_score"],       # entity-degree contribution
+      n["_co_bonus"],          # min(vec, bm25) * 0.10 when both fire
+      n["_recall_boost"],      # log1p(__recall_count__) * 0.05
+      n["_rank_stage"])        # "fusion" or "rerank"
+# When a reranker ran, these extras are also set:
+#   n["_fusion_score"]   pre-rerank fused base
+#   n["_rerank_score"]   raw reranker output
 ```
+
+`Result.meta["signals"]` carries the rest of the pipeline state:
+
+```python
+r.meta["signals"]
+# {
+#   "fusion": {"method": "weighted", "weights": [...], "graph_signal_enabled": True},
+#   "recency": {"half_life_days": 7300.0},
+#   "sentence_query_expansion": {"enabled": True, "num_sentences": 1},
+#   "stages": {"gathered_vec": N, "gathered_bm25": N, "union": N,
+#              "cap_applied": bool, "after_cap": N, "before_rerank": N, "final": N},
+#   "reranker": {"ran": bool, "model": str|None, "error": str|None},
+#   "nucleus": {"enabled": bool},
+# }
+```
+
+### Dry-run via `q.sys.explain(inner)`
+
+Pass any `q.remember(...)` Query into `q.sys.explain(...)` to dry-run the pipeline. Skips materialization, rerank, nucleus, and the recall-count bump:
+
+```python
+plan = q.sys.explain(q.remember("caroline counseling", limit=3)).execute(gs)
+plan.kind            # "plan"
+plan.data["candidates"]
+# [{"slot": 9, "id": "m1", "fused_score": 0.42,
+#   "vector_sim": 0.52, "bm25_score": 0.0, "recency_score": 1.0,
+#   "graph_score": 0.0, "co_bonus": 0.0, "recall_boost": 0.0}, ...]
+plan.meta["signals"]   # same block as a real REMEMBER
+```
+
+Safe to call repeatedly while tuning fusion weights.
+
+### ANSWER: retrieval + reader LLM
+
+`q.answer(...)` runs REMEMBER internally, hands the retrieved passages + question to a configured reader callable, returns an answer with citations. graphstore ships no LLM dependency; the reader is a plain callable:
+
+```python
+def my_reader(prompt: str, max_tokens: int = 1000) -> str:
+    # call any LLM (openai, litellm, local model, ...)
+    ...
+
+gs = GraphStore(reader=my_reader)
+
+r = q.answer("What is the capital of France?", limit=3).execute(gs)
+r.kind           # "answer"
+r.data["answer"]        # "Paris"
+r.data["cited_slots"]   # ["n0", "n1", "n2"]
+r.data["candidates"]    # list of full REMEMBER nodes
+r.meta["signals"]       # REMEMBER telemetry
+```
+
+Named readers for A/B testing:
+
+```python
+gs = GraphStore(readers={"fast": fast_llm, "careful": careful_llm})
+r = q.answer("q", limit=3, using="fast").execute(gs)
+r = q.answer("q", limit=3, using="careful").execute(gs)
+```
+
+Reader resolution order: `USING name` -> `readers[name]` (raise if missing) -> default `reader=` -> sole entry of `readers` if exactly one -> else `GraphStoreError`.
+
+Reader exceptions are caught, not raised. `data["error"]` carries the exception message; retrieval state (candidates, signals) still returned so the caller can inspect.
 
 ## REMEMBER fusion (default)
 

@@ -90,16 +90,43 @@ Deep dive: [Architecture](https://graphstore-docs.orkait.com/concepts/architectu
 
 Weights are configurable via `graphstore.json`, `GRAPHSTORE_DSL_*` env vars, or constructor kwargs.
 
-Every result returns per-signal scores:
+Every result returns per-signal scores on every node and a `meta["signals"]` block with the full pipeline state (fusion weights, per-stage candidate counts, reranker status):
 
 ```python
 r = g.execute('REMEMBER "Caroline counseling" LIMIT 1 WHERE kind = "message"')
 n = r.data[0]
 print(n["_remember_score"], n["_vector_sim"], n["_bm25_score"],
-      n["_recency_score"], n["_graph_score"])
+      n["_recency_score"], n["_graph_score"], n["_co_bonus"],
+      n["_recall_boost"], n["_rank_stage"])
+r.meta["signals"]  # {fusion, recency, stages, reranker, nucleus, ...}
+```
+
+Dry-run the pipeline without mutating recall counts:
+
+```python
+g.execute('SYS EXPLAIN REMEMBER "Caroline counseling" LIMIT 3')
+# kind="plan", candidates with per-signal scores, full meta["signals"]
 ```
 
 Deep dive: [REMEMBER pipeline](https://graphstore-docs.orkait.com/concepts/remember-pipeline).
+
+## ANSWER (retrieval + reader LLM)
+
+For a full retrieve + synthesize loop, wire a reader callable and use `ANSWER`:
+
+```python
+def my_reader(prompt: str, max_tokens: int = 1000) -> str:
+    ...  # call any LLM (openai, litellm, local, ...)
+
+g = GraphStore(path="./brain", reader=my_reader)
+
+r = g.execute('ANSWER "What is the capital of France?" LIMIT 3')
+r.data["answer"]         # "Paris"
+r.data["cited_slots"]    # ["mem:paris", ...]
+r.meta["signals"]        # same telemetry as REMEMBER
+```
+
+graphstore ships no LLM dependency. The reader is a plain callable; bring your own. Named readers (`GraphStore(readers={"fast": a, "careful": b})`) enable A/B via `ANSWER "q" USING "careful"`.
 
 ## Typed query builder
 

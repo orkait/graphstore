@@ -80,6 +80,7 @@ RECALL FROM "id" DEPTH n [LIMIT n] [WHERE expr]
 SIMILAR TO "text"|NODE "id"|[0.1,0.2,...] [LIMIT n] [WHERE expr]
 LEXICAL SEARCH "text" [LIMIT n] [WHERE expr]
 REMEMBER "text" [AT "2024-05"] [TOKENS n] [LIMIT n] [WHERE expr]
+ANSWER "text" [AT "2024-05"] [TOKENS n] [LIMIT n] [WHERE expr] [USING "reader"]
 WHAT IF RETRACT "id"
 ```
 
@@ -138,7 +139,8 @@ SYS REGISTER NODE KIND "name" REQUIRED f:t,... [OPTIONAL f:t,...] [EMBED f]
 SYS REGISTER EDGE KIND "name" FROM "k1",... TO "k1",...
 SYS UNREGISTER NODE|EDGE KIND "name"
 SYS SLOW|FREQUENT|FAILED QUERIES [SINCE "t"] [LIMIT n]
-SYS EXPLAIN <read_query>
+SYS EXPLAIN <read_query>    -- MatchQuery/TraverseQuery/NodesQuery: cost plan
+                            -- RememberQuery: full dry-run with per-signal candidate scores
 SYS CHECKPOINT | SYS REBUILD INDICES
 SYS CLEAR LOG|CACHE
 SYS WAL STATUS|REPLAY
@@ -248,7 +250,74 @@ MATCH (session) -[]-> (msg) -[kind = "mentions"]-> (ent WHERE name = "Luna")
 + recall_frequency     -- log1p(recall_count) × 0.05
 ```
 
-Every REMEMBER result exposes per-signal scores via `_vector_sim`, `_bm25_score`, `_recency_score`, `_graph_score`, `_recall_score`, `_remember_score`. Check these when debugging retrieval quality.
+### Per-node signal scores (always populated)
+
+Every REMEMBER result carries these on every returned node:
+
+```
+_remember_score  -- fused final; when a reranker ran, this is the rerank score
+_vector_sim      -- max sentence cosine across the SQE-expanded query
+_bm25_score      -- normalised FTS5 score
+_recency_score   -- exp(-age / half_life)
+_graph_score     -- normalised entity-degree contribution
+_co_bonus        -- min(vec, bm25) * 0.10 when found by BOTH channels
+_recall_boost    -- log1p(__recall_count__) * 0.05
+_rank_stage      -- "fusion" or "rerank"
+_fusion_score    -- pre-rerank fused base (only when a reranker ran)
+_rerank_score    -- raw reranker score (only when a reranker ran)
+```
+
+### Rich meta["signals"] telemetry
+
+`Result.meta["signals"]` on every REMEMBER (and ANSWER) carries the full pipeline state:
+
+```json
+{
+  "fusion": {"method": "weighted|rrf", "weights": [...], "graph_signal_enabled": bool},
+  "recency": {"half_life_days": 7300.0},
+  "sentence_query_expansion": {"enabled": bool, "num_sentences": int},
+  "stages": {"gathered_vec": int, "gathered_bm25": int, "union": int,
+             "cap_applied": bool, "after_cap": int, "before_rerank": int,
+             "final": int},
+  "reranker": {"ran": bool, "model": str|null, "error": str|null},
+  "nucleus": {"enabled": bool}
+}
+```
+
+Use it to verify: did BM25 fire (gathered_bm25 > 0)? Did rerank run? Did the candidate cap kick in? Which fusion weights produced this ordering?
+
+### ANSWER verb (REMEMBER + reader LLM)
+
+```
+ANSWER "question" [AT "..."] [TOKENS n] [LIMIT n] [WHERE expr] [USING "reader"]
+```
+
+Runs REMEMBER internally, hands the top-k passages + question to a reader LLM configured on the GraphStore, returns `Result(kind="answer", data={"answer": str, "cited_slots": [id], "candidates": [nodes], "reader": str|null}, meta=<REMEMBER signals>)`.
+
+graphstore ships no LLM dependency. The reader is a plain callable the caller wires at construction:
+
+```python
+gs = GraphStore(reader=my_callable)                # default reader
+gs = GraphStore(readers={"fast": a, "careful": b}) # named registry
+```
+
+Reader resolution:
+1. `USING "name"` -> `readers[name]` (raise if missing)
+2. default `reader=`
+3. sole entry of `readers` if exactly one
+4. else raise `GraphStoreError`
+
+Reader exceptions are caught - `data["error"]` carries the exception message; retrieval state still returned so the caller can inspect.
+
+### SYS EXPLAIN REMEMBER (dry-run)
+
+```
+SYS EXPLAIN REMEMBER "text" [AT "..."] [LIMIT n] [WHERE expr]
+```
+
+Returns `Result(kind="plan", data={"candidates": [{slot, id, fused_score, vector_sim, bm25_score, recency_score, graph_score, co_bonus, recall_boost}]}, meta={"signals": {...}})`.
+
+Side-effect-free: skips materialization, rerank, nucleus, recall-count bumps. Safe to call repeatedly while tuning fusion weights or diagnosing "why did this rank where it did".
 
 ## Escape rules
 
@@ -389,12 +458,14 @@ Given a natural-language question, emit ONE statement that retrieves best. Defau
 | Question shape | Emit |
 |---|---|
 | "Tell me about X" | `REMEMBER "X" LIMIT 10 WHERE kind = "message"` |
+| "Answer X" (caller configured a reader) | `ANSWER "X" LIMIT 10 WHERE kind = "message"` |
 | "Everything connected to X" (X is a known entity) | `RECALL FROM "ent:X" DEPTH 2 LIMIT 20` |
 | "Find X in date range" | `REMEMBER "X" AT "2024-05" LIMIT 10` |
 | "What changed about X" | `REMEMBER "X" LIMIT 10` then check `_retracted_` in results |
 | "Count X" | `COUNT NODES WHERE expr` |
 | "Contradictions" | `SYS CONTRADICTIONS FIELD value GROUP BY topic` |
 | "Which K mention Y" | `MATCH (y WHERE name = "Y") -[]-> (k) LIMIT 10` |
+| "Why did this rank where it did" (debug) | `SYS EXPLAIN REMEMBER "X" LIMIT 10` |
 
 ## Do / don't
 
