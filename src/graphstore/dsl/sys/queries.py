@@ -18,6 +18,7 @@ from graphstore.dsl.ast_nodes import (
     Condition,
     MatchQuery,
     NodesQuery,
+    RememberQuery,
     TraverseQuery,
 )
 from graphstore.dsl.cost_estimator import estimate_match_cost, estimate_traverse_cost
@@ -178,8 +179,22 @@ class SysQueryHandlers:
 
     @handles_sys(SysExplain)
     def _explain(self, q: SysExplain) -> Result:
-        """Run cost estimator on the inner query without executing."""
+        """Run cost estimator / dry-run on the inner query without executing.
+
+        For REMEMBER: delegates to the handler's ``_plan_only`` branch which
+        runs gather + fuse + temporal filter and returns candidate slot ids
+        with per-signal scores, skipping materialization, rerank, nucleus,
+        and recall-count mutations.
+        """
         inner = q.query
+        if isinstance(inner, RememberQuery):
+            if self._executor is None:
+                return Result(
+                    kind="plan",
+                    data={"type": "direct", "note": "main executor not wired"},
+                    count=1,
+                )
+            return self._executor._remember(inner, _plan_only=True)
         if isinstance(inner, MatchQuery):
             cost = estimate_match_cost(inner.pattern, self.store.edge_matrices)
         elif isinstance(inner, TraverseQuery):

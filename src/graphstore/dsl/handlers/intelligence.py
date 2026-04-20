@@ -312,7 +312,7 @@ class IntelligenceHandlers:
             self.store._tombstone_mask_cache = None
 
     @handles(RememberQuery, write=True)
-    def _remember(self, q: RememberQuery) -> Result:
+    def _remember(self, q: RememberQuery, *, _plan_only: bool = False) -> Result:
         """REMEMBER: 3-signal fusion with optional reranker and nucleus.
 
         Pipeline: gather -> 3-signal fusion -> top-N -> reranker -> results
@@ -323,6 +323,12 @@ class IntelligenceHandlers:
         layer's perspective so those column writes never reached the WAL
         — a crash between the mutation and the next checkpoint lost the
         recall-count increment (bug #50).
+
+        ``_plan_only=True`` (internal, used by ``SYS EXPLAIN REMEMBER``):
+        run gather + fuse + temporal filter only. Skip rerank, nucleus,
+        node materialization, recall-count bumps, and the similarity
+        buffer. Return a ``Result(kind="plan", ...)`` listing the top-k
+        candidate slot ids with their per-signal scores. No state change.
         """
         if getattr(self, '_embedder_dirty', False):
             from graphstore.core.errors import GraphStoreError
@@ -333,6 +339,16 @@ class IntelligenceHandlers:
 
         n = self.store._next_slot
         if n == 0:
+            if _plan_only:
+                return Result(
+                    kind="plan",
+                    data={
+                        "verb": "REMEMBER", "query": q.query, "limit": target_k,
+                        "candidates": [],
+                    },
+                    count=0,
+                    meta={"debug": {"empty_result_reasons": ["no nodes in store"]}},
+                )
             return Result(
                 kind="nodes", data=[], count=0,
                 meta={"debug": {"empty_result_reasons": ["no nodes in store"]}},
@@ -460,6 +476,16 @@ class IntelligenceHandlers:
                 early_meta["debug"] = {"empty_result_reasons": reasons}
             if warnings:
                 early_meta["warnings"] = warnings
+            if _plan_only:
+                return Result(
+                    kind="plan",
+                    data={
+                        "verb": "REMEMBER", "query": q.query, "limit": target_k,
+                        "candidates": [],
+                    },
+                    count=0,
+                    meta=early_meta,
+                )
             return Result(kind="nodes", data=[], count=0, meta=early_meta)
 
         # Adaptive oversample cap
@@ -615,6 +641,79 @@ class IntelligenceHandlers:
                 base_final *= allowed
 
         base_final *= live_mask
+
+        # ── Plan-only short-circuit ──────────────────────────────────
+        # Used by SYS EXPLAIN REMEMBER. No materialization, no rerank,
+        # no nucleus, no recall-count bumps. Pure read of the fused
+        # scores for the top-k candidate slots.
+        if _plan_only:
+            try:
+                weights_out = list(weights) if not isinstance(weights, list) else weights
+            except Exception:
+                weights_out = None
+            signals_meta = {
+                "fusion": {
+                    "method": fusion_method,
+                    "weights": weights_out,
+                    "graph_signal_enabled": graph_enabled,
+                },
+                "recency": {"half_life_days": float(half_life)},
+                "sentence_query_expansion": {
+                    "enabled": bool(use_sqe),
+                    "num_sentences": int(num_sentences),
+                },
+                "stages": {
+                    "gathered_vec": int(len(vec_slots_np)),
+                    "gathered_bm25": int(len(bm25_slots_np)),
+                    "union": int(union_size),
+                    "cap_applied": bool(cap_applied),
+                    "after_cap": int(len(slot_arr)),
+                    "before_rerank": 0,
+                    "final": 0,
+                },
+                "reranker": {"ran": False, "model": None, "error": None},
+                "nucleus": {"enabled": bool(getattr(self, '_nucleus_expansion', False))},
+            }
+            if len(slot_arr) == 0:
+                return Result(
+                    kind="plan",
+                    data={
+                        "verb": "REMEMBER",
+                        "query": q.query,
+                        "limit": target_k,
+                        "candidates": [],
+                    },
+                    count=0,
+                    meta={"signals": signals_meta, "warnings": warnings},
+                )
+            order_plan = slot_arr[np.argsort(-base_final[slot_arr])][:target_k]
+            candidates = []
+            for slot in order_plan:
+                slot = int(slot)
+                node_id = self.store._slot_to_id(slot)
+                candidates.append({
+                    "slot": slot,
+                    "id": node_id,
+                    "fused_score": round(float(base_final[slot]), 4),
+                    "vector_sim": round(float(vec_signal[slot]), 4),
+                    "bm25_score": round(float(bm25_signal[slot]), 4),
+                    "recency_score": round(float(recency_signal[slot]), 4),
+                    "graph_score": round(float(graph_signal[slot]), 4),
+                    "co_bonus": round(float(co_bonus[slot]), 4),
+                    "recall_boost": round(float(recall_boost_full[slot]), 4),
+                })
+            signals_meta["stages"]["final"] = len(candidates)
+            return Result(
+                kind="plan",
+                data={
+                    "verb": "REMEMBER",
+                    "query": q.query,
+                    "limit": target_k,
+                    "candidates": candidates,
+                },
+                count=len(candidates),
+                meta={"signals": signals_meta, "warnings": warnings},
+            )
 
         # ── Stage 4: Top-N Selection + Materialization ───────────────
         if len(slot_arr) == 0:

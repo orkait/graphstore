@@ -249,6 +249,9 @@ class GraphStore:
         }
         self._sys_executor = SystemExecutor(self._runtime, retention=retention_dict)
         self._sys_executor._eviction_target_ratio = cfg.core.eviction_target_ratio
+        # SYS EXPLAIN REMEMBER (and future dry-run-of-user-query verbs) needs
+        # to reach the main Executor's handlers + configured state.
+        self._sys_executor._executor = self._executor
         # Evolution engine wired after engine is created (below)
 
         # Cron scheduler (requires queued mode for background execution)
