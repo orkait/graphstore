@@ -205,10 +205,18 @@ def main():
                         help="Only used with --adapter skill: dump raw LLM output per session")
     parser.add_argument("--no-carry-facts", action="store_true",
                         help="Only with --adapter skill: disable cross-session fact memory")
+    parser.add_argument("--use-raw-turns", action="store_true",
+                        help="Feed raw dialogue turns (~20/session) instead of "
+                             "author-distilled observations (~9/session). Required "
+                             "for fair A/B of LLM-ingest adapters.")
     parser.add_argument("--out-dir", default="benchmarks/framework/results")
     args = parser.parse_args()
 
-    ds = load_locomo(args.data_path, max_conversations=args.max_conversations)
+    ds = load_locomo(
+        args.data_path,
+        max_conversations=args.max_conversations,
+        use_raw_turns=args.use_raw_turns,
+    )
     print(f"LoCoMo: {len(ds)} total QA pairs, {len(set(r.question.metadata.get('sample_id') for r in ds.records))} conversations")
 
     # Use config.py defaults - no hardcoded benchmark overrides
