@@ -1,0 +1,13 @@
+{
+  "id": "superkaiii/pack-ternary-bonsai-4b-tq1_0",
+  "title": "Pack Ternary-Bonsai-4B TQ1_0",
+  "code_file": "pack_ternary_bonsai.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "competition_sources": [],
+  "dataset_sources": ["superkaiii/hf-token-private"],
+  "kernel_sources": []
+}
