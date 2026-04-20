@@ -205,10 +205,16 @@ Rules:
   `SYS REGISTER` statements.
 - Create one `session` node with EVENT_AT set to the date:
   CREATE NODE "sess:{session.session_id}" kind = "session" session_id = "{session.session_id}" EVENT_AT "{date}"
-- For each message, CREATE NODE with kind="message", the `session` field set
-  to "{session.session_id}", the role, and a DOCUMENT clause carrying the
-  content. Include EVENT_AT. Use ids of the form `{session.session_id}:msg<i>`
-  where <i> is the zero-based index.
+- For each message, CREATE NODE with:
+    kind = "message"
+    session = "{session.session_id}"
+    role = "user"|"assistant"
+    position = <zero-based index>
+    content = "<the raw message text, quote-escaped>"
+    EVENT_AT "{date}"
+  Use ids of the form `{session.session_id}:msg<i>`. Do NOT use a DOCUMENT
+  clause - use the `content` field only. The schema is registered with
+  EMBED content, which auto-embeds the content field on CREATE.
 - Add `CREATE EDGE "sess:<id>" -> "<session_id>:msg<i>" kind = "has_message"`
   for every message.
 - Between adjacent messages, add `CREATE EDGE "<session_id>:msg<i>" -> "<session_id>:msg<i+1>" kind = "next"`.
@@ -358,17 +364,12 @@ class GraphStoreSkillAdapter(GraphStoreAdapter):
         super().reset()
         self.stats = _IngestStats()
         self._known_facts = {}
-        # Parent adapter registers `message` with `content:string` REQUIRED +
-        # `EMBED content`. That fits the content-field path. This adapter
-        # teaches the LLM to use `DOCUMENT "..."` instead (G2 / PR #102), so
-        # re-register `message` without `content` and without EMBED. DOCUMENT
-        # alone populates blob + FTS5 + vector in one shot.
-        self._gs.execute('SYS UNREGISTER NODE KIND "message"')
-        self._gs.execute(
-            'SYS REGISTER NODE KIND "message" '
-            'REQUIRED session:string, role:string '
-            'OPTIONAL position:int'
-        )
+        # Match the baseline schema exactly: `content:string` REQUIRED +
+        # `EMBED content`. This is load-bearing for A/B parity - parent's
+        # query strategies read `n.get("content")`, which is empty if the
+        # LLM uses `DOCUMENT "..."` (blob-only path). The prompt instructs
+        # the LLM to emit `content = "..."` as a typed field so retrieval
+        # finds real text.
         # Parent skipped `entity` kind when entity_extraction=False. Add it
         # here - the LLM is expected to emit UPSERT NODE for entities.
         try:

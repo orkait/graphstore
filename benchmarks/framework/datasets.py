@@ -169,6 +169,7 @@ def load_locomo(
     data_path: str | Path,
     max_conversations: int | None = None,
     max_questions: int | None = None,
+    use_raw_turns: bool = False,
 ) -> BenchmarkDataset:
     """Load LoCoMo dataset.
 
@@ -176,6 +177,17 @@ def load_locomo(
     Format: 10 conversations, ~200 QAs each, 19+ sessions per conversation.
 
     Category mapping: 1=single-hop, 2=multi-hop, 3=temporal, 4=open-domain, 5=adversarial
+
+    Input selection:
+        use_raw_turns=False (default) - use author-distilled observations
+            (conversation[session_N_observation]). Dataset authors recommend this
+            path: "RAG does particularly well when dialogues are transformed into
+            a database of assertions (observations) about each speaker's life."
+            ~9 facts per session, pre-extracted, each tagged with evidence dia_id.
+        use_raw_turns=True - use raw dialogue turns (conversation[session_N]).
+            ~20 chit-chat turns per session with {speaker, dia_id, text}. Use this
+            when the adapter under test does its own distillation (e.g. LLM-driven
+            ingest); otherwise retrieval over raw small talk underperforms.
     """
     p = Path(data_path)
     candidates = [
@@ -203,29 +215,31 @@ def load_locomo(
         speaker_a = conversation.get("speaker_a", "A")
         speaker_b = conversation.get("speaker_b", "B")
 
-        # Build sessions from observations (structured facts, not raw turns)
-        # Observations are pre-extracted facts with evidence IDs
-        observations = conv.get("observation", {})
         sessions: list[Session] = []
-        sess_idx = 1
-        while f"session_{sess_idx}_observation" in observations:
-            obs_key = f"session_{sess_idx}_observation"
-            date = conversation.get(f"session_{sess_idx}_date_time", "")
-            msgs = []
-            for speaker, facts in observations[obs_key].items():
-                for fact_text, evidence_id in facts:
-                    msgs.append(Message(
-                        role=speaker,
-                        content=f"[{date}] {speaker}: {fact_text}",
-                    ))
-            sessions.append(Session(
-                session_id=f"s{sess_idx}",
-                messages=msgs,
-                metadata={"date": date, "position": sess_idx},
-            ))
-            sess_idx += 1
 
-        # Fallback to raw turns if no observations
+        # Build sessions from observations (author-distilled facts) unless
+        # use_raw_turns forces the raw-dialogue path.
+        if not use_raw_turns:
+            observations = conv.get("observation", {})
+            sess_idx = 1
+            while f"session_{sess_idx}_observation" in observations:
+                obs_key = f"session_{sess_idx}_observation"
+                date = conversation.get(f"session_{sess_idx}_date_time", "")
+                msgs = []
+                for speaker, facts in observations[obs_key].items():
+                    for fact_text, evidence_id in facts:
+                        msgs.append(Message(
+                            role=speaker,
+                            content=f"[{date}] {speaker}: {fact_text}",
+                        ))
+                sessions.append(Session(
+                    session_id=f"s{sess_idx}",
+                    messages=msgs,
+                    metadata={"date": date, "position": sess_idx},
+                ))
+                sess_idx += 1
+
+        # Raw-turns path: either forced or observations missing.
         if not sessions:
             sess_idx = 1
             while f"session_{sess_idx}" in conversation:
