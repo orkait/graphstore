@@ -40,8 +40,8 @@ def connect_all(store, vector_store, threshold=0.85, where_expr=None, executor=N
         if progress_callback is not None and slot % 100 == 0:
             try:
                 progress_callback(slot, n)
-            except Exception:
-                pass
+            except Exception as err:
+                logger.debug("user progress_callback raised (ignored): %s", err)
 
         if not live[slot] or not vector_store.has_vector(slot):
             continue

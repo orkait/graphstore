@@ -265,7 +265,8 @@ class EvolutionEngine:
             from graphstore.core.memory import measure
             m = measure(store, gs._vector_store, gs._document_store)
             total_bytes = m.get("total", 0)
-        except Exception:
+        except Exception as err:
+            logger.debug("memory.measure() failed during evolve telemetry: %s", err)
             total_bytes = 0
 
         ceiling = getattr(store, "_ceiling_bytes", 1) or 1
@@ -281,7 +282,8 @@ class EvolutionEngine:
             h = health_check(store, gs._vector_store, gs._document_store)
             tombstone_ratio = h.get("tombstone_ratio", 0.0)
             string_bloat = h.get("string_bloat", 0.0)
-        except Exception:
+        except Exception as err:
+            logger.debug("optimizer.health_check() failed during evolve telemetry: %s", err)
             tombstone_ratio = 0.0
             string_bloat = 0.0
 

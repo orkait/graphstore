@@ -260,12 +260,12 @@ class IngestHandlers:
                     ent_id = f"ent:{s}"
                     try:
                         self.store.put_node(ent_id, "entity", {"name": ent.text})
-                    except Exception:
-                        pass
+                    except Exception as err:
+                        logger.debug("put_node(%s) skipped during ingest entity link: %s", ent_id, err)
                     try:
                         self.store.put_edge(chunk_id, ent_id, "mentions")
-                    except Exception:
-                        pass
+                    except Exception as err:
+                        logger.debug("put_edge(%s -> %s) skipped during ingest entity link: %s", chunk_id, ent_id, err)
 
             # Embed chunk text for vector retrieval
             embed_batch.append((chunk_slot, embed_text))
