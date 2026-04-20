@@ -60,3 +60,10 @@ website/node_modules/
 website/.docusaurus/
 website/build/
 website/.cache-loader/
+
+# Scratch/exploration scripts at repo root. Real bench entry points live
+# under benchmarks/framework/runners/ - anything matching these patterns
+# at the top level is throwaway.
+/bench_*.py
+/bonsai_*.py
+/test_reasoning.py
