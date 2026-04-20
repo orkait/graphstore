@@ -73,7 +73,9 @@ class LlamaCppEmbedder(Embedder):
         return self._encode(prefixed)
 
     def _encode(self, texts: list[str]) -> np.ndarray:
-        vecs = np.array([self._model.embed(t) for t in texts], dtype=np.float32)
+        raw_embeds = [self._model.embed(t) for t in texts]
+        flattened = [r[0] if isinstance(r, list) and len(r) > 0 and isinstance(r[0], list) else r for r in raw_embeds]
+        vecs = np.array(flattened, dtype=np.float32)
 
         if self._output_dims < vecs.shape[1]:
             return truncate_dims(vecs, self._output_dims)
