@@ -548,76 +548,36 @@ def get_llm_proposal(prompt: str, config: dict) -> tuple[str, str, str]:
     Returns (extracted_code, model_used, raw_response).
     """
     import re as _re
-    import litellm
+    from graphstore.llm_runner import LLMRunner
     from tools.autoresearch.providers import resolve_providers
-    litellm.suppress_debug_info = True
 
-    candidates = resolve_providers(config)
-    last_error: Exception | None = None
+    runner = LLMRunner(resolve_providers(config), timeout_s=800)
+    raw_response, model = runner.call_sync_verbose(prompt, max_tokens=4096, temperature=0.7)
 
-    for candidate in candidates:
-        pid = candidate["pid"]
-        litellm_model = candidate["litellm_model"]
-        api_base = candidate["api_base"]
-        api_key = candidate["api_key"]
-        model = litellm_model.split("/")[-1]
-        print(f"  -> {pid} / {litellm_model}")
+    if not raw_response.strip():
+        raise RuntimeError("All providers/models failed: empty response")
 
-        for attempt in range(3):
-            try:
-                response = litellm.completion(
-                    model=litellm_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    api_base=api_base,
-                    api_key=api_key,
-                    stream=False,
-                    timeout=800,
-                    temperature=0.7,
-                )
-                raw_response = response.choices[0].message.content or ""
+    # Extract code: markdown fences, then trim leading prose.
+    new_code = raw_response
+    if "```python" in new_code:
+        new_code = new_code.split("```python")[1].split("```")[0].strip()
+    elif "```" in new_code:
+        new_code = new_code.split("```")[1].split("```")[0].strip()
 
-                if not raw_response.strip():
-                    print(f"  Empty response (attempt {attempt+1}/3)")
-                    time.sleep(2)
-                    continue
+    lines = new_code.split("\n")
+    start = 0
+    for idx, ln in enumerate(lines):
+        s = ln.lstrip()
+        if s.startswith(("from ", "import ", "def ", "class ", "@", "#!", '"""', "'''", "# ")):
+            start = idx
+            break
+    new_code = "\n".join(lines[start:]).strip()
 
-                # Extract code: strip <think>, then markdown fences,
-                # then any prose before the first import/from/def line.
-                new_code = _re.sub(r"<think>.*?</think>", "", raw_response, flags=_re.DOTALL).strip()
-                if "```python" in new_code:
-                    new_code = new_code.split("```python")[1].split("```")[0].strip()
-                elif "```" in new_code:
-                    new_code = new_code.split("```")[1].split("```")[0].strip()
+    if "def " not in new_code:
+        raise RuntimeError(f"No function defs in LLM response from {model!r}")
 
-                # Trim leading prose: find first line starting with
-                # from/import/def/class/@/#!/"""/' and drop everything before it
-                lines = new_code.split("\n")
-                start = 0
-                for idx, ln in enumerate(lines):
-                    s = ln.lstrip()
-                    if s.startswith(("from ", "import ", "def ", "class ",
-                                      "@", "#!", '"""', "'''", "# ")):
-                        start = idx
-                        break
-                new_code = "\n".join(lines[start:]).strip()
-
-                if "def " not in new_code:
-                    print(f"  No function defs in response (attempt {attempt+1}/3)")
-                    time.sleep(2)
-                    continue
-
-                print(f"  Got {len(new_code)} chars from {model} (raw: {len(raw_response)})")
-                return new_code, model, raw_response
-
-            except Exception as e:
-                last_error = e
-                print(f"  Error (attempt {attempt+1}/3): {e}")
-                if attempt < 2:
-                    time.sleep(2 ** (attempt + 1))
-
-        print(f"  Candidate '{pid}/{model}' exhausted.")
-
-    raise RuntimeError(f"All providers/models failed. Last: {last_error}")
+    print(f"  Got {len(new_code)} chars from {model} (raw: {len(raw_response)})")
+    return new_code, model, raw_response
 
 
 # ---------------------------------------------------------------------------
