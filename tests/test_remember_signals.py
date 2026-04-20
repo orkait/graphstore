@@ -114,3 +114,60 @@ def test_remember_graph_signal_reflected_in_meta():
     r = gs.execute('REMEMBER "entry" LIMIT 5')
     assert r.meta["signals"]["fusion"]["graph_signal_enabled"] is False
     gs.close()
+
+
+def test_sys_explain_remember_returns_plan_without_side_effects():
+    """SYS EXPLAIN REMEMBER dry-runs: returns candidate plan, no state mutation."""
+    gs = GraphStore(embedder=FixedEmbedder())
+    gs.execute('SYS REGISTER NODE KIND "item" REQUIRED text:string EMBED text')
+    for i in range(5):
+        gs.execute(f'CREATE NODE "p{i}" kind = "item" text = "entry {i}"')
+
+    r = gs.execute('SYS EXPLAIN REMEMBER "entry" LIMIT 3')
+
+    # Shape
+    assert r.kind == "plan"
+    assert r.data["verb"] == "REMEMBER"
+    assert r.data["query"] == "entry"
+    assert r.data["limit"] == 3
+    candidates = r.data["candidates"]
+    assert len(candidates) == 3
+    for c in candidates:
+        assert "slot" in c and "id" in c
+        for sig in ("fused_score", "vector_sim", "bm25_score",
+                    "recency_score", "graph_score", "co_bonus", "recall_boost"):
+            assert sig in c
+    # Monotonic fused score
+    for a, b in zip(candidates, candidates[1:]):
+        assert a["fused_score"] >= b["fused_score"]
+
+    # Meta telemetry must match the same shape REMEMBER emits
+    sig = r.meta["signals"]
+    for key in ("fusion", "recency", "sentence_query_expansion", "stages",
+                "reranker", "nucleus"):
+        assert key in sig
+    assert sig["reranker"]["ran"] is False
+    assert sig["stages"]["final"] == 3
+
+    # No side effects: recall counts all absent
+    for i in range(5):
+        slot = gs._store._slot_to_id  # sanity: method exists
+    col = gs._store.columns.get_column("__recall_count__", gs._store._next_slot)
+    if col is not None:
+        _, pres, _ = col
+        for i in range(5):
+            slot = gs._store.id_to_slot[gs._store.string_table.intern(f"p{i}")]
+            assert not pres[slot], f"recall_count was set on slot {slot}; EXPLAIN should not mutate"
+
+    gs.close()
+
+
+def test_sys_explain_remember_empty_store_returns_empty_plan():
+    """With no nodes, EXPLAIN must return kind='plan' with empty candidates."""
+    gs = GraphStore(embedder=FixedEmbedder())
+    gs.execute('SYS REGISTER NODE KIND "item" REQUIRED text:string EMBED text')
+    r = gs.execute('SYS EXPLAIN REMEMBER "anything" LIMIT 5')
+    assert r.kind == "plan"
+    assert r.count == 0
+    assert r.data["candidates"] == []
+    gs.close()

@@ -58,6 +58,11 @@ class SystemExecutor(
         self._duplicate_threshold_override: float | None = None
         self._protected_kinds: set[str] | None = None
         self._wal_manager = None
+        # Back-reference to the main Executor. Wired by GraphStore at
+        # construction time. Needed so SYS handlers that dry-run user
+        # queries (e.g. SYS EXPLAIN REMEMBER) can reach the user-query
+        # handlers and their configured state (embedder, weights, ...).
+        self._executor = None
 
     @property
     def store(self):
