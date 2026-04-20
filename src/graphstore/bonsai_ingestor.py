@@ -34,6 +34,19 @@ The public surface is `BonsaiIngestor`. Every call:
      touching the GraphStore - used for testing, previewing, and building
      training data.
 
+It also tracks cross-message belief state. After every successful ingest, the
+executed ASSERT / RETRACT lines are scraped into a running `fact_id -> FactState`
+dict. The next ingest injects the live (non-retracted) facts into the USER
+message (not the system prompt - see below), so the model sees prior fact ids
+and reuses them when updating the same concept. Without this, the model coins
+a new fact_id per message and the graph ends up with multiple beliefs for the
+same underlying concept.
+
+The known-facts block goes in the USER message on purpose: the system prompt
+stays byte-identical across calls, which keeps llama.cpp's prefix-match KV
+cache warm. If we appended facts to the system prompt, every call would be a
+cold one.
+
 Not handled here:
   - Streaming. Generation is blocking. Callers can run it in a thread.
   - Multi-user / multi-tenant. Use one BonsaiIngestor per user.
@@ -74,6 +87,25 @@ class IngestOverflow(BonsaiError):
 # --------------------------------------------------------------------
 
 @dataclass
+class FactState:
+    """One live belief tracked across messages within this ingestor.
+
+    Updated by `_scrape_belief_updates` after every successful ingest and
+    rendered back into the next ingest's user message by
+    `_render_known_facts_block`, so the model reuses the same fact_id for the
+    same concept instead of coining a new one each call.
+    """
+
+    fact_id: str
+    kind: str = ""
+    value: str = ""
+    confidence: float = 1.0
+    source: str = ""
+    retracted: bool = False
+    retract_reason: str = ""
+
+
+@dataclass
 class IngestResult:
     """Everything an ingest call produced, for inspection and tracing."""
 
@@ -95,10 +127,21 @@ class IngestResult:
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _FENCE_RE = re.compile(r"^```[a-zA-Z]*\s*$|^```\s*$")
 _UPSERT_RE = re.compile(r'^\s*UPSERT\s+NODE\s+"([^"\\]+(?:\\.[^"\\]*)*)"', re.IGNORECASE)
+_ASSERT_LINE_RE = re.compile(
+    r'^\s*ASSERT\s+"([^"\\]+(?:\\.[^"\\]*)*)"\s+(.*)$',
+    re.IGNORECASE,
+)
 _ASSERT_RE = re.compile(r'^\s*ASSERT\s+"([^"\\]+(?:\\.[^"\\]*)*)"', re.IGNORECASE)
-_RETRACT_RE = re.compile(r'^\s*RETRACT\s+"([^"\\]+(?:\\.[^"\\]*)*)"', re.IGNORECASE)
+_RETRACT_RE = re.compile(
+    r'^\s*RETRACT\s+"([^"\\]+(?:\\.[^"\\]*)*)"(?:\s+REASON\s+"([^"\\]*(?:\\.[^"\\]*)*)")?\s*$',
+    re.IGNORECASE,
+)
 _CREATE_NODE_RE = re.compile(r'^\s*CREATE\s+NODE\s+"([^"\\]+(?:\\.[^"\\]*)*)"', re.IGNORECASE)
 _ENT_FROM_ID_RE = re.compile(r'"(ent:[^"\\]+)"')
+_KV_VALUE_RE = re.compile(r'value\s*=\s*"([^"\\]*(?:\\.[^"\\]*)*)"', re.IGNORECASE)
+_KV_KIND_RE = re.compile(r'kind\s*=\s*"([^"\\]*(?:\\.[^"\\]*)*)"', re.IGNORECASE)
+_KV_CONFIDENCE_RE = re.compile(r'CONFIDENCE\s+([0-9.]+)', re.IGNORECASE)
+_KV_SOURCE_RE = re.compile(r'SOURCE\s+"([^"\\]*(?:\\.[^"\\]*)*)"', re.IGNORECASE)
 
 
 def _strip_think(raw: str) -> str:
@@ -137,6 +180,80 @@ def _dedupe_upserts(stmts: list[str]) -> tuple[list[str], list[tuple[str, str]]]
             seen.add(eid)
         kept.append(ln)
     return kept, dropped
+
+
+def _scrape_belief_updates(
+    executed_lines: list[str],
+    facts: dict[str, FactState],
+) -> None:
+    """Walk successfully-executed DSL lines and update running fact state.
+
+    Only ASSERT / RETRACT contribute. Other writes ignored. Mutates `facts`
+    in place.
+    """
+    for line in executed_lines:
+        m = _ASSERT_LINE_RE.match(line)
+        if m:
+            fact_id = m.group(1)
+            rest = m.group(2)
+            st = facts.get(fact_id) or FactState(fact_id=fact_id)
+            km = _KV_KIND_RE.search(rest)
+            if km:
+                st.kind = km.group(1)
+            vm = _KV_VALUE_RE.search(rest)
+            if vm:
+                st.value = vm.group(1)
+            cm = _KV_CONFIDENCE_RE.search(rest)
+            if cm:
+                try:
+                    st.confidence = float(cm.group(1))
+                except ValueError:
+                    pass
+            sm = _KV_SOURCE_RE.search(rest)
+            if sm:
+                st.source = sm.group(1)
+            st.retracted = False
+            st.retract_reason = ""
+            facts[fact_id] = st
+            continue
+        m = _RETRACT_RE.match(line)
+        if m:
+            fact_id = m.group(1)
+            reason = m.group(2) or ""
+            st = facts.get(fact_id) or FactState(fact_id=fact_id)
+            st.retracted = True
+            st.retract_reason = reason
+            facts[fact_id] = st
+
+
+def _render_known_facts_block(facts: dict[str, FactState], max_facts: int = 40) -> str:
+    """Format non-retracted facts into a block the LLM reads before the input.
+
+    Placed in the USER message (not the system prompt) to keep the system
+    prompt byte-identical across calls for llama.cpp KV-cache prefix reuse.
+
+    Retracted facts are hidden so the model cannot re-assert a superseded
+    belief. If the dict grows beyond `max_facts`, the most-recently-touched
+    entries win (dict preserves insertion order since Python 3.7).
+    """
+    alive = [f for f in facts.values() if not f.retracted]
+    if not alive:
+        return ""
+    alive = alive[-max_facts:]
+    lines = [
+        "### KNOWN FACTS (reuse these fact_ids; emit RETRACT + ASSERT to update)",
+    ]
+    for f in alive:
+        bits = [f'[{f.fact_id}]']
+        if f.kind:
+            bits.append(f'kind="{f.kind}"')
+        if f.value:
+            bits.append(f'value="{f.value}"')
+        bits.append(f'confidence={f.confidence:.2f}')
+        if f.source:
+            bits.append(f'source="{f.source}"')
+        lines.append(" ".join(bits))
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------
@@ -211,6 +328,10 @@ class BonsaiIngestor:
         self._llm: Any | None = None
         self._lock = threading.Lock()
 
+        # Cross-message belief tracking. fact_id -> FactState. Fed into the
+        # user message of the next ingest so the model reuses ids.
+        self._facts: dict[str, FactState] = {}
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -273,6 +394,19 @@ class BonsaiIngestor:
         processes for the same skill bytes. Emitted in every ingest log line."""
         return self._skill_fingerprint
 
+    @property
+    def facts(self) -> dict[str, FactState]:
+        """Live fact state accumulated from successful ingests. Read-only view.
+
+        Use reset_facts() to clear. Dry-run ingests don't update this.
+        """
+        return dict(self._facts)
+
+    def reset_facts(self) -> None:
+        """Clear the running fact state so the next ingest starts fresh."""
+        with self._lock:
+            self._facts.clear()
+
     # ------------------------------------------------------------------
     # Ingest
     # ------------------------------------------------------------------
@@ -314,7 +448,12 @@ class BonsaiIngestor:
         t0 = time.perf_counter()
         llm = self._ensure_llm()
 
-        est = self._estimate_tokens(self._system_prompt) + self._estimate_tokens(text)
+        # Compose the user message: prior facts block + user text. Keeps the
+        # system prompt byte-identical so the skill stays KV-cache warm.
+        facts_block = _render_known_facts_block(self._facts)
+        user_msg = f"{facts_block}\n\n{text}" if facts_block else text
+
+        est = self._estimate_tokens(self._system_prompt) + self._estimate_tokens(user_msg)
         budget = est + self._max_output_tokens
         if budget > self._n_ctx - self._CTX_HEADROOM:
             if est + self._max_output_tokens > self._n_ctx - self._CTX_HEADROOM:
@@ -330,7 +469,7 @@ class BonsaiIngestor:
         response = llm.create_chat_completion(
             messages=[
                 {"role": "system", "content": self._system_prompt},
-                {"role": "user", "content": text},
+                {"role": "user", "content": user_msg},
             ],
             max_tokens=self._max_output_tokens,
             temperature=self._temperature,
@@ -377,13 +516,19 @@ class BonsaiIngestor:
                     beliefs_changed.append((m.group(1), "retract"))
 
         executed = 0
+        executed_lines: list[str] = []
         if not dry_run:
             for ln in valid:
                 try:
                     self._gs.execute(ln)
                     executed += 1
+                    executed_lines.append(ln)
                 except Exception as err:
                     rejected.append((ln, f"execute error: {err}"))
+            # Scrape belief updates so the next ingest sees the current fact
+            # state. Only lines that actually executed contribute - failed
+            # ones leave the running state unchanged.
+            _scrape_belief_updates(executed_lines, self._facts)
 
         duration_ms = int((time.perf_counter() - t0) * 1000)
         self._log_event(

@@ -13,10 +13,13 @@ import pytest
 
 from graphstore.bonsai_ingestor import (
     BonsaiIngestor,
+    FactState,
     IngestEmpty,
     IngestOverflow,
     IngestResult,
     _dedupe_upserts,
+    _render_known_facts_block,
+    _scrape_belief_updates,
     _split_lines,
     _strip_think,
 )
@@ -188,3 +191,137 @@ def test_ingest_result_defaults():
     assert r.raw_output == ""
     assert r.skill_fingerprint == ""
     assert r.dry_run is False
+
+
+# --------------------------------------------------------------------
+# Fact state tracking (cross-message belief identity)
+# --------------------------------------------------------------------
+
+def test_scrape_single_assert_creates_factstate():
+    facts: dict[str, FactState] = {}
+    _scrape_belief_updates(
+        ['ASSERT "fact:color" kind = "belief" value = "blue" CONFIDENCE 0.9 SOURCE "m:0"'],
+        facts,
+    )
+    assert "fact:color" in facts
+    st = facts["fact:color"]
+    assert st.kind == "belief"
+    assert st.value == "blue"
+    assert st.confidence == 0.9
+    assert st.source == "m:0"
+    assert st.retracted is False
+
+
+def test_scrape_assert_then_retract_marks_retracted():
+    facts: dict[str, FactState] = {}
+    _scrape_belief_updates(
+        ['ASSERT "fact:x" kind = "belief" value = "v" CONFIDENCE 0.9 SOURCE "m:0"'],
+        facts,
+    )
+    _scrape_belief_updates(
+        ['RETRACT "fact:x" REASON "wrong"'],
+        facts,
+    )
+    assert facts["fact:x"].retracted is True
+    assert facts["fact:x"].retract_reason == "wrong"
+
+
+def test_scrape_retract_then_reassert_un_retracts():
+    facts: dict[str, FactState] = {}
+    _scrape_belief_updates(
+        ['ASSERT "fact:x" kind = "belief" value = "old" CONFIDENCE 0.9 SOURCE "m:0"',
+         'RETRACT "fact:x" REASON "wrong"',
+         'ASSERT "fact:x" kind = "belief" value = "new" CONFIDENCE 0.9 SOURCE "m:1"'],
+        facts,
+    )
+    st = facts["fact:x"]
+    assert st.value == "new"
+    assert st.retracted is False
+    assert st.retract_reason == ""
+
+
+def test_scrape_ignores_non_belief_lines():
+    facts: dict[str, FactState] = {}
+    _scrape_belief_updates(
+        ['CREATE NODE "m:0" kind = "message"',
+         'UPSERT NODE "ent:x" kind = "entity" name = "X"',
+         'CREATE EDGE "a" -> "b" kind = "mentions"'],
+        facts,
+    )
+    assert facts == {}
+
+
+def test_render_known_facts_block_empty_when_no_facts():
+    assert _render_known_facts_block({}) == ""
+
+
+def test_render_known_facts_block_hides_retracted():
+    facts = {
+        "fact:a": FactState(fact_id="fact:a", kind="belief", value="alive", confidence=0.9),
+        "fact:b": FactState(fact_id="fact:b", kind="belief", value="dead", retracted=True),
+    }
+    block = _render_known_facts_block(facts)
+    assert "fact:a" in block
+    assert "fact:b" not in block
+    assert "alive" in block
+    assert "dead" not in block
+
+
+def test_render_known_facts_block_formats_each_fact():
+    facts = {
+        "fact:color": FactState(
+            fact_id="fact:color",
+            kind="belief",
+            value="blue",
+            confidence=0.9,
+            source="m:s1:0",
+        ),
+    }
+    block = _render_known_facts_block(facts)
+    assert "[fact:color]" in block
+    assert 'kind="belief"' in block
+    assert 'value="blue"' in block
+    assert "confidence=0.90" in block
+    assert 'source="m:s1:0"' in block
+    assert "KNOWN FACTS" in block
+
+
+def test_render_known_facts_trims_to_max_facts():
+    facts = {
+        f"fact:{i}": FactState(fact_id=f"fact:{i}", value=str(i), confidence=0.9)
+        for i in range(60)
+    }
+    block = _render_known_facts_block(facts, max_facts=5)
+    for i in range(55, 60):
+        assert f"[fact:{i}]" in block
+    for i in range(0, 55):
+        assert f"[fact:{i}]" not in block
+
+
+def test_ingestor_facts_property_returns_copy(tmp_path: Path):
+    skill = tmp_path / "skill.md"
+    skill.write_text("any")
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"")
+
+    ing = BonsaiIngestor(model_path=model, skill_path=skill)
+    assert ing.facts == {}
+    # Simulate state set by an earlier ingest:
+    ing._facts["fact:x"] = FactState(fact_id="fact:x", value="v")
+    snapshot = ing.facts
+    assert "fact:x" in snapshot
+    # Mutating the snapshot should not affect internal state
+    snapshot["fact:y"] = FactState(fact_id="fact:y")
+    assert "fact:y" not in ing._facts
+
+
+def test_ingestor_reset_facts_clears_state(tmp_path: Path):
+    skill = tmp_path / "skill.md"
+    skill.write_text("any")
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"")
+
+    ing = BonsaiIngestor(model_path=model, skill_path=skill)
+    ing._facts["fact:x"] = FactState(fact_id="fact:x", value="v")
+    ing.reset_facts()
+    assert ing._facts == {}

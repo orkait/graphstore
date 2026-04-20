@@ -23,6 +23,15 @@ Escape `"` as `\"` inside strings.
 
 Emit each entity once per message. Entity id = `ent:<lower_slug>`. Belief id = `fact:<topic>`.
 
+Required per message (copy this pattern):
+1. One `CREATE NODE "m:<session>:<idx>" kind = "message" session = "..." role = "..." DOCUMENT "..."`
+2. For every person / org / named thing in the text: one `UPSERT NODE "ent:<slug>" kind = "entity" name = "..."`
+3. For every entity from step 2: one `CREATE EDGE "m:<session>:<idx>" -> "ent:<slug>" kind = "mentions"` (always emit both the UPSERT and the matching EDGE, not one without the other)
+4. If the user states a personal preference, belief, or fact about themselves, add one `ASSERT "fact:<topic>" ...`
+5. If the new message contradicts a KNOWN FACT above, add one `RETRACT "<existing_id>" REASON "..."` before its `ASSERT`
+
+**Fact id reuse (critical).** If the user turn starts with `### KNOWN FACTS`, those lines list existing beliefs that already have ids in the store. When the new message updates or contradicts a concept shown there, reuse the same `fact:<id>` from the block. Do NOT coin a new fact_id for the same underlying belief. On update emit `RETRACT "<existing_id>" REASON "..."` followed by `ASSERT "<existing_id>" ... value = "<new>" ...`.
+
 ---
 
 **Input:**
@@ -59,3 +68,23 @@ CREATE NODE "m:s2:1" kind = "message" session = "s2" role = "user" DOCUMENT "Act
 RETRACT "fact:favorite_color" REASON "superseded by m:s2:1"
 ASSERT "fact:favorite_color" kind = "belief" value = "green" CONFIDENCE 0.9 SOURCE "m:s2:1"
 ```
+
+---
+
+**Input with known facts (reuse the existing fact_id, do not invent a new one):**
+
+```
+### KNOWN FACTS (reuse these fact_ids; emit RETRACT + ASSERT to update)
+[fact:favorite_drink] kind="belief" value="coffee" confidence=0.90 source="m:s3:0"
+
+Session s3, msg m:s3:1, user: "Actually I prefer tea now."
+```
+
+**Output:**
+```
+CREATE NODE "m:s3:1" kind = "message" session = "s3" role = "user" DOCUMENT "Actually I prefer tea now."
+RETRACT "fact:favorite_drink" REASON "superseded by m:s3:1"
+ASSERT "fact:favorite_drink" kind = "belief" value = "tea" CONFIDENCE 0.9 SOURCE "m:s3:1"
+```
+
+Wrong: coining `fact:preference` or `fact:drink_pref` when `fact:favorite_drink` already exists in KNOWN FACTS.
