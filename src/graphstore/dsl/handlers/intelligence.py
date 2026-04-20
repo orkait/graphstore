@@ -465,7 +465,9 @@ class IntelligenceHandlers:
         # Adaptive oversample cap
         max_candidates = min(num_sentences * oversample_factor * target_k, 200)
         slot_arr = np.union1d(vec_slots_np, bm25_slots_np)
-        if len(slot_arr) > max_candidates:
+        union_size = int(len(slot_arr))
+        cap_applied = union_size > max_candidates
+        if cap_applied:
             combined_scores = np.zeros(n, dtype=np.float64)
             if len(vec_slots_np) > 0:
                 combined_scores[vec_slots_np] = vec_sims_np
@@ -577,12 +579,14 @@ class IntelligenceHandlers:
 
         # Recall frequency boost: frequently recalled memories are implicitly important.
         # Log-scaled with w=0.05 to nudge without dominating: count 1→0.03, 10→0.12, 100→0.23
+        recall_boost_full = np.zeros(n, dtype=np.float64)
         recall_count_col = self.store.columns.get_column("__recall_count__", n)
         if recall_count_col is not None:
             rc_data, rc_pres, _ = recall_count_col
             rc_counts = rc_data[slot_arr].astype(np.float64)
             rc_valid = rc_pres[slot_arr]
             recall_boost = 0.05 * np.log1p(np.where(rc_valid, rc_counts, 0.0))
+            recall_boost_full[slot_arr] = recall_boost
             base_final[slot_arr] += recall_boost
 
         base_final += co_bonus
@@ -637,6 +641,10 @@ class IntelligenceHandlers:
             node["_vector_sim"] = round(float(vec_signal[slot]), 4)
             node["_bm25_score"] = round(float(bm25_signal[slot]), 4)
             node["_recency_score"] = round(float(recency_signal[slot]), 4)
+            node["_graph_score"] = round(float(graph_signal[slot]), 4)
+            node["_co_bonus"] = round(float(co_bonus[slot]), 4)
+            node["_recall_boost"] = round(float(recall_boost_full[slot]), 4)
+            node["_rank_stage"] = "fusion"
 
             results.append(node)
             retrieved_slots.append(slot)
@@ -655,7 +663,10 @@ class IntelligenceHandlers:
         meta: dict = {}
         if warnings:
             meta.setdefault("warnings", []).extend(warnings)
+        before_rerank_count = len(results)
         reranker = getattr(self, '_reranker', None)
+        reranker_ran = False
+        reranker_error: str | None = None
         if reranker is not None and len(texts_for_rerank) > target_k:
             try:
                 rerank_scores = reranker.score(q.query, texts_for_rerank)
@@ -663,16 +674,21 @@ class IntelligenceHandlers:
                                key=lambda x: x[0], reverse=True)
                 results = [r for _, r, _ in ranked[:target_k]]
                 retrieved_slots = [s for _, _, s in ranked[:target_k]]
-                # Update scores with reranker scores
+                # Update scores with reranker scores; also preserve the pre-rerank fusion score.
                 for score, node, slot in ranked[:target_k]:
+                    node["_fusion_score"] = node.get("_remember_score")
+                    node["_rerank_score"] = round(float(score), 4)
                     node["_remember_score"] = round(float(score), 4)
+                    node["_rank_stage"] = "rerank"
+                reranker_ran = True
             except Exception as rerank_err:
                 import logging as _logging
                 _logging.getLogger(__name__).warning(
                     "reranker failed; falling back to fusion top-K: %s",
                     rerank_err,
                 )
-                meta["reranker_error"] = f"{type(rerank_err).__name__}: {rerank_err}"
+                reranker_error = f"{type(rerank_err).__name__}: {rerank_err}"
+                meta["reranker_error"] = reranker_error
                 results = results[:target_k]
                 retrieved_slots = retrieved_slots[:target_k]
         else:
@@ -753,5 +769,48 @@ class IntelligenceHandlers:
         buf = getattr(self._runtime, "similarity_buffer", None)
         if buf is not None and results:
             buf.append(results[0].get("_vector_sim", 0.0))
+
+        # Telemetry block: always populate so callers can see which stages ran
+        # and with what weights. Additive - does not replace existing meta keys.
+        try:
+            weights_out = list(weights) if not isinstance(weights, list) else weights
+        except Exception:
+            weights_out = None
+        reranker_model: str | None = None
+        if reranker is not None:
+            reranker_model = (
+                getattr(reranker, "model_name", None)
+                or getattr(reranker, "_model_name", None)
+                or type(reranker).__name__
+            )
+        meta["signals"] = {
+            "fusion": {
+                "method": fusion_method,
+                "weights": weights_out,
+                "graph_signal_enabled": graph_enabled,
+            },
+            "recency": {
+                "half_life_days": float(half_life),
+            },
+            "sentence_query_expansion": {
+                "enabled": bool(use_sqe),
+                "num_sentences": int(num_sentences),
+            },
+            "stages": {
+                "gathered_vec": int(len(vec_slots_np)),
+                "gathered_bm25": int(len(bm25_slots_np)),
+                "union": int(union_size),
+                "cap_applied": bool(cap_applied),
+                "after_cap": int(len(slot_arr)),
+                "before_rerank": int(before_rerank_count),
+                "final": int(len(results)),
+            },
+            "reranker": {
+                "ran": bool(reranker_ran),
+                "model": reranker_model,
+                "error": reranker_error,
+            },
+            "nucleus": {"enabled": bool(nucleus_on)},
+        }
 
         return Result(kind="nodes", data=results, count=len(results), meta=meta)
