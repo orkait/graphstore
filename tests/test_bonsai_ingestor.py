@@ -13,14 +13,14 @@ import pytest
 
 from graphstore.bonsai_ingestor import (
     BonsaiIngestor,
-    CompactTurn,
+    ParsedTurn,
     FactState,
     IngestEmpty,
     IngestOverflow,
     IngestResult,
     _dedupe_upserts,
     _dsl_escape,
-    _parse_compact_output,
+    _parse_verb_output,
     _render_known_facts_block,
     _scrape_belief_updates,
     _split_lines,
@@ -332,65 +332,335 @@ def test_ingestor_reset_facts_clears_state(tmp_path: Path):
 
 
 # --------------------------------------------------------------------
-# Compact mode: parser + DSL synthesis
+# Verb parser (English-keyword @-prefix grammar)
 # --------------------------------------------------------------------
 
-def test_parse_compact_all_three_sections():
-    out = '''ENTS: "ent:priya"="Priya", "ent:openai"="OpenAI"
-BELIEFS: "fact:color"="blue"
-RETRACTS: "fact:old"'''
-    turn = _parse_compact_output(out)
+def test_parse_all_three_ingest_verbs():
+    out = '''@UPSERT priya Priya
+@UPSERT openai OpenAI
+@BELIEF color blue
+@RETRACT old'''
+    turn = _parse_verb_output(out)
     assert turn.entities == [("ent:priya", "Priya"), ("ent:openai", "OpenAI")]
     assert turn.beliefs == [("fact:color", "blue")]
     assert turn.retracts == ["fact:old"]
 
 
-def test_parse_compact_none_values_are_empty():
-    out = '''ENTS: none
-BELIEFS: none
-RETRACTS: none'''
-    turn = _parse_compact_output(out)
+def test_parse_empty_output_is_empty_turn():
+    turn = _parse_verb_output("")
     assert turn.entities == []
     assert turn.beliefs == []
     assert turn.retracts == []
 
 
-def test_parse_compact_missing_sections_default_empty():
-    out = 'ENTS: "ent:x"="X"'
-    turn = _parse_compact_output(out)
-    assert turn.entities == [("ent:x", "X")]
+def test_parse_entities_only():
+    turn = _parse_verb_output("@UPSERT kailash Kailash")
+    assert turn.entities == [("ent:kailash", "Kailash")]
     assert turn.beliefs == []
     assert turn.retracts == []
 
 
-def test_parse_compact_case_insensitive():
-    out = 'ents: "ent:x"="X"\nBELIEFS: "fact:y"="Y"'
-    turn = _parse_compact_output(out)
+def test_parse_multi_word_name_joined_by_whitespace():
+    """Rest-of-line is the name; split on first 2 whitespace runs only."""
+    turn = _parse_verb_output("@UPSERT sf San Francisco")
+    assert turn.entities == [("ent:sf", "San Francisco")]
+
+
+def test_parse_case_insensitive_verbs():
+    out = "@upsert priya Priya\n@belief color blue\n@retract old"
+    turn = _parse_verb_output(out)
+    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.beliefs == [("fact:color", "blue")]
+    assert turn.retracts == ["fact:old"]
+
+
+def test_parse_assert_alias_maps_to_belief():
+    """ASSERT is a grammar keyword; we accept it as an alias for @BELIEF."""
+    turn = _parse_verb_output("@ASSERT color blue")
+    assert turn.beliefs == [("fact:color", "blue")]
+
+
+def test_parse_tolerates_fence_lines():
+    out = "```\n@UPSERT x X\n```"
+    turn = _parse_verb_output(out)
     assert turn.entities == [("ent:x", "X")]
-    assert turn.beliefs == [("fact:y", "Y")]
 
 
-def test_parse_compact_tolerates_fence_lines():
-    out = '''```
-ENTS: "ent:x"="X"
-```'''
-    turn = _parse_compact_output(out)
+def test_parse_strips_prefix_if_model_adds_it():
+    """Model sometimes emits '@UPSERT ent:x X'; we normalize to slug-only."""
+    turn = _parse_verb_output('@UPSERT ent:priya Priya')
+    assert turn.entities == [("ent:priya", "Priya")]
+
+    turn2 = _parse_verb_output('@BELIEF fact:color blue')
+    assert turn2.beliefs == [("fact:color", "blue")]
+
+
+def test_parse_ignores_unknown_verbs():
+    out = "@UPSERT priya Priya\n@FOO some garbage\n@RETRACT old"
+    turn = _parse_verb_output(out)
+    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.retracts == ["fact:old"]
+
+
+def test_parse_ignores_malformed_short_lines():
+    """Missing required args -> line dropped, no crash."""
+    out = "@UPSERT justslug\n@BELIEF onlytopic\n@RETRACT\n"
+    turn = _parse_verb_output(out)
+    assert turn.entities == []
+    assert turn.beliefs == []
+    assert turn.retracts == []
+
+
+def test_parse_strips_quotes_if_present():
+    """Model occasionally wraps tokens in quotes; handle both."""
+    turn = _parse_verb_output('@UPSERT "priya" "Priya"')
+    assert turn.entities == [("ent:priya", "Priya")]
+
+
+# --------------------------------------------------------------------
+# @-prefix contract
+# --------------------------------------------------------------------
+
+def test_parse_drops_lines_without_at_prefix():
+    """Any line not starting with @ drops silently (English drift inert)."""
+    out = '''UPSERT priya Priya
+Wait, let me think about this.
+This is free-form prose.
+@UPSERT kailash Kailash'''
+    turn = _parse_verb_output(out)
+    assert turn.entities == [("ent:kailash", "Kailash")]
+
+
+def test_parse_accepts_space_after_at():
+    """'@ UPSERT priya' still parses (tolerant)."""
+    turn = _parse_verb_output("@ UPSERT priya Priya")
+    assert turn.entities == [("ent:priya", "Priya")]
+
+
+def test_parse_bare_at_dropped():
+    turn = _parse_verb_output("@\n@UPSERT x X\n@")
     assert turn.entities == [("ent:x", "X")]
 
 
-def test_parse_compact_escaped_quote_in_value():
-    out = 'ENTS: "ent:a"="Alice \\"Ace\\" Smith"'
-    turn = _parse_compact_output(out)
-    assert turn.entities == [("ent:a", 'Alice \\"Ace\\" Smith')]
+def test_parse_english_drift_after_ops_ignored():
+    out = '''@UPSERT priya Priya
+Wait - that's not correct. Let me reconsider.'''
+    turn = _parse_verb_output(out)
+    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.statements == []
 
 
-def test_parse_compact_ignores_unknown_prefixes():
-    out = '''ENTS: "ent:x"="X"
-FOO: not a section
-BELIEFS: "fact:y"="Y"'''
-    turn = _parse_compact_output(out)
-    assert turn.entities == [("ent:x", "X")]
-    assert turn.beliefs == [("fact:y", "Y")]
+# --------------------------------------------------------------------
+# Non-ingest verbs (edges, retrieval, walks, sys/vault)
+# --------------------------------------------------------------------
+
+def test_parse_edge_emits_create_edge():
+    turn = _parse_verb_output("@EDGE ent:priya ent:flipkart works_at")
+    assert turn.statements == [
+        'CREATE EDGE "ent:priya" -> "ent:flipkart" kind = "works_at"'
+    ]
+    assert turn.entities == []
+
+
+def test_parse_edge_needs_three_args():
+    turn = _parse_verb_output("@EDGE ent:a ent:b")
+    assert turn.statements == []
+
+
+def test_parse_remember():
+    turn = _parse_verb_output("@REMEMBER what I said about coffee")
+    assert turn.statements == ['REMEMBER "what I said about coffee" LIMIT 10']
+
+
+def test_parse_similar():
+    turn = _parse_verb_output("@SIMILAR joining a startup")
+    assert turn.statements == ['SIMILAR TO "joining a startup" LIMIT 10']
+
+
+def test_parse_lexical():
+    turn = _parse_verb_output("@LEXICAL python parser bug")
+    assert turn.statements == ['LEXICAL SEARCH "python parser bug" LIMIT 10']
+
+
+def test_parse_answer():
+    turn = _parse_verb_output("@ANSWER where does Priya work")
+    assert turn.statements == ['ANSWER "where does Priya work"']
+
+
+def test_parse_recall_walk():
+    turn = _parse_verb_output("@RECALL ent:priya")
+    assert turn.statements == ['RECALL FROM "ent:priya" DEPTH 2']
+
+
+def test_parse_traverse_walk():
+    turn = _parse_verb_output("@TRAVERSE ent:priya")
+    assert turn.statements == ['TRAVERSE FROM "ent:priya" DEPTH 2']
+
+
+def test_parse_ancestors_walk():
+    turn = _parse_verb_output("@ANCESTORS fact:favorite_color")
+    assert turn.statements == ['ANCESTORS OF "fact:favorite_color" DEPTH 3']
+
+
+def test_parse_descendants_walk():
+    turn = _parse_verb_output("@DESCENDANTS ent:priya")
+    assert turn.statements == ['DESCENDANTS OF "ent:priya" DEPTH 3']
+
+
+def test_parse_subgraph_walk():
+    turn = _parse_verb_output("@SUBGRAPH ent:openai")
+    assert turn.statements == ['SUBGRAPH FROM "ent:openai" DEPTH 2']
+
+
+def test_parse_path_and_shortest():
+    assert _parse_verb_output("@PATH ent:a ent:b").statements == [
+        'PATH FROM "ent:a" TO "ent:b" MAX_DEPTH 3'
+    ]
+    assert _parse_verb_output("@SHORTEST_PATH ent:a ent:b").statements == [
+        'SHORTEST PATH FROM "ent:a" TO "ent:b"'
+    ]
+    assert _parse_verb_output("@COMMON ent:a ent:b").statements == [
+        'COMMON NEIGHBORS OF "ent:a" AND "ent:b"'
+    ]
+
+
+def test_parse_snapshot_with_name():
+    turn = _parse_verb_output('@SNAPSHOT before-cleanup')
+    assert turn.statements == ['SYS SNAPSHOT "before-cleanup"']
+
+
+def test_parse_snapshot_auto_timestamp_when_bare():
+    import re
+    turn = _parse_verb_output("@SNAPSHOT")
+    assert len(turn.statements) == 1
+    assert re.fullmatch(
+        r'SYS SNAPSHOT "snap-\d{8}T\d{6}Z"',
+        turn.statements[0],
+    ), turn.statements[0]
+
+
+def test_parse_rollback_and_snapshots_list():
+    assert _parse_verb_output("@ROLLBACK v1").statements == [
+        'SYS ROLLBACK TO "v1"'
+    ]
+    assert _parse_verb_output("@SNAPSHOTS").statements == ['SYS SNAPSHOTS']
+
+
+def test_parse_compact_optimize():
+    assert _parse_verb_output("@COMPACT").statements == ['SYS OPTIMIZE COMPACT']
+
+
+def test_parse_health_stats_kinds():
+    assert _parse_verb_output("@HEALTH").statements == ['SYS HEALTH']
+    assert _parse_verb_output("@STATS").statements == ['SYS STATS']
+    assert _parse_verb_output("@KINDS").statements == ['SYS KINDS']
+
+
+def test_parse_explain():
+    turn = _parse_verb_output("@EXPLAIN what I said about coffee")
+    assert turn.statements == ['SYS EXPLAIN REMEMBER "what I said about coffee"']
+
+
+def test_parse_mixed_ingest_and_query():
+    out = '''@UPSERT priya Priya
+@UPSERT openai OpenAI
+@REMEMBER what I said about coffee'''
+    turn = _parse_verb_output(out)
+    assert turn.entities == [("ent:priya", "Priya"), ("ent:openai", "OpenAI")]
+    assert turn.statements == ['REMEMBER "what I said about coffee" LIMIT 10']
+
+
+def test_parse_escapes_quotes_in_query_text():
+    turn = _parse_verb_output('@REMEMBER she said "go"')
+    assert turn.statements == ['REMEMBER "she said \\"go\\"" LIMIT 10']
+
+
+def test_parse_query_verb_without_body_dropped():
+    turn = _parse_verb_output("@REMEMBER   \n@SIMILAR")
+    assert turn.statements == []
+
+
+def test_parse_walk_verb_without_anchor_dropped():
+    turn = _parse_verb_output("@RECALL\n@TRAVERSE")
+    assert turn.statements == []
+
+
+def test_parse_plain_verb_ignores_trailing_tokens():
+    """@HEALTH foo still fires; plain handler ignores the rest of the line."""
+    turn = _parse_verb_output("@HEALTH ignored")
+    assert turn.statements == ['SYS HEALTH']
+
+
+def test_parse_edge_escapes_quotes_in_ids():
+    """Quote-escape applies inside CREATE EDGE even if ids carry weird chars."""
+    turn = _parse_verb_output('@EDGE ent:a ent:b weird"kind')
+    assert turn.statements == [
+        'CREATE EDGE "ent:a" -> "ent:b" kind = "weird\\"kind"'
+    ]
+
+
+# --------------------------------------------------------------------
+# Node lifecycle verbs (update/delete/forget/merge/counterfactual)
+# --------------------------------------------------------------------
+
+def test_parse_update_node():
+    turn = _parse_verb_output("@UPDATE_NODE me title senior engineer")
+    assert turn.statements == [
+        'UPDATE NODE "ent:me" SET title = "senior engineer"'
+    ]
+
+
+def test_parse_delete_node():
+    turn = _parse_verb_output("@DELETE_NODE obsolete")
+    assert turn.statements == ['DELETE NODE "ent:obsolete"']
+
+
+def test_parse_forget_node():
+    turn = _parse_verb_output("@FORGET old_gym")
+    assert turn.statements == ['FORGET NODE "ent:old_gym"']
+
+
+def test_parse_merge_nodes():
+    turn = _parse_verb_output("@MERGE maria marie")
+    assert turn.statements == [
+        'MERGE NODE "ent:maria" INTO "ent:marie"'
+    ]
+
+
+def test_parse_counterfactual():
+    turn = _parse_verb_output("@COUNTERFACTUAL joined_stripe")
+    assert turn.statements == ['WHAT IF RETRACT "fact:joined_stripe"']
+
+
+def test_parse_count_nodes_and_edges():
+    assert _parse_verb_output("@COUNT_NODES").statements == ['COUNT NODES']
+    assert _parse_verb_output("@COUNT_EDGES").statements == ['COUNT EDGES']
+
+
+# --------------------------------------------------------------------
+# DSL synthesis (v5 pre-rendered statements)
+# --------------------------------------------------------------------
+
+def test_synthesize_appends_statements_verbatim():
+    turn = ParsedTurn(
+        entities=[("ent:x", "X")],
+        statements=['REMEMBER "hello" LIMIT 3', 'SYS STATS'],
+    )
+    dsl = _synthesize_dsl(turn, msg_id="m:0", session_id="s", role="user", text="hi")
+    assert dsl[-2] == 'REMEMBER "hello" LIMIT 3'
+    assert dsl[-1] == 'SYS STATS'
+
+
+def test_synthesize_statements_only_still_includes_create_node():
+    turn = ParsedTurn(statements=['REMEMBER "x" LIMIT 10'])
+    dsl = _synthesize_dsl(turn, msg_id="m:0", session_id="s", role="user", text="x")
+    assert any(d.startswith('CREATE NODE "m:0"') for d in dsl)
+    assert 'REMEMBER "x" LIMIT 10' in dsl
+
+
+def test_parsed_turn_default_statements_empty():
+    turn = ParsedTurn()
+    assert turn.statements == []
 
 
 def test_dsl_escape_handles_quote_and_backslash():
@@ -399,7 +669,7 @@ def test_dsl_escape_handles_quote_and_backslash():
 
 
 def test_synthesize_minimal_turn_emits_only_message_node():
-    turn = CompactTurn()
+    turn = ParsedTurn()
     dsl = _synthesize_dsl(turn, msg_id="m:s1:0", session_id="s1", role="user", text="hi")
     assert len(dsl) == 1
     assert 'CREATE NODE "m:s1:0"' in dsl[0]
@@ -407,7 +677,7 @@ def test_synthesize_minimal_turn_emits_only_message_node():
 
 
 def test_synthesize_with_entities_emits_upsert_plus_matching_edge():
-    turn = CompactTurn(entities=[("ent:priya", "Priya"), ("ent:openai", "OpenAI")])
+    turn = ParsedTurn(entities=[("ent:priya", "Priya"), ("ent:openai", "OpenAI")])
     dsl = _synthesize_dsl(turn, msg_id="m:s1:0", session_id="s1", role="user", text="x")
     assert len(dsl) == 1 + 2 + 2
     assert 'UPSERT NODE "ent:priya"' in dsl[1]
@@ -417,7 +687,7 @@ def test_synthesize_with_entities_emits_upsert_plus_matching_edge():
 
 
 def test_synthesize_dedupes_duplicate_entities():
-    turn = CompactTurn(entities=[("ent:x", "X"), ("ent:x", "X")])
+    turn = ParsedTurn(entities=[("ent:x", "X"), ("ent:x", "X")])
     dsl = _synthesize_dsl(turn, msg_id="m:0", session_id="s", role="user", text="x")
     upserts = [d for d in dsl if d.startswith("UPSERT")]
     edges = [d for d in dsl if d.startswith("CREATE EDGE")]
@@ -426,7 +696,7 @@ def test_synthesize_dedupes_duplicate_entities():
 
 
 def test_synthesize_belief_and_retract_use_same_fact_id():
-    turn = CompactTurn(
+    turn = ParsedTurn(
         beliefs=[("fact:drink", "tea")],
         retracts=["fact:drink"],
     )
@@ -438,7 +708,7 @@ def test_synthesize_belief_and_retract_use_same_fact_id():
 
 
 def test_synthesize_escapes_quotes_in_text_and_name():
-    turn = CompactTurn(entities=[("ent:a", 'Alice "Ace"')])
+    turn = ParsedTurn(entities=[("ent:a", 'Alice "Ace"')])
     dsl = _synthesize_dsl(
         turn, msg_id="m:0", session_id="s", role="user",
         text='She said "go".',
@@ -450,7 +720,7 @@ def test_synthesize_escapes_quotes_in_text_and_name():
 
 def test_synthesize_all_together_contract():
     """End-to-end: messages + entity + belief + retract."""
-    turn = CompactTurn(
+    turn = ParsedTurn(
         entities=[("ent:priya", "Priya")],
         beliefs=[("fact:color", "green")],
         retracts=["fact:color"],
@@ -463,27 +733,23 @@ def test_synthesize_all_together_contract():
     assert kinds == ["CREATE", "UPSERT", "CREATE", "RETRACT", "ASSERT"]
 
 
-def test_compact_mode_requires_msg_id(tmp_path: Path):
+def test_ingest_requires_msg_id(tmp_path: Path):
     skill = tmp_path / "skill.md"
-    skill.write_text("compact skill body")
+    skill.write_text("prompt body")
     model = tmp_path / "fake.gguf"
     model.write_bytes(b"")
 
-    ing = BonsaiIngestor(model_path=model, skill_path=skill, compact=True)
-    with pytest.raises(ValueError, match="compact=True ingest requires"):
+    ing = BonsaiIngestor(model_path=model, skill_path=skill)
+    with pytest.raises(ValueError, match="ingest requires an explicit msg_id"):
         ing.ingest("hello", dry_run=True)
 
 
-def test_compact_mode_defaults_to_compact_skill_path(tmp_path: Path):
-    """When no skill_path is passed and compact=True, uses the compact default."""
-    model = tmp_path / "fake.gguf"
-    model.write_bytes(b"")
-
-    # Default compact skill path must exist in the repo or this raises; we
-    # accept that and just assert on the chosen path rather than instantiate.
-    from graphstore.bonsai_ingestor import _DEFAULT_COMPACT_SKILL_PATH, _DEFAULT_SKILL_PATH
-    assert _DEFAULT_COMPACT_SKILL_PATH != _DEFAULT_SKILL_PATH
-    assert "compact" in str(_DEFAULT_COMPACT_SKILL_PATH)
+def test_default_prompt_path_ships_in_package(tmp_path: Path):
+    """Default prompt file lives inside the package and contains at least one @-verb."""
+    from graphstore.bonsai_ingestor import _DEFAULT_PROMPT_PATH
+    assert _DEFAULT_PROMPT_PATH.exists()
+    body = _DEFAULT_PROMPT_PATH.read_text()
+    assert "@UPSERT" in body and "@REMEMBER" in body
 
 
 # --------------------------------------------------------------------
