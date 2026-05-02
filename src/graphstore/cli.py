@@ -111,15 +111,22 @@ def cmd_playground(args: argparse.Namespace) -> None:
 
     from graphstore.server import app, mount_static
 
-    # Try dev path first (repo checkout), then installed package path
-    repo_root = Path(__file__).resolve().parent.parent
-    dev_dist = repo_root / "playground" / "dist"
-    pkg_dist = Path(__file__).resolve().parent / "playground_dist"
-
-    if dev_dist.is_dir():
-        mount_static(app, dev_dist)
-    elif pkg_dist.is_dir():
-        mount_static(app, pkg_dist)
+    # Locate the bundled UI: try dev paths first (repo checkout, both
+    # legacy `playground/dist` and current `apps/playground/dist`),
+    # then the installed-package path.
+    here = Path(__file__).resolve()
+    candidates = [
+        # Current repo layout post-`refactor: consolidate repo layout`.
+        here.parent.parent.parent / "apps" / "playground" / "dist",
+        # Legacy pre-refactor layout, kept for older checkouts.
+        here.parent.parent / "playground" / "dist",
+        # Wheel install path.
+        here.parent / "playground_dist",
+    ]
+    for d in candidates:
+        if d.is_dir():
+            mount_static(app, d)
+            break
 
     if not args.no_browser:
         url = f"http://{args.host}:{args.port}"
