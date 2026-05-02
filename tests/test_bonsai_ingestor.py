@@ -341,7 +341,7 @@ def test_parse_all_three_ingest_verbs():
 @BELIEF color blue
 @RETRACT old'''
     turn = _parse_verb_output(out)
-    assert turn.entities == [("ent:priya", "Priya"), ("ent:openai", "OpenAI")]
+    assert turn.entities == [("priya", "Priya"), ("openai", "OpenAI")]
     assert turn.beliefs == [("fact:color", "blue")]
     assert turn.retracts == ["fact:old"]
 
@@ -355,7 +355,7 @@ def test_parse_empty_output_is_empty_turn():
 
 def test_parse_entities_only():
     turn = _parse_verb_output("@UPSERT kailash Kailash")
-    assert turn.entities == [("ent:kailash", "Kailash")]
+    assert turn.entities == [("kailash", "Kailash")]
     assert turn.beliefs == []
     assert turn.retracts == []
 
@@ -363,13 +363,13 @@ def test_parse_entities_only():
 def test_parse_multi_word_name_joined_by_whitespace():
     """Rest-of-line is the name; split on first 2 whitespace runs only."""
     turn = _parse_verb_output("@UPSERT sf San Francisco")
-    assert turn.entities == [("ent:sf", "San Francisco")]
+    assert turn.entities == [("sf", "San Francisco")]
 
 
 def test_parse_case_insensitive_verbs():
     out = "@upsert priya Priya\n@belief color blue\n@retract old"
     turn = _parse_verb_output(out)
-    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.entities == [("priya", "Priya")]
     assert turn.beliefs == [("fact:color", "blue")]
     assert turn.retracts == ["fact:old"]
 
@@ -383,13 +383,13 @@ def test_parse_assert_alias_maps_to_belief():
 def test_parse_tolerates_fence_lines():
     out = "```\n@UPSERT x X\n```"
     turn = _parse_verb_output(out)
-    assert turn.entities == [("ent:x", "X")]
+    assert turn.entities == [("x", "X")]
 
 
 def test_parse_strips_prefix_if_model_adds_it():
     """Model sometimes emits '@UPSERT ent:x X'; we normalize to slug-only."""
     turn = _parse_verb_output('@UPSERT ent:priya Priya')
-    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.entities == [("priya", "Priya")]
 
     turn2 = _parse_verb_output('@BELIEF fact:color blue')
     assert turn2.beliefs == [("fact:color", "blue")]
@@ -398,7 +398,7 @@ def test_parse_strips_prefix_if_model_adds_it():
 def test_parse_ignores_unknown_verbs():
     out = "@UPSERT priya Priya\n@FOO some garbage\n@RETRACT old"
     turn = _parse_verb_output(out)
-    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.entities == [("priya", "Priya")]
     assert turn.retracts == ["fact:old"]
 
 
@@ -414,7 +414,7 @@ def test_parse_ignores_malformed_short_lines():
 def test_parse_strips_quotes_if_present():
     """Model occasionally wraps tokens in quotes; handle both."""
     turn = _parse_verb_output('@UPSERT "priya" "Priya"')
-    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.entities == [("priya", "Priya")]
 
 
 # --------------------------------------------------------------------
@@ -428,25 +428,25 @@ Wait, let me think about this.
 This is free-form prose.
 @UPSERT kailash Kailash'''
     turn = _parse_verb_output(out)
-    assert turn.entities == [("ent:kailash", "Kailash")]
+    assert turn.entities == [("kailash", "Kailash")]
 
 
 def test_parse_accepts_space_after_at():
     """'@ UPSERT priya' still parses (tolerant)."""
     turn = _parse_verb_output("@ UPSERT priya Priya")
-    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.entities == [("priya", "Priya")]
 
 
 def test_parse_bare_at_dropped():
     turn = _parse_verb_output("@\n@UPSERT x X\n@")
-    assert turn.entities == [("ent:x", "X")]
+    assert turn.entities == [("x", "X")]
 
 
 def test_parse_english_drift_after_ops_ignored():
     out = '''@UPSERT priya Priya
 Wait - that's not correct. Let me reconsider.'''
     turn = _parse_verb_output(out)
-    assert turn.entities == [("ent:priya", "Priya")]
+    assert turn.entities == [("priya", "Priya")]
     assert turn.statements == []
 
 
@@ -455,15 +455,17 @@ Wait - that's not correct. Let me reconsider.'''
 # --------------------------------------------------------------------
 
 def test_parse_edge_emits_create_edge():
+    """@EDGE produces an entity_edges entry; synthesizer maps each
+    slug to the resolver's entity_id before rendering the DSL."""
     turn = _parse_verb_output("@EDGE ent:priya ent:flipkart works_at")
-    assert turn.statements == [
-        'CREATE EDGE "ent:priya" -> "ent:flipkart" kind = "works_at"'
-    ]
+    assert turn.entity_edges == [("priya", "flipkart", "works_at")]
+    assert turn.statements == []
     assert turn.entities == []
 
 
 def test_parse_edge_needs_three_args():
     turn = _parse_verb_output("@EDGE ent:a ent:b")
+    assert turn.entity_edges == []
     assert turn.statements == []
 
 
@@ -566,7 +568,7 @@ def test_parse_mixed_ingest_and_query():
 @UPSERT openai OpenAI
 @REMEMBER what I said about coffee'''
     turn = _parse_verb_output(out)
-    assert turn.entities == [("ent:priya", "Priya"), ("ent:openai", "OpenAI")]
+    assert turn.entities == [("priya", "Priya"), ("openai", "OpenAI")]
     assert turn.statements == ['REMEMBER "what I said about coffee" LIMIT 10']
 
 
@@ -592,11 +594,10 @@ def test_parse_plain_verb_ignores_trailing_tokens():
 
 
 def test_parse_edge_escapes_quotes_in_ids():
-    """Quote-escape applies inside CREATE EDGE even if ids carry weird chars."""
+    """Edge slugs + kind survive odd characters; synthesizer escapes
+    when it renders the final DSL."""
     turn = _parse_verb_output('@EDGE ent:a ent:b weird"kind')
-    assert turn.statements == [
-        'CREATE EDGE "ent:a" -> "ent:b" kind = "weird\\"kind"'
-    ]
+    assert turn.entity_edges == [("a", "b", 'weird"kind')]
 
 
 # --------------------------------------------------------------------
@@ -643,7 +644,7 @@ def test_parse_count_nodes_and_edges():
 
 def test_synthesize_appends_statements_verbatim():
     turn = ParsedTurn(
-        entities=[("ent:x", "X")],
+        entities=[("x", "X")],
         statements=['REMEMBER "hello" LIMIT 3', 'SYS STATS'],
     )
     dsl = _synthesize_dsl(turn, msg_id="m:0", session_id="s", role="user", text="hi")
@@ -676,23 +677,68 @@ def test_synthesize_minimal_turn_emits_only_message_node():
     assert 'DOCUMENT "hi"' in dsl[0]
 
 
-def test_synthesize_with_entities_emits_upsert_plus_matching_edge():
-    turn = ParsedTurn(entities=[("ent:priya", "Priya"), ("ent:openai", "OpenAI")])
+def test_synthesize_with_entities_emits_mention_entity_and_refers_to():
+    """Each entity slug yields: mention node + entity node (new) +
+    refers_to edge (mention->entity) + mentions edge (msg->mention).
+    With no gs passed, every mention mints a fresh entity."""
+    turn = ParsedTurn(entities=[("priya", "Priya"), ("openai", "OpenAI")])
     dsl = _synthesize_dsl(turn, msg_id="m:s1:0", session_id="s1", role="user", text="x")
-    assert len(dsl) == 1 + 2 + 2
-    assert 'UPSERT NODE "ent:priya"' in dsl[1]
-    assert 'UPSERT NODE "ent:openai"' in dsl[2]
-    assert 'CREATE EDGE "m:s1:0" -> "ent:priya" kind = "mentions"' in dsl[3]
-    assert 'CREATE EDGE "m:s1:0" -> "ent:openai" kind = "mentions"' in dsl[4]
+    # 1 message + 2 * (1 mention + 1 entity + 1 refers_to + 1 mentions) = 9
+    assert len(dsl) == 9
+    text = "\n".join(dsl)
+    assert 'kind = "mention"' in text
+    assert 'kind = "entity"' in text
+    assert 'kind = "refers_to"' in text
+    assert 'kind = "mentions"' in text
+    assert 'mention:m:s1:0:priya:0' in text
+    assert 'mention:m:s1:0:openai:1' in text
+    assert 'canonical_name = "Priya"' in text
+    assert 'canonical_name = "OpenAI"' in text
 
 
 def test_synthesize_dedupes_duplicate_entities():
-    turn = ParsedTurn(entities=[("ent:x", "X"), ("ent:x", "X")])
+    """Same slug emitted twice in one turn yields exactly one mention
+    + one entity + one refers_to."""
+    turn = ParsedTurn(entities=[("x", "X"), ("x", "X")])
     dsl = _synthesize_dsl(turn, msg_id="m:0", session_id="s", role="user", text="x")
-    upserts = [d for d in dsl if d.startswith("UPSERT")]
-    edges = [d for d in dsl if d.startswith("CREATE EDGE")]
-    assert len(upserts) == 1
-    assert len(edges) == 1
+    mentions = [d for d in dsl if 'kind = "mention"' in d]
+    entities = [d for d in dsl if 'kind = "entity"' in d]
+    refers = [d for d in dsl if 'kind = "refers_to"' in d]
+    assert len(mentions) == 1
+    assert len(entities) == 1
+    assert len(refers) == 1
+
+
+def test_synthesize_emits_entity_edges_after_resolution():
+    """@EDGE between two upserted slugs renders as entity-to-entity
+    after the slug map is populated."""
+    turn = ParsedTurn(
+        entities=[("priya", "Priya"), ("flipkart", "Flipkart")],
+        entity_edges=[("priya", "flipkart", "works_at")],
+    )
+    dsl = _synthesize_dsl(turn, msg_id="m:0", session_id="s", role="user", text="x")
+    edge_lines = [d for d in dsl
+                  if d.startswith("CREATE EDGE")
+                  and 'kind = "works_at"' in d]
+    assert len(edge_lines) == 1
+    # Both endpoints must be entity:* ids, not slug literals.
+    assert 'entity:' in edge_lines[0]
+    assert 'ent:priya' not in edge_lines[0]
+    assert 'ent:flipkart' not in edge_lines[0]
+
+
+def test_synthesize_drops_entity_edge_with_unknown_slug():
+    """@EDGE references a slug not declared via @UPSERT; synthesizer
+    drops it (logs warning) rather than emitting a broken DSL line."""
+    turn = ParsedTurn(
+        entities=[("alice", "Alice")],
+        entity_edges=[("alice", "ghost", "knows")],
+    )
+    dsl = _synthesize_dsl(turn, msg_id="m:0", session_id="s", role="user", text="x")
+    edge_lines = [d for d in dsl
+                  if d.startswith("CREATE EDGE")
+                  and 'kind = "knows"' in d]
+    assert edge_lines == []
 
 
 def test_synthesize_belief_and_retract_use_same_fact_id():
@@ -708,29 +754,34 @@ def test_synthesize_belief_and_retract_use_same_fact_id():
 
 
 def test_synthesize_escapes_quotes_in_text_and_name():
-    turn = ParsedTurn(entities=[("ent:a", 'Alice "Ace"')])
+    turn = ParsedTurn(entities=[("a", 'Alice "Ace"')])
     dsl = _synthesize_dsl(
         turn, msg_id="m:0", session_id="s", role="user",
         text='She said "go".',
     )
-    # Backslash-escapes in DSL string literal:
-    assert 'DOCUMENT "She said \\"go\\"."' in dsl[0]
-    assert 'name = "Alice \\"Ace\\""' in dsl[1]
+    text = "\n".join(dsl)
+    assert '\\"go\\"' in text
+    assert 'Alice \\"Ace\\"' in text
 
 
 def test_synthesize_all_together_contract():
-    """End-to-end: messages + entity + belief + retract."""
+    """End-to-end: message + mention/entity/refers_to + belief + retract."""
     turn = ParsedTurn(
-        entities=[("ent:priya", "Priya")],
+        entities=[("priya", "Priya")],
         beliefs=[("fact:color", "green")],
         retracts=["fact:color"],
     )
     dsl = _synthesize_dsl(
         turn, msg_id="m:0", session_id="s1", role="user", text="text",
     )
-    # Order: CREATE NODE, UPSERTs, EDGEs, RETRACTs, ASSERTs
-    kinds = [d.split(maxsplit=2)[0] for d in dsl]
-    assert kinds == ["CREATE", "UPSERT", "CREATE", "RETRACT", "ASSERT"]
+    text = "\n".join(dsl)
+    assert 'kind = "message"' in text
+    assert 'kind = "mention"' in text
+    assert 'kind = "entity"' in text
+    assert 'kind = "refers_to"' in text
+    assert 'kind = "mentions"' in text
+    assert 'RETRACT "fact:color"' in text
+    assert 'ASSERT "fact:color"' in text
 
 
 def test_ingest_requires_msg_id(tmp_path: Path):
