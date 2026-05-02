@@ -57,6 +57,37 @@ g.execute('SIMILAR TO "capital city" LIMIT 5')            # vector only
 
 `DOCUMENT "text"` populates the vector index, FTS5 index, and blob storage in one shot. Without it, a node is structured data only.
 
+## Natural-language ingest (Bonsai)
+
+For agent-conversation memory, writing DSL by hand is the wrong abstraction. graphstore ships `BonsaiIngestor`, an LLM-driven NL→DSL converter built on a 4B Ternary-Bonsai GGUF (1.1 GB, runs on CPU at ~20 tok/s, ~150 tok/s on a CUDA 12 GPU). It reads natural-language turns and emits the DSL statements that mirror them.
+
+```python
+from graphstore import GraphStore
+from graphstore.bonsai_ingestor import BonsaiIngestor, _DEFAULT_LITE_PROMPT_PATH
+
+g = GraphStore(path="./brain")
+ing = BonsaiIngestor(
+    model_path="./models/Ternary-Bonsai-4B-TQ1_0.gguf",
+    gs=g,
+    skill_path=str(_DEFAULT_LITE_PROMPT_PATH),  # or omit for the full prompt
+    n_gpu_layers=-1,                             # 0 for CPU; -1 to offload all
+)
+
+ing.ingest("Kailash joined OpenAI.",     msg_id="m1")  # @UPSERT/@UPSERT/@EDGE
+ing.ingest("I prefer tea to coffee.",    msg_id="m2")  # @BELIEF
+ing.ingest("Maria moved to Berlin.",     msg_id="m3")
+ing.ingest("Actually I drink coffee now.", msg_id="m4")  # @RETRACT + @BELIEF
+
+# Retrieval is the same NL surface
+ing.ingest("Where does Maria work?", msg_id="q1", dry_run=True)  # -> @ANSWER
+```
+
+Prompt variants:
+- `bonsai_dsl_prompt_lite.txt` (~600 system tokens, 16 verbs, ingest+retrieval): production sweet spot.
+- `bonsai_dsl_prompt.txt` (~1700 system tokens, ~50 verbs, all admin DSL): full control surface.
+
+Persistent KV cache (`kv_cache_path=...`) cuts cold start from ~10 s to ~1 s across process restarts.
+
 ## Architecture
 
 <p align="center">
@@ -164,11 +195,34 @@ Query p50 46 ms / p95 76 ms. Retrieval-only, no LLM judge.
 
 Full methodology: [Benchmarks](website/docs/benchmarks/overview.md).
 
+## GPU offload (opt-in, off by default)
+
+graphstore never grabs a GPU implicitly. Every `*_gpu_layers` default is 0 (CPU). To opt in, install `[gpu]` (and a CUDA-built `llama-cpp-python` wheel for Bonsai/embedder/reranker) and call `gpu.setup()`:
+
+```python
+from graphstore import gpu
+status = gpu.setup()
+print(status.ready, status.provider, status.device_name, status.error)
+```
+
+`gpu.setup()` is idempotent and does the dirty work: discovers any `nvidia-*-cu12` pip wheels under `site-packages`, ctypes-preloads their `.so` files in dependency order so `LD_LIBRARY_PATH` doesn't have to be set externally, then probes onnxruntime + llama-cpp-python CUDA support. On success it surfaces `GRAPHSTORE_GPU=1` so the existing compute_profile gate flips automatically. Failure is structured (`status.error`) and falls back to CPU silently.
+
+For per-component control, pass the explicit kwargs (CPU stays the default):
+
+```python
+GraphStore(path="./brain", gpu_layers=-1, reranker_gpu_layers=-1)
+BonsaiIngestor(model_path=..., n_gpu_layers=-1)
+```
+
+`profile="pro"` for one-line auto-detection + sized knobs is in the pipeline; v0.5 ships `gpu.setup()` as the explicit entry point. See `src/graphstore/pro.py` for the WIP slotted spec + calibration cache.
+
 ## Scope
 
 - Embedded, one writer per path. For multi-tenant, wrap in your own service.
 - No SQL, no Cypher, no distributed cluster. Graph ops exist because agent memory is a graph.
 - Fusion weights are hand-tuned. Reranking is opt-in, off by default.
+- Bonsai NL→DSL ingest is opt-in via `BonsaiIngestor(...)`. Core install never auto-loads an LLM.
+- GPU offload is opt-in via `gpu.setup()` or explicit `n_gpu_layers=...`. No silent device acquisition.
 
 ## Development
 
