@@ -660,6 +660,18 @@ class GraphStore:
         if self._runtime.vector_store is not None:
             from graphstore.vector.store import VectorStore
             vector_path = os.path.join(str(self._path), "vectors.usearch") if self._path else None
+            # VectorStore.__init__ does .view(path) on an existing file,
+            # which mmaps the OLD index with its keys. Without removing
+            # the file first, the "reset" graph still has every prior
+            # vector key live - subsequent CREATE NODE with a reused id
+            # then trips usearch with "Duplicate keys not allowed in
+            # high-level wrappers" and the whole batch rolls back.
+            if vector_path and os.path.exists(vector_path):
+                try:
+                    os.remove(vector_path)
+                except OSError as e:
+                    logger.warning("vector reset: could not remove %s (%s); "
+                                   "stale keys may persist", vector_path, e)
             self._runtime.vector_store = VectorStore(
                 dims=self._runtime.vector_store.dims,
                 capacity=self._config.core.initial_capacity,

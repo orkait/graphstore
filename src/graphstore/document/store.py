@@ -31,16 +31,22 @@ class DocumentStore:
     """SQLite-backed storage for raw documents. Always on disk, never in RAM."""
 
     def __init__(self, db_path: str | None = None, fts_tokenizer: str = "porter unicode61"):
-        """Initialize with a file path. If None, uses a temp file (cleaned on close)."""
+        """Initialize with a file path. If None, uses a temp file (cleaned on close).
+
+        ``check_same_thread=False`` so the connection works under uvicorn /
+        FastAPI / multi-threaded callers. graphstore serializes writes via
+        higher-level locking around the GraphStore facade, and sqlite3
+        itself uses its own internal mutex when this flag is set.
+        """
         self._fts_tokenizer = fts_tokenizer
         if db_path:
             self._path = db_path
-            self._conn = sqlite3.connect(db_path)
+            self._conn = sqlite3.connect(db_path, check_same_thread=False)
             self._temp = False
         else:
             fd, self._path = tempfile.mkstemp(suffix=".graphstore-docs.db")
             os.close(fd)  # close fd, sqlite will reopen
-            self._conn = sqlite3.connect(self._path)
+            self._conn = sqlite3.connect(self._path, check_same_thread=False)
             self._temp = True
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._ensure_tables()
