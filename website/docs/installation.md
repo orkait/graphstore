@@ -28,6 +28,11 @@ pip install 'graphstore[audio]'
 # GPU acceleration for NER (Linux x86_64, CUDA 12)
 pip install 'graphstore[gpu]'
 
+# Pro profile: spec-driven, calibrated agentic-memory deployment
+# (bundles ingest + vision + audio + embedders-extra + gpu plus
+# huggingface-hub + tokenizers + onnxruntime). See "Pro mode" guide.
+pip install 'graphstore[pro]'
+
 # Everything heavy
 pip install 'graphstore[ingest,vision,playground]'
 ```
@@ -43,6 +48,7 @@ pip install 'graphstore[ingest,vision,playground]'
 | `embedders-extra` | fastembed + llama-cpp-python (alternate embedder backends; model2vec is default and core) |
 | `playground` | fastapi + uvicorn (local web UI) |
 | `gpu` | onnxruntime-gpu only (bring your own CUDA 12 + cuDNN 9) |
+| `pro` | All-in-one agentic memory: ingest + vision + audio + embedders-extra + gpu + tokenizers + onnxruntime + huggingface-hub. Backed by `graphstore pro setup` calibration. |
 | `dev` | pytest + pytest-benchmark + pytest-xdist + pytest-timeout |
 
 ## Verify

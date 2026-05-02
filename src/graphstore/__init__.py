@@ -1,6 +1,6 @@
 """graphstore - Agentic brain DB with semantic search."""
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 # Import compute_profile first so its module-level _apply_blas_env_cap()
 # runs before numpy / scipy initialise their BLAS thread pools. Protects
