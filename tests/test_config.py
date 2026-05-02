@@ -35,6 +35,17 @@ class TestConfigDefaults:
         with pytest.raises(AttributeError):
             cfg.core = CoreConfig(ceiling_mb=512)
 
+    def test_gpu_default_off(self):
+        """Contract: every *_gpu_layers default is 0 (CPU).
+
+        graphstore must never silently grab a GPU. GPU offload is opt-in
+        via graphstore.gpu.setup() / GraphStore(profile="pro") plus
+        explicit kwarg or config overrides.
+        """
+        cfg = GraphStoreConfig()
+        assert cfg.vector.gpu_layers == 0
+        assert cfg.dsl.reranker_gpu_layers == 0
+
 
 class TestConfigSerialize:
     def test_json_roundtrip(self):

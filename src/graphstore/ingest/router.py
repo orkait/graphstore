@@ -131,21 +131,26 @@ def list_ingestors() -> list[dict]:
     _docling_formats = ["pdf", "docx", "pptx", "xlsx", "md", "html", "csv",
                         "png", "jpg", "jpeg", "tiff", "tif", "bmp", "webp",
                         "tex", "adoc"]
-    try:
-        import docling as _  # noqa
-        docling_available = True
-    except ImportError:
-        docling_available = False
-    try:
-        import llama_cpp.server as _  # noqa
-        vision_available = True
-    except ImportError:
-        vision_available = False
-    try:
-        import faster_whisper as _  # noqa
-        stt_available = True
-    except ImportError:
-        stt_available = False
+    # Probe by importlib metadata, not by import. The vision sidecar's
+    # llama-cpp-python loads its native lib at module import; on hosts with
+    # missing/broken CUDA libs that import raises RuntimeError (not
+    # ImportError) and crashes the whole capability registry. Distribution
+    # metadata is a pure file-system read with no side effects.
+    import importlib.metadata as _im
+    import importlib.util as _il
+
+    def _installed(dist: str) -> bool:
+        try:
+            _im.distribution(dist)
+            return True
+        except _im.PackageNotFoundError:
+            return False
+
+    docling_available = _il.find_spec("docling") is not None
+    # Check parent dist; find_spec("llama_cpp.server") would import
+    # llama_cpp.__init__ which triggers the dlopen we're avoiding.
+    vision_available = _installed("llama-cpp-python")
+    stt_available = _il.find_spec("faster_whisper") is not None
 
     return [
         {"name": "markitdown", "formats": ["txt", "md", "html", "csv", "json", "xml", "docx", "pptx", "xlsx", "pdf", "zip", "png", "jpg"], "tier": 1, "extra": "ingest"},
