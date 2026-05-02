@@ -8,7 +8,7 @@
 [![PyPI](https://img.shields.io/pypi/v/graphstore?color=f59e0b&logo=pypi&logoColor=white)](https://pypi.org/project/graphstore/)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.10-3776AB?logo=python&logoColor=white)](https://python.org)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-ea580c?logo=gnu&logoColor=white)](LICENSE)
-[![Docs](https://img.shields.io/badge/docs-graphstore--docs.orkait.com-f59e0b?logo=readthedocs&logoColor=white)](https://graphstore-docs.orkait.com)
+[![Docs](https://img.shields.io/badge/docs-website%2Fdocs-f59e0b?logo=readthedocs&logoColor=white)](website/docs/intro.md)
 
 </div>
 
@@ -16,7 +16,7 @@
 
 An embedded memory database for AI agents. Facts get written with confidence scores, expire, get contradicted, decay by recency. Retrieval fuses vector similarity, BM25, graph structure, and recency in one call. Everything goes through a typed DSL. Runs in-process, persists to SQLite.
 
-Status: v0.3.0, alpha.
+Status: v0.5.0, alpha.
 
 ## Install
 
@@ -34,7 +34,7 @@ pip install 'graphstore[playground]'   # FastAPI web UI
 pip install 'graphstore[gpu]'          # onnxruntime-gpu, Linux x86_64, CUDA 12
 ```
 
-Full extras matrix: [Installation](https://graphstore-docs.orkait.com/installation).
+Full extras matrix: [Installation](website/docs/installation.md).
 
 ## Quickstart
 
@@ -71,7 +71,7 @@ Three engines behind one DSL.
 
 The **DSL** is Lark LALR(1). Every write, read, `INGEST`, and `SYS *` goes through it.
 
-Deep dive: [Architecture](https://graphstore-docs.orkait.com/concepts/architecture) · [Edge matrix](https://graphstore-docs.orkait.com/concepts/edge-matrix).
+Deep dive: [Architecture](website/docs/concepts/architecture.md) · [Edge matrix](website/docs/concepts/edge-matrix.md).
 
 ## REMEMBER
 
@@ -108,7 +108,7 @@ g.execute('SYS EXPLAIN REMEMBER "Caroline counseling" LIMIT 3')
 # kind="plan", candidates with per-signal scores, full meta["signals"]
 ```
 
-Deep dive: [REMEMBER pipeline](https://graphstore-docs.orkait.com/concepts/remember-pipeline).
+Deep dive: [REMEMBER pipeline](website/docs/concepts/remember-pipeline.md).
 
 ## ANSWER (retrieval + reader LLM)
 
@@ -148,7 +148,7 @@ q.batch(
 ).execute(g)
 ```
 
-Full reference: [Query builder](https://graphstore-docs.orkait.com/query-builder).
+Full reference: [Query builder](website/docs/query-builder.md).
 
 ## Benchmarks
 
@@ -160,9 +160,9 @@ Full reference: [Query builder](https://graphstore-docs.orkait.com/query-builder
 
 Query p50 46 ms / p95 76 ms. Retrieval-only, no LLM judge.
 
-**LoCoMo**, 50Q sample, MiniMax M2.7 reader. Overall F1 **0.357**. Retrieval recall: top-10 80%, top-50 96%.
+**LoCoMo**, conv-26 199Q full, jina-v5-small 1024d, MiniMax M2.7 reader. Best adapter (Bonsai NL→DSL ingest) overall token-F1 **0.476** vs 0.464 deterministic NER + 0.392 remote-LLM ingest, all on the same retrieval stack. Scoring matched byte-for-byte against snap-research/locomo `task_eval/evaluation.py` (parity test in `tests/test_locomo_scoring_parity.py`).
 
-Full methodology: [Benchmarks](https://graphstore-docs.orkait.com/benchmarks/overview).
+Full methodology: [Benchmarks](website/docs/benchmarks/overview.md).
 
 ## Scope
 
