@@ -242,6 +242,32 @@ Defaults match the measured-best LoCoMo configuration as of this release: `jina-
 
 Full guide: [Pro mode](website/docs/guides/pro-mode.md).
 
+## Docker
+
+Two images. Both expose the playground HTTP API on `:7200` and persist the database on a `/data` volume.
+
+```bash
+# CPU image (~660 MB) - fits 90% of deploys
+docker compose up -d                              # builds + starts on :7200
+
+# Pro GPU image (~6 GB, includes pre-pulled Bonsai/jina/tinybert weights)
+docker compose --profile pro up -d                # requires nvidia-container-toolkit
+docker compose --profile pro run --rm graphstore-pro graphstore pro setup   # one-time calibration
+```
+
+The entrypoint auto-generates an auth token on first boot and writes it to `/data/.auth_token` (printed to logs). Use it as `Authorization: Bearer <token>` on every `/api/*` call. To pin a fixed token set `GRAPHSTORE_AUTH_TOKEN` in the environment; to disable auth on a private network set `GRAPHSTORE_ALLOW_UNAUTH_BIND=1`.
+
+```bash
+TOKEN=$(docker exec graphstore cat /data/.auth_token)
+curl -s -X POST http://127.0.0.1:7200/api/execute \
+     -H "Authorization: Bearer $TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"query":"COUNT NODES"}'
+# {"kind":"count","data":0,"count":0,...}
+```
+
+Resource limits in `docker-compose.yml` cap each container at 8 CPUs / 16 GB RAM. Adjust via `deploy.resources.limits` per host.
+
 ## Scope
 
 - Embedded, one writer per path. For multi-tenant, wrap in your own service.

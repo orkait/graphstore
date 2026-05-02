@@ -1,0 +1,60 @@
+# Build context exclusions. Keep image builds fast and avoid copying
+# multi-GB caches / venvs / model weights into the docker daemon.
+
+.git
+.gitignore
+.github
+
+# Python virtualenvs and caches
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.tox
+.coverage
+htmlcov
+.benchmarks
+
+# Editor / OS noise
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Models / data / databases - never bake host-local state into the image
+models
+*.gguf
+*.onnx
+*.bin
+*.pkl
+*.usearch
+*.sqlite
+*.sqlite3
+*.db
+*-shm
+*-wal
+
+# Built artifacts
+dist
+build
+*.egg-info
+website/build
+website/.docusaurus
+website/node_modules
+apps/playground/node_modules
+apps/playground/dist
+benchmarks/results
+
+# Docker self-references (avoid infinite loops if someone builds in-tree)
+Dockerfile
+Dockerfile.*
+docker-compose*.yml
+.dockerignore
