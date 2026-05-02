@@ -54,17 +54,36 @@ _DEFAULT_CACHE_DIR = (
     / "graphstore"
 )
 
-# Slot value enums. Add new options here when shipping new model
-# integrations; the calibration cache keys derive directly from these.
-_EMBEDDERS = ("jina-v5-small", "jina-v5-nano", "model2vec-256d",
-              "embeddinggemma-300m", "fastembed-bge-small", "none")
-_RERANKERS = ("jina-v3", "none")
-_INGEST_MODES = ("bonsai", "deterministic")
-_BONSAI_QUANTS = ("tq1_0", "tq2_0")
-_BONSAI_SKILLS = ("lite", "full")
-_VISIONS = ("smolvlm2-2.2b", "qwen-vl-3b", "none")
-_AUDIOS = ("whisper-tiny", "whisper-base", "whisper-small", "none")
-_NERS = ("tinybert", "none")
+# Slot value sets are encoded as Literal types on ProSpec itself; msgspec
+# enforces at decode time. No separate tuple registry to keep in sync.
+#
+# Reserved keys in CalibrationEntry.extra populated by the probe runner
+# (graphstore.cli `pro setup`/`probe`). Resolver reads these to scale
+# knobs without hard-coding host-RAM thresholds:
+#
+#   "n_ctx_min" / "n_ctx_default" / "n_ctx_max"   - bonsai context window
+#                                                   measured at ram_mb_min /
+#                                                   ram_mb_at_default /
+#                                                   ram_mb_max
+#   "n_batch_at_default"                          - bonsai n_batch at the
+#                                                   default measurement
+#   "embed_batch_at_default"                      - embedder batch size at
+#                                                   the default measurement
+#   "reranker_max_at_default"                     - reranker max_length at
+#                                                   the default measurement
+#
+# Missing keys → resolver falls back to safe minimums.
+_EXTRA_N_CTX_MIN = "n_ctx_min"
+_EXTRA_N_CTX_DEFAULT = "n_ctx_default"
+_EXTRA_N_CTX_MAX = "n_ctx_max"
+_EXTRA_N_BATCH = "n_batch_at_default"
+_EXTRA_EMBED_BATCH = "embed_batch_at_default"
+_EXTRA_RERANKER_MAX = "reranker_max_at_default"
+
+_FALLBACK_N_CTX = 2048
+_FALLBACK_N_BATCH = 256
+_FALLBACK_EMBED_BATCH = 16
+_FALLBACK_RERANKER_MAX = 512
 
 
 # ---------------------------------------------------------------------
@@ -440,7 +459,9 @@ class CalibrationCache:
         target_dir = cache_dir or _DEFAULT_CACHE_DIR
         target_dir.mkdir(parents=True, exist_ok=True)
         path = target_dir / "calibration.json"
-        tmp = path.with_suffix(".json.tmp")
+        # Path.with_suffix REPLACES the suffix; appending ".tmp" via name
+        # concatenation is the unambiguous form regardless of basename.
+        tmp = path.parent / (path.name + ".tmp")
         payload = {
             "schema_version": self.schema_version,
             "graphstore_version": self.graphstore_version,
@@ -652,53 +673,52 @@ def resolve(
             calibration_age_s=_age_s(cache.measured_at),
         )
 
-    # Step 3: pick maximal knobs that still fit. Conservative bias - we
-    # do not push to the absolute upper bound when calibration only
-    # measured smaller values; only step up if the cache supports it.
+    # Step 3: pick maximal knobs that still fit. Knob values come from
+    # the calibration entry's `extra` dict (set by the probe runner) so
+    # we never hard-code "tier X needs N MB". The probe ran the actual
+    # model at concrete knobs and recorded both the knob value and the
+    # resulting RAM use; we just check which measurement still fits.
     bonsai_id = next((cid for cid in component_ids
                       if cid.startswith("ingest:bonsai-")), None)
-    n_ctx = 2048
-    bonsai_n_batch = 256
+    n_ctx = _FALLBACK_N_CTX
+    bonsai_n_batch = _FALLBACK_N_BATCH
     if bonsai_id is not None:
         e = cache.components[bonsai_id]
-        # Prefer larger n_ctx if cache has measurements; capped by RAM
-        # available after subtracting other components.
+        # ram_left = how much host RAM remains for bonsai once every
+        # other component takes its share. Compare each measured tier
+        # against this; pick the largest knob whose recorded RAM fits.
         ram_left = host.ram_available_mb - sum(
             v for k, v in ram_budget.items() if k != bonsai_id)
-        # ram_mb_max is measured peak; use it as the ceiling.
-        if e.ram_mb_max and e.ram_mb_max <= ram_left:
-            n_ctx = 8192 if host.ram_available_mb >= 14000 else 4096
-            bonsai_n_batch = 512
-        elif e.ram_mb_at_default and e.ram_mb_at_default <= ram_left:
-            n_ctx = 4096
-            bonsai_n_batch = 512
-        else:
-            n_ctx = 2048
-            bonsai_n_batch = 256
+        n_ctx_max = _maybe_int(e.extra.get(_EXTRA_N_CTX_MAX))
+        n_ctx_default = _maybe_int(e.extra.get(_EXTRA_N_CTX_DEFAULT))
+        n_ctx_min = _maybe_int(e.extra.get(_EXTRA_N_CTX_MIN))
+        n_batch_default = _maybe_int(e.extra.get(_EXTRA_N_BATCH))
+        if n_ctx_max and e.ram_mb_max and e.ram_mb_max <= ram_left:
+            n_ctx = n_ctx_max
+            bonsai_n_batch = n_batch_default or _FALLBACK_N_BATCH
+        elif n_ctx_default and e.ram_mb_at_default and e.ram_mb_at_default <= ram_left:
+            n_ctx = n_ctx_default
+            bonsai_n_batch = n_batch_default or _FALLBACK_N_BATCH
+        elif n_ctx_min:
+            n_ctx = n_ctx_min
+            bonsai_n_batch = _FALLBACK_N_BATCH
+        # else: leave fallbacks (cache extra empty, e.g. legacy probe).
 
-    # Reranker max length scales with RAM tier.
+    # Reranker max length and embedder batch read straight from the
+    # default measurement; no host-RAM ladder.
     reranker_id = next((cid for cid in component_ids
                         if cid.startswith("reranker:")), None)
     reranker_max = 0
     if reranker_id is not None:
-        if host.ram_available_mb >= 14000:
-            reranker_max = 2048
-        elif host.ram_available_mb >= 6000:
-            reranker_max = 1024
-        else:
-            reranker_max = 512
+        e = cache.components[reranker_id]
+        reranker_max = _maybe_int(e.extra.get(_EXTRA_RERANKER_MAX)) or _FALLBACK_RERANKER_MAX
 
-    # Embedder batch scales with RAM and GPU.
     embedder_id = next((cid for cid in component_ids
                         if cid.startswith("embedder:")), None)
-    embed_batch = 16
+    embed_batch = _FALLBACK_EMBED_BATCH
     if embedder_id is not None:
-        if use_gpu:
-            embed_batch = 128
-        elif host.ram_available_mb >= 14000:
-            embed_batch = 64
-        elif host.ram_available_mb >= 6000:
-            embed_batch = 32
+        e = cache.components[embedder_id]
+        embed_batch = _maybe_int(e.extra.get(_EXTRA_EMBED_BATCH)) or _FALLBACK_EMBED_BATCH
 
     # GPU layer counts: -1 if cached layered allocation kept it on GPU.
     bonsai_n_gpu_layers = -1 if (use_gpu and bonsai_id and vram_budget.get(bonsai_id, 0) > 0) else 0
@@ -773,4 +793,18 @@ def _age_s(measured_at: str) -> int | None:
         when = datetime.fromisoformat(measured_at.replace("Z", "+00:00"))
         return int((datetime.now(timezone.utc) - when).total_seconds())
     except (ValueError, TypeError):
+        return None
+
+
+def _maybe_int(value: Any) -> int | None:
+    """Best-effort int coerce. Returns None for None / non-numeric values.
+
+    Used to read scalar knob values from CalibrationEntry.extra dicts,
+    which can carry arbitrary user-supplied JSON.
+    """
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
         return None

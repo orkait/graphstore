@@ -136,6 +136,21 @@ class TestHostSnapshot:
 
 
 def _entry(cid: str, **overrides) -> CalibrationEntry:
+    """Build a calibration entry with realistic `extra` knob fields.
+
+    The resolver reads knob values (n_ctx, n_batch, embed_batch,
+    reranker_max) from `extra` because those are recorded by the probe
+    at measurement time. Tests populate them so resolver picks the
+    measured-default tier rather than the always-safe fallback.
+    """
+    extra = {
+        "n_ctx_min": 2048,
+        "n_ctx_default": 4096,
+        "n_ctx_max": 8192,
+        "n_batch_at_default": 512,
+        "embed_batch_at_default": 128,
+        "reranker_max_at_default": 2048,
+    }
     base = CalibrationEntry(
         component_id=cid,
         measured_at=datetime.now(timezone.utc).isoformat(),
@@ -147,6 +162,7 @@ def _entry(cid: str, **overrides) -> CalibrationEntry:
         vram_mb_full_offload=100,
         tps_cpu_threads={"4": 50.0, "8": 90.0},
         tps_gpu_full_offload=300.0,
+        extra=extra,
     )
     for k, v in overrides.items():
         setattr(base, k, v)
@@ -331,3 +347,48 @@ class TestResolve:
         cache.measured_at = old
         rc = resolve(ProSpec(), host=host, cache=cache, cache_dir=tmp_path)
         assert any("days old" in w for w in rc.warnings)
+
+    def test_knobs_read_from_cache_extra_not_hardcoded(self, tmp_path):
+        """Resolver must take n_ctx / n_batch / embed_batch / reranker_max
+        from the calibration entry's `extra` dict, never from hard-coded
+        host-RAM thresholds. The hard rule for pro is no assumption-based
+        sizing; everything either measured or fallback."""
+        host = self._gpu_host()
+        cache = self._full_cache(host)
+        # Override the bonsai entry's extra to non-default values; the
+        # resolver should pick them up verbatim (within the fits ladder).
+        bonsai_id = next(c for c in ProSpec().component_ids()
+                         if c.startswith("ingest:bonsai-"))
+        e = cache.components[bonsai_id]
+        e.extra = dict(e.extra)
+        e.extra["n_ctx_max"] = 16384
+        e.extra["n_batch_at_default"] = 768
+        cache.components[bonsai_id] = e
+        # Embedder override
+        emb_id = "embedder:jina-v5-small"
+        cache.components[emb_id].extra = {"embed_batch_at_default": 64}
+        # Reranker override
+        rr_id = "reranker:jina-v3"
+        cache.components[rr_id].extra = {"reranker_max_at_default": 1500}
+
+        rc = resolve(ProSpec(), host=host, cache=cache, cache_dir=tmp_path)
+        assert rc.fits is True
+        assert rc.n_ctx == 16384
+        assert rc.bonsai_n_batch == 768
+        assert rc.embed_batch == 64
+        assert rc.reranker_max_len == 1500
+
+    def test_empty_extra_falls_back_safely(self, tmp_path):
+        """When cache has no extra knobs (e.g. legacy probe), resolver
+        uses safe minimums - never explodes, never picks unmeasured
+        large values."""
+        host = self._gpu_host()
+        cache = self._full_cache(host)
+        for cid in cache.components:
+            cache.components[cid].extra = {}
+        rc = resolve(ProSpec(), host=host, cache=cache, cache_dir=tmp_path)
+        assert rc.fits is True
+        assert rc.n_ctx == 2048      # _FALLBACK_N_CTX
+        assert rc.bonsai_n_batch == 256  # _FALLBACK_N_BATCH
+        assert rc.embed_batch == 16
+        assert rc.reranker_max_len == 512
