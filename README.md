@@ -16,7 +16,7 @@
 
 An embedded memory database for AI agents. Facts get written with confidence scores, expire, get contradicted, decay by recency. Retrieval fuses vector similarity, BM25, graph structure, and recency in one call. Everything goes through a typed DSL. Runs in-process, persists to SQLite.
 
-Status: v0.5.0, alpha.
+Status: v0.6.0, alpha.
 
 ## Install
 
@@ -32,6 +32,7 @@ pip install 'graphstore[vision]'       # local VLM for images + scanned PDFs
 pip install 'graphstore[audio]'        # faster-whisper speech-to-text
 pip install 'graphstore[playground]'   # FastAPI web UI
 pip install 'graphstore[gpu]'          # onnxruntime-gpu, Linux x86_64, CUDA 12
+pip install 'graphstore[pro]'          # one-shot agentic memory bundle (see Pro mode below)
 ```
 
 Full extras matrix: [Installation](website/docs/installation.md).
@@ -214,7 +215,32 @@ GraphStore(path="./brain", gpu_layers=-1, reranker_gpu_layers=-1)
 BonsaiIngestor(model_path=..., n_gpu_layers=-1)
 ```
 
-`profile="pro"` for one-line auto-detection + sized knobs is in the pipeline; v0.5 ships `gpu.setup()` as the explicit entry point. See `src/graphstore/pro.py` for the WIP slotted spec + calibration cache.
+## Pro mode
+
+`pip install 'graphstore[pro]'` bundles ingest + vision + audio + embedders-extra + gpu plus huggingface-hub / tokenizers / onnxruntime. Pair it with a one-time calibration to get spec-driven validation and a calibrated Bonsai ingestor without writing the device-detection / sizing / fallback glue yourself.
+
+```bash
+pip install 'graphstore[pro]'
+graphstore pro setup        # download every component, probe each on this host
+graphstore pro status       # inspect host + spec + resolved knobs
+```
+
+```python
+from graphstore import GraphStore
+
+gs = GraphStore(path="./brain", profile="pro")
+
+# Resolver caught every shortfall up-front (extras missing, calibration
+# stale, RAM/VRAM short). If we got here, the spec runs.
+print(gs.pro_resolved.n_ctx, gs.pro_resolved.bonsai_n_gpu_layers)
+
+ing = gs.create_bonsai()                       # n_ctx / n_batch / n_gpu_layers
+ing.ingest("Maria joined OpenAI.", msg_id="m1")  # all wired from calibration
+```
+
+Defaults match the measured-best LoCoMo configuration as of this release: `jina-v5-small` embedder, `jina-v3` reranker, `bonsai-tq1_0-lite` ingest, `tinybert` NER. Customize via a `ProSpec(...)` instance. Strict by default: missing extras / missing calibration / unfit host raise `ProExtraNotInstalled` / `ProCalibrationMissing` / `ProUnsupportedHostError`. Pass `pro_strict=False` to log + continue. Linux x86_64 + NVIDIA CUDA 12 only in v1.
+
+Full guide: [Pro mode](website/docs/guides/pro-mode.md).
 
 ## Scope
 

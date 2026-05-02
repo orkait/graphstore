@@ -99,7 +99,25 @@ class GraphStore:
                  initial_capacity=_UNSET,
                  reader=None,
                  readers=None,
+                 profile: str | None = None,
+                 pro_spec=None,
+                 pro_strict: bool = True,
+                 pro_cache_dir: str | None = None,
                  ):
+        # Profile resolution runs FIRST, before any config layer, so its
+        # validation can short-circuit the constructor. We re-validate
+        # inside _resolve_pro_profile and stash the resolved config on
+        # self._pro_resolved for later callers (gs.create_bonsai, etc.).
+        self._pro_spec = None
+        self._pro_resolved = None
+        self._pro_cache_dir = Path(pro_cache_dir) if pro_cache_dir else None
+        if profile == "pro":
+            self._resolve_pro_profile(pro_spec, pro_strict)
+        elif profile is not None:
+            raise ValueError(
+                f"unknown profile {profile!r}; supported values: 'pro' or None"
+            )
+
         # Load config: explicit object > explicit path > env var > db dir > defaults
         if config is not None:
             self._config = config
@@ -347,6 +365,165 @@ class GraphStore:
             self._cron = CronScheduler(self._conn, self.submit_background)
             self._cron.start()
             self._sys_executor._cron = self._cron
+
+    # --------------------------------------------------------------
+    # profile="pro" support
+    # --------------------------------------------------------------
+
+    def _resolve_pro_profile(self, pro_spec, pro_strict: bool) -> None:
+        """Validate the pro spec against the host before any other init.
+
+        Raises ``ProExtraNotInstalled`` / ``ProUnsupportedHostError`` /
+        ``ProCalibrationMissing`` under ``pro_strict=True``; logs a
+        warning and continues otherwise. Result is stashed on
+        ``self._pro_spec`` and ``self._pro_resolved`` so downstream
+        helpers (``create_bonsai``, ``pro_resolved`` property) can
+        consume it.
+        """
+        from graphstore.pro import (
+            HostSnapshot, ProSpec, check_extras_installed, resolve,
+            ProUnsupportedHostError, ProCalibrationMissing,
+        )
+        spec = pro_spec or ProSpec()
+        if not isinstance(spec, ProSpec):
+            raise TypeError(
+                f"pro_spec must be a graphstore.pro.ProSpec instance, "
+                f"got {type(spec).__name__}"
+            )
+        host = HostSnapshot.capture(cache_dir=self._pro_cache_dir)
+        try:
+            check_extras_installed(spec, host)
+        except Exception as e:
+            if pro_strict:
+                raise
+            logger.warning(
+                "graphstore profile=pro: extras check failed (%s); continuing in degraded mode",
+                e,
+            )
+        resolved = resolve(spec, host, cache_dir=self._pro_cache_dir)
+        self._pro_spec = spec
+        self._pro_resolved = resolved
+        if not resolved.fits:
+            shortfall_msg = "; ".join(resolved.shortfalls) or "spec does not fit host"
+            if pro_strict:
+                if resolved.calibration_source == "missing":
+                    from graphstore.pro import CalibrationCache
+                    cache = CalibrationCache.load(
+                        host.host_signature(), cache_dir=self._pro_cache_dir,
+                    )
+                    missing = [
+                        cid for cid in spec.component_ids()
+                        if cid not in cache.components
+                    ]
+                    raise ProCalibrationMissing(
+                        shortfall_msg, missing_components=missing,
+                    )
+                raise ProUnsupportedHostError(shortfall_msg, resolved=resolved)
+            logger.warning(
+                "graphstore profile=pro: spec does not fit host: %s. "
+                "Suggestions: %s",
+                shortfall_msg,
+                "; ".join(resolved.suggestions) or "(none)",
+            )
+
+    @property
+    def pro_resolved(self):
+        """ResolvedConfig from ``profile='pro'`` resolution, or None."""
+        return self._pro_resolved
+
+    @property
+    def pro_spec(self):
+        """The ProSpec the GraphStore was instantiated with, or None."""
+        return self._pro_spec
+
+    def create_bonsai(self, **overrides):
+        """Build a calibrated BonsaiIngestor from the resolved pro config.
+
+        Requires ``profile='pro'`` to have been passed at construction,
+        and the spec must use ``ingest_mode='bonsai'``. Reads n_ctx /
+        n_batch / n_gpu_layers from the live calibration cache so the
+        ingestor matches what ``graphstore pro probe`` last measured.
+
+        Optional ``**overrides`` are passed through to
+        ``BonsaiIngestor.__init__`` and win over the resolved values -
+        useful when callers want a different ``temperature`` or
+        ``max_output_tokens`` without losing the calibrated knobs.
+
+        Raises ``RuntimeError`` if pro mode wasn't requested, the spec
+        excludes bonsai, or the GGUF can't be located. The latter is
+        usually fixed by ``graphstore pro setup``.
+        """
+        if self._pro_spec is None or self._pro_resolved is None:
+            raise RuntimeError(
+                "create_bonsai() requires GraphStore(profile='pro'); "
+                "either pass profile='pro' or instantiate BonsaiIngestor directly"
+            )
+        if self._pro_spec.ingest_mode != "bonsai":
+            raise RuntimeError(
+                f"pro spec ingest_mode={self._pro_spec.ingest_mode!r}; "
+                "create_bonsai() requires ingest_mode='bonsai'"
+            )
+        if not self._pro_resolved.fits:
+            raise RuntimeError(
+                "pro spec does not fit host; create_bonsai() refuses to "
+                "build an ingestor that would crash. shortfalls: "
+                + "; ".join(self._pro_resolved.shortfalls)
+            )
+        from graphstore.pro import _DEFAULT_CACHE_DIR  # type: ignore[attr-defined]
+        from graphstore.bonsai_ingestor import (
+            BonsaiIngestor,
+            _DEFAULT_LITE_PROMPT_PATH, _DEFAULT_PROMPT_PATH,
+        )
+        gguf_path = self._locate_bonsai_gguf(self._pro_spec.bonsai_quant)
+        skill_path = (
+            _DEFAULT_LITE_PROMPT_PATH if self._pro_spec.bonsai_skill == "lite"
+            else _DEFAULT_PROMPT_PATH
+        )
+        cfg = self._config
+        ner_dir = (
+            cfg.dsl.entity_model_dir if self._pro_spec.ner == "tinybert" else None
+        )
+        kwargs = dict(
+            model_path=str(gguf_path),
+            gs=self,
+            skill_path=str(skill_path),
+            n_ctx=self._pro_resolved.n_ctx or None,
+            n_batch=self._pro_resolved.bonsai_n_batch or 512,
+            n_gpu_layers=self._pro_resolved.bonsai_n_gpu_layers,
+            ner_model_dir=ner_dir,
+        )
+        kwargs.update(overrides)
+        # Drop None values so BonsaiIngestor gets its own defaults.
+        kwargs = {k: v for k, v in kwargs.items() if v is not None or k == "gs"}
+        return BonsaiIngestor(**kwargs)
+
+    def _locate_bonsai_gguf(self, quant: str) -> Path:
+        """Find the Bonsai GGUF in the HuggingFace cache.
+
+        Mirrors the discovery in ``pro_probe.BonsaiProbe.measure`` so an
+        ingestor built via ``create_bonsai()`` always points at the same
+        weight file the calibration probe measured.
+        """
+        try:
+            from huggingface_hub import scan_cache_dir
+        except ImportError as e:
+            raise RuntimeError(
+                "huggingface-hub not installed; pip install 'graphstore[pro]'"
+            ) from e
+        marker = f"-{quant.upper()}"
+        for repo in scan_cache_dir().repos:
+            if marker not in str(repo.repo_id):
+                continue
+            for rev in repo.revisions:
+                for f in rev.files:
+                    if f.file_name.endswith(".gguf"):
+                        path = Path(f.file_path)
+                        if path.exists():
+                            return path
+        raise RuntimeError(
+            f"Bonsai GGUF for quant={quant!r} not found in HF cache. "
+            "Run `graphstore pro setup` to download required models."
+        )
 
     def _build_embedder(self, cfg, embedder_arg):
         """Resolve the embedder instance from kwarg + cfg. Explicit instance

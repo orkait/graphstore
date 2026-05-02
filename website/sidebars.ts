@@ -30,6 +30,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'guides/first-memory',
         'guides/ingestion',
+        'guides/pro-mode',
       ],
     },
     {
