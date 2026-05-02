@@ -271,3 +271,35 @@ class TestResolverIsPureRead:
         resolve_mention(gs, "Alice", "context here")
         after = gs.execute("COUNT NODES").data
         assert before == after
+
+
+class TestResolverIgnoresNERAutoEntities:
+    """The deterministic NER pipeline auto-creates ``ent:{slug}`` nodes
+    with kind=entity whenever a CREATE NODE...DOCUMENT runs. Resolver
+    candidate set must skip those (id prefix != ``entity:``) so they
+    don't pollute name matching and force false-splits."""
+
+    def test_ner_style_node_excluded_from_candidates(self, gs):
+        # Simulate what the NER pipeline writes: ent:* id, kind=entity,
+        # name field set but no canonical_name.
+        gs.execute(
+            'CREATE NODE "ent:alice" kind = "entity" name = "alice"'
+        )
+        # Existing canonical entity from a real mention/resolver pass.
+        existing_id = "entity:c4f8a3"
+        _create_entity(gs, existing_id, "Alice", context="works at OpenAI")
+
+        result = resolve_mention(gs, surface_name="Alice", context="ctx")
+        assert result.entity_id == existing_id
+        assert result.is_new_entity is False
+        # candidates_seen counts ONLY canonical entities, not the NER node.
+        assert result.candidates_seen == 1
+
+    def test_only_ner_nodes_present_treated_as_no_match(self, gs):
+        gs.execute(
+            'CREATE NODE "ent:alice" kind = "entity" name = "alice"'
+        )
+        result = resolve_mention(gs, surface_name="Alice", context="ctx")
+        # No canonical entity exists; resolver mints fresh.
+        assert result.is_new_entity is True
+        assert result.candidates_seen == 0
