@@ -70,17 +70,27 @@ def _f1_score(prediction: str, gold: str) -> float:
 
 
 def compute_f1(prediction: str, gold: str, category: int | None = None) -> float:
-    """Compute F1 matching official LoCoMo protocol.
+    """Compute F1 matching snap-research/locomo task_eval/evaluation.py verbatim.
 
-    - Categories 2,3,4 (single-hop, temporal, open-domain): direct F1
-    - Category 1 (multi-hop): split comma-separated sub-answers, partial F1 each
-    - Category 5 (adversarial): check for "no information available" / "not mentioned"
+    Category mapping (from official evaluation.py):
+      - 1 (multi-hop):   split comma-separated sub-answers, np.mean of per-gold
+                         max over pred sub-F1 scores
+      - 2 (single-hop):  direct token F1
+      - 3 (temporal):    gold.split(';')[0].strip() then direct token F1
+      - 4 (open-domain): direct token F1
+      - 5 (adversarial): 1.0 if prediction contains abstention phrase
+                         ("no information available" or "not mentioned")
     """
     if category == 5:
         low = prediction.lower()
         if 'no information available' in low or 'not mentioned' in low:
             return 1.0
         return 0.0
+
+    # Temporal: gold may carry multiple alternates separated by ';'; take first
+    # per snap-research evaluation.py line 203-204.
+    if category == 3:
+        gold = gold.split(';')[0].strip()
 
     if category == 1:
         import numpy as np

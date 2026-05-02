@@ -920,9 +920,14 @@ def _synthesize_dsl(
     role_esc = _dsl_escape(role)
     msg_esc = _dsl_escape(msg_id)
 
+    # Store the text in both `content` (for baseline retrieval adapters that
+    # scan the node column) and `DOCUMENT` (for the vector + BM25 pipeline).
+    # The two-liner duplication costs ~1 string interning but makes Bonsai-
+    # ingested messages directly comparable to the deterministic NER adapter.
     out.append(
         f'CREATE NODE "{msg_esc}" kind = "message" '
         f'session = "{session_esc}" role = "{role_esc}" '
+        f'content = "{text_esc}" '
         f'DOCUMENT "{text_esc}"'
     )
 
@@ -1042,6 +1047,7 @@ class BonsaiIngestor:
         n_ctx: int | None = None,
         n_batch: int = 512,
         n_threads: int | None = None,
+        n_gpu_layers: int = 0,
         chat_format: str = "qwen",
         max_output_tokens: int = 256,
         temperature: float = 0.0,
@@ -1067,6 +1073,10 @@ class BonsaiIngestor:
         # kwarg for GPU callers where bigger batches can help.
         self._n_batch = n_batch
         self._flash_attn = flash_attn
+        # 0 = CPU only (default). -1 = offload all layers to GPU. Positive
+        # int = offload that many layers. Requires a CUDA/Metal/Vulkan build
+        # of llama-cpp-python; the CPU-only wheel silently ignores it.
+        self._n_gpu_layers = n_gpu_layers
 
         self._skill_text = ""
         self._skill_fingerprint = ""
@@ -1223,6 +1233,7 @@ class BonsaiIngestor:
             "model_path": str(self._model_path),
             "n_ctx": self._n_ctx,
             "n_batch": self._n_batch,
+            "n_gpu_layers": self._n_gpu_layers,
             "chat_format": self._chat_format,
             "flash_attn": self._flash_attn,
             "verbose": False,
@@ -1230,9 +1241,11 @@ class BonsaiIngestor:
         if self._n_threads is not None:
             kwargs["n_threads"] = self._n_threads
         _log.info(
-            "bonsai: loading %s n_ctx=%d n_batch=%d flash_attn=%s threads=%s chat_format=%s",
+            "bonsai: loading %s n_ctx=%d n_batch=%d gpu_layers=%d flash_attn=%s "
+            "threads=%s chat_format=%s",
             self._model_path.name, self._n_ctx, self._n_batch,
-            self._flash_attn, self._n_threads, self._chat_format,
+            self._n_gpu_layers, self._flash_attn, self._n_threads,
+            self._chat_format,
         )
         self._llm = Llama(**kwargs)
         self._try_load_kv_cache(self._llm)

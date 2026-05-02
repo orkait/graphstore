@@ -26,9 +26,14 @@ from ..transport.llm_client import (
     compute_f1, compute_llm_judge, health_check,
 )
 
-# Official LoCoMo category IDs
+# Official LoCoMo category IDs per snap-research/locomo task_eval/evaluation.py:
+#   cat 1 = multi-hop (comma-split sub-answer F1)
+#   cat 2 = single-hop (direct F1)
+#   cat 3 = temporal (direct F1 after gold.split(';')[0])
+#   cat 4 = open-domain (direct F1)
+#   cat 5 = adversarial (abstention: "no information available"/"not mentioned")
 _CAT_TO_ID = {
-    "single-hop": 1, "multi-hop": 2, "temporal": 3,
+    "multi-hop": 1, "single-hop": 2, "temporal": 3,
     "open-domain": 4, "adversarial": 5,
 }
 
@@ -305,13 +310,20 @@ def main():
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--embedder", default="model2vec")
     parser.add_argument("--adapter", default="graphstore",
-                        choices=["graphstore", "skill"],
+                        choices=["graphstore", "skill", "bonsai"],
                         help="graphstore = deterministic NER+CREATE; "
-                             "skill = LLM-driven DSL emission via graphstore-dsl skill")
+                             "skill = LLM-driven DSL emission via graphstore-dsl skill; "
+                             "bonsai = local Ternary-Bonsai 4B TQ1_0 for ingest + recall")
     parser.add_argument("--skill-dump-dir", default=None,
                         help="Only used with --adapter skill: dump raw LLM output per session")
     parser.add_argument("--no-carry-facts", action="store_true",
                         help="Only with --adapter skill: disable cross-session fact memory")
+    parser.add_argument("--bonsai-gpu-layers", type=int, default=0,
+                        help="Only with --adapter bonsai: -1 offloads all layers, 0 CPU only")
+    parser.add_argument("--bonsai-prompt", default=None,
+                        help="Only with --adapter bonsai: override prompt file (default: lite)")
+    parser.add_argument("--bonsai-kv-cache", default=None,
+                        help="Only with --adapter bonsai: persistent KV cache file")
     parser.add_argument("--use-raw-turns", action="store_true",
                         help="Feed raw dialogue turns (~20/session) instead of "
                              "author-distilled observations (~9/session). Required "
@@ -350,6 +362,16 @@ def main():
         if args.no_carry_facts:
             config["skill_carry_facts"] = False
         adapter = GraphStoreSkillAdapter(config=config)
+    elif args.adapter == "bonsai":
+        from ..adapters.graphstore_bonsai import GraphStoreBonsaiAdapter
+        config["bonsai_n_gpu_layers"] = args.bonsai_gpu_layers
+        if args.bonsai_prompt:
+            config["bonsai_prompt_path"] = args.bonsai_prompt
+        if args.bonsai_kv_cache:
+            config["bonsai_kv_cache_path"] = args.bonsai_kv_cache
+        # Conversations are long (hundreds of turns); need room for KNOWN FACTS block
+        config["bonsai_n_ctx"] = 4096
+        adapter = GraphStoreBonsaiAdapter(config=config)
     else:
         from ..adapters.graphstore_ import GraphStoreAdapter
         adapter = GraphStoreAdapter(config=config)
