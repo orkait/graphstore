@@ -207,7 +207,13 @@ def load_locomo(
     if max_conversations is not None:
         raw = raw[:max_conversations]
 
-    cat_names = {1: "single-hop", 2: "multi-hop", 3: "temporal", 4: "open-domain", 5: "adversarial"}
+    # Category ID -> name mapping per snap-research/locomo task_eval/evaluation.py:
+    #   cat 1 = multi-hop (gets comma-split sub-answer F1; see eval line 213)
+    #   cat 2 = single-hop (direct F1; see eval line 210)
+    #   cat 3 = temporal (direct F1 + gold.split(';')[0]; see eval line 203-204)
+    #   cat 4 = open-domain (direct F1)
+    #   cat 5 = adversarial (abstention check)
+    cat_names = {1: "multi-hop", 2: "single-hop", 3: "temporal", 4: "open-domain", 5: "adversarial"}
 
     records: list[BenchmarkRecord] = []
     for conv in raw:
