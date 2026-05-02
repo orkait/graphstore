@@ -134,17 +134,17 @@ def list_ingestors() -> list[dict]:
     try:
         import docling as _  # noqa
         docling_available = True
-    except ImportError:
+    except Exception:
         docling_available = False
     try:
         import llama_cpp.server as _  # noqa
         vision_available = True
-    except ImportError:
+    except Exception:
         vision_available = False
     try:
         import faster_whisper as _  # noqa
         stt_available = True
-    except ImportError:
+    except Exception:
         stt_available = False
 
     return [
