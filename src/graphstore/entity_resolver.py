@@ -11,11 +11,33 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from typing import Any
 
 _log = logging.getLogger(__name__)
+
+# Process-global lock around the resolve -> caller-materializes window.
+# Resolver itself is read-only, but its return value drives a CREATE NODE
+# in the caller. Without serialization, two threads ingesting the same
+# name in parallel both observe "no candidates", both mint fresh entity
+# ids, and both succeed in writing - producing N entities where 1 was
+# intended.
+_RESOLVER_LOCK = threading.Lock()
+
+# In-memory cache: normalize_name -> entity_id, populated by
+# resolve_and_create_entity when it confidently links or creates.
+# Bypasses any read-after-write visibility lag between the CREATE NODE
+# we just wrote and the NODES WHERE query the next call would issue.
+# Invalidated only on explicit reset_for_tests().
+_NAME_TO_ENTITY_CACHE: dict[str, str] = {}
+
+
+def reset_resolver_cache_for_tests() -> None:
+    """Test-only: drop the name -> entity_id cache."""
+    _NAME_TO_ENTITY_CACHE.clear()
 
 DEFAULT_HIGH_THRESHOLD = 0.85
 
@@ -41,8 +63,12 @@ _NAME_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
 
 
 def normalize_name(name: str) -> str:
-    """Case-fold + strip non-alphanumerics. "Alice S." == "alice s"."""
-    return _NAME_NORMALIZE_RE.sub("", name.lower())
+    """Case-fold + strip non-alphanumerics. NFKD-decompose first so the
+    same letter under different Unicode encodings (NFC "Müller" vs NFD
+    "Müller") collapses to the same key - otherwise text from
+    different sources splits the same canonical name."""
+    decomposed = unicodedata.normalize("NFKD", name).lower()
+    return _NAME_NORMALIZE_RE.sub("", decomposed)
 
 
 def make_entity_id(prefix: str = "entity") -> str:
@@ -209,3 +235,55 @@ def resolve_mention(
 def make_mention_id(msg_id: str, slug: str, occurrence: int = 0) -> str:
     """Idempotent location-keyed id: ``mention:{msg}:{slug}:{n}``."""
     return f"mention:{msg_id}:{slug}:{occurrence}"
+
+
+def resolve_and_create_entity(
+    gs: Any,
+    surface_name: str,
+    context: str,
+    threshold_high: float = DEFAULT_HIGH_THRESHOLD,
+) -> tuple[str, float, bool]:
+    """Atomic resolve + (conditional) CREATE NODE under a process lock.
+
+    Returns ``(entity_id, confidence, was_new)``. When ``was_new`` is
+    True the entity node has already been written to ``gs``; the caller
+    only emits the mention + refers_to edge.
+
+    The lock closes the race in which two threads ingesting the same
+    name observe zero candidates concurrently and both mint a fresh
+    entity. With this wrapper the second thread sees the first's
+    entity inside its own resolve() call.
+    """
+    with _RESOLVER_LOCK:
+        # Cache hit short-circuits the whole pipeline. Two threads
+        # racing on the same name: first one resolves + writes +
+        # populates cache; second one reads cache + returns existing
+        # id without ever querying the graph. Closes the read-after-
+        # write visibility gap that caused 2-4 duplicate entities to
+        # leak in the 8-thread stress test.
+        nkey = normalize_name(surface_name)
+        cached = _NAME_TO_ENTITY_CACHE.get(nkey) if nkey else None
+        if cached is not None:
+            return cached, 1.0, False
+
+        result = resolve_mention(gs, surface_name, context, threshold_high)
+        if result.is_new_entity:
+            esc_id = result.entity_id.replace("\\", "\\\\").replace('"', '\\"')
+            esc_name = surface_name.replace("\\", "\\\\").replace('"', '\\"')
+            esc_ctx = context.replace("\\", "\\\\").replace('"', '\\"')
+            try:
+                gs.execute(
+                    f'CREATE NODE "{esc_id}" kind = "{KIND_ENTITY}" '
+                    f'canonical_name = "{esc_name}" mention_count = 0 '
+                    f'context = "{esc_ctx}" '
+                    f'DOCUMENT "{esc_name} | {esc_ctx}"'
+                )
+            except Exception as e:
+                _log.warning(
+                    "resolve_and_create_entity: CREATE NODE %s failed (%s); "
+                    "caller may receive duplicate-key error",
+                    result.entity_id, e,
+                )
+        if nkey:
+            _NAME_TO_ENTITY_CACHE[nkey] = result.entity_id
+        return result.entity_id, result.confidence, result.is_new_entity

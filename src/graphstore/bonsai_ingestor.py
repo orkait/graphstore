@@ -938,7 +938,8 @@ def _synthesize_dsl(
     when None (dry-run, tests) every mention mints a fresh entity."""
     from graphstore.entity_resolver import (
         EDGE_REFERS_TO, KIND_ENTITY, KIND_MENTION,
-        make_entity_id, make_mention_id, resolve_mention,
+        make_entity_id, make_mention_id,
+        resolve_and_create_entity, resolve_mention,
     )
 
     out: list[str] = []
@@ -970,11 +971,16 @@ def _synthesize_dsl(
         name_esc = _dsl_escape(name)
 
         if gs is not None:
+            # Atomic resolve+create under process lock - protects
+            # against the race where two concurrent ingests of the
+            # same name both observe zero candidates and both mint
+            # fresh entities. With the wrapper, by the time the
+            # second caller's resolve() runs, the first caller's
+            # entity is already in the store.
             try:
-                resolved = resolve_mention(gs, surface_name=name, context=text)
-                entity_id = resolved.entity_id
-                is_new = resolved.is_new_entity
-                confidence = resolved.confidence
+                entity_id, confidence, is_new = resolve_and_create_entity(
+                    gs, surface_name=name, context=text,
+                )
             except Exception as e:  # pragma: no cover
                 _log.warning("entity_resolver failed for %r: %s", name, e)
                 entity_id = make_entity_id()
@@ -995,7 +1001,11 @@ def _synthesize_dsl(
             f'DOCUMENT "{name_esc} | {text_esc}"'
         )
 
-        if is_new:
+        # When gs is None (dry-run / tests) the entity hasn't been
+        # written yet and we still need to emit a CREATE NODE for it.
+        # When gs is real, resolve_and_create_entity already wrote it
+        # if needed; we just bump mention_count.
+        if gs is None and is_new:
             out.append(
                 f'CREATE NODE "{entity_esc}" kind = "{KIND_ENTITY}" '
                 f'canonical_name = "{name_esc}" mention_count = 1 '
