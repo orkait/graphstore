@@ -101,7 +101,13 @@ class DslConfig(msgspec.Struct, frozen=True):
     reranker_model_dir: str | None = "./models/jina-reranker-v3/jina-reranker-v3-Q8_0.gguf"
     reranker_projector_path: str | None = "./models/jina-reranker-v3/projector.safetensors"
     reranker_max_length: int = 2048
-    reranker_gpu_layers: int = -1
+    # CPU-only by default. Set to -1 (offload all layers) or N (offload N
+    # layers) when a CUDA-built llama-cpp-python wheel is installed AND the
+    # caller wants GPU offload. Matches vector.gpu_layers and BonsaiIngestor's
+    # n_gpu_layers defaults so the install is portable and never silently
+    # grabs a GPU. graphstore.gpu.setup() / GraphStore(profile="pro") flip
+    # this on automatically when GPU bind succeeds.
+    reranker_gpu_layers: int = 0
     cache_gc_threshold: int = 200
 
 

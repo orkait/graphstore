@@ -41,24 +41,27 @@ _WHEEL_LAYOUT: dict[str, str] = {
 }
 
 
-def _apparmor_userns_blocks_cuda() -> bool:
-    """True if Ubuntu 24.04+ apparmor userns restriction is active.
+def _userns_restrict_active() -> tuple[bool, str | None]:
+    """Probe `/proc/sys/kernel/apparmor_restrict_unprivileged_userns`.
 
-    When set, cudaGetDeviceCount() fails with error 304 from any
-    venv-isolated process - the exact reason every first-time GPU run
-    on a fresh 24.04 box mysteriously breaks.
+    Returns (active, raw_value). The sysctl exists on kernels that ship
+    apparmor userns hardening (introduced in Linux 6.7, default-on in some
+    distro builds). When set to 1, cudaGetDeviceCount() returns error 304
+    from any venv-isolated process. We do not assume which distro / version
+    the user runs - we only report what the sysctl says.
 
-    Inside a Docker container (detected via /.dockerenv), skip the check:
-    GPU access comes through CDI device injection, not the userns path.
+    Inside a Docker container (detected via /.dockerenv), skip: GPU access
+    comes through CDI device injection, not the userns path.
     """
     if os.path.exists("/.dockerenv"):
-        return False
+        return False, None
     path = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
     try:
         with open(path) as f:
-            return f.read().strip() == "1"
+            raw = f.read().strip()
     except (FileNotFoundError, PermissionError, OSError):
-        return False
+        return False, None
+    return raw == "1", raw
 
 
 def _system_cuda_libs_present() -> bool:
@@ -92,9 +95,11 @@ def _preload_cu12_libs() -> None:
 
     Strategy:
         1. Non-Linux: no-op. cu12 wheels are Linux x86_64 only.
-        2. Ubuntu 24.04 apparmor userns restriction active: raise a
-           targeted error with the sysctl fix - otherwise the user
+        2. Kernel apparmor userns restriction active (sysctl
+           kernel.apparmor_restrict_unprivileged_userns=1): raise a
+           targeted error pointing at the sysctl - otherwise the user
            would hit an opaque "CUDA failure 304" at session creation.
+           No assumption on distro / version: we only check the sysctl.
         3. System already has the libs in a standard search path:
            skip preload. ORT's own dlopen will find them.
         4. nvidia-*-cu12 pip wheels installed alongside onnxruntime-gpu:
@@ -110,16 +115,32 @@ def _preload_cu12_libs() -> None:
     if _CU12_PRELOADED or sys.platform != "linux":
         return
 
-    if _apparmor_userns_blocks_cuda():
+    userns_blocked, userns_raw = _userns_restrict_active()
+    if userns_blocked:
+        # Report only what was observed. No claims about which distro,
+        # version, or release ships this kernel sysctl - it varies. The
+        # observation is precise; the fix is well-known and documented.
         raise RuntimeError(
-            "CUDA cannot initialize: Ubuntu 24.04+ apparmor is blocking\n"
-            "unprivileged user namespaces (error 304 from cudaGetDeviceCount).\n"
+            "CUDA initialization is likely blocked on this host:\n"
+            "  /proc/sys/kernel/apparmor_restrict_unprivileged_userns "
+            f"= {userns_raw}\n"
+            "  This sysctl restricts unprivileged user namespaces, which the\n"
+            "  CUDA runtime requires to initialize from a venv-isolated\n"
+            "  process. cudaGetDeviceCount() will fail with error 304.\n"
             "\n"
-            "Temporary fix for this session:\n"
-            "    sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0\n"
+            "Verify the symptom (returns 0 = blocked, 1 = allowed):\n"
+            "    cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns\n"
             "\n"
-            "Restore the safeguard after the run with:\n"
-            "    sudo sysctl kernel.apparmor_restrict_unprivileged_userns=1"
+            "Workarounds (root, distro-dependent):\n"
+            "  - Allow temporarily for this boot:\n"
+            "      sudo sysctl kernel.apparmor_restrict_unprivileged_userns=0\n"
+            "  - Or persist via /etc/sysctl.d/, or run inside a container.\n"
+            "  - Restore later:\n"
+            "      sudo sysctl kernel.apparmor_restrict_unprivileged_userns=1\n"
+            "\n"
+            "If the symptom does not match what you observe, please report\n"
+            "with `nvidia-smi` output + this message at "
+            "https://github.com/orkait/graphstore/issues."
         )
 
     if _system_cuda_libs_present():
