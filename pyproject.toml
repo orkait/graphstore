@@ -111,6 +111,22 @@ vision = [
     "llama-cpp-python[server]>=0.3",
     "huggingface-hub>=0.24",
 ]
+# Pro: aggregate of every extra needed to drive the slotted ProSpec
+# (jina-v5-small embedder + jina-v3 reranker + Bonsai NL->DSL ingest +
+# vision/audio sidecars + GPU). Adds NO new pip deps; this is a wrapper
+# so users can `pip install 'graphstore[pro]'` instead of stringing
+# extras together. See `graphstore pro check / setup / probe / status`
+# and src/graphstore/pro.py.
+pro = [
+    "graphstore[ingest]",
+    "graphstore[vision]",
+    "graphstore[audio]",
+    "graphstore[embedders-extra]",
+    "graphstore[gpu]",
+    "tokenizers>=0.15",
+    "onnxruntime>=1.17",
+    "huggingface-hub>=0.24",
+]
 [tool.setuptools.package-dir]
 "" = "src"
 
