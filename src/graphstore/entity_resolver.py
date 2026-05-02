@@ -49,9 +49,19 @@ def make_entity_id(prefix: str = "entity") -> str:
     return f"{prefix}:{uuid.uuid4().hex[:12]}"
 
 
+_CANONICAL_ENTITY_PREFIX = "entity:"
+
+
 def _candidates_by_name(gs: Any, surface_name: str) -> list[dict]:
-    """Pre-filter entity candidates by exact normalized-name match,
-    avoiding the embedder cost when the name is unique."""
+    """Pre-filter entity candidates by exact normalized-name match.
+
+    Restricted to nodes whose id starts with ``entity:`` (this resolver's
+    canonical-form id) so the deterministic NER pipeline's ``ent:slug``
+    auto-extracted entity nodes do not pollute the candidate set.
+    Without this filter, every ingest with NER enabled creates a parallel
+    same-name entity that triggers the disambiguation branch and forces
+    false-splits.
+    """
     target = normalize_name(surface_name)
     if not target:
         return []
@@ -66,6 +76,9 @@ def _candidates_by_name(gs: Any, surface_name: str) -> list[dict]:
     out: list[dict] = []
     for n in nodes:
         if not isinstance(n, dict):
+            continue
+        node_id = n.get("id", "")
+        if not isinstance(node_id, str) or not node_id.startswith(_CANONICAL_ENTITY_PREFIX):
             continue
         cn = n.get("canonical_name") or n.get("name") or ""
         if normalize_name(cn) == target:
