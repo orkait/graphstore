@@ -8,6 +8,7 @@ __version__ = "0.5.0"
 from .core import compute_profile as _compute_profile_init  # noqa: F401
 
 from . import gpu  # noqa: F401  - expose graphstore.gpu.{setup, is_ready, status}
+from . import pro  # noqa: F401  - expose graphstore.pro.{ProSpec, resolve, ...}
 from .store import GraphStore
 from .core.store import CoreStore
 from .core.schema import SchemaRegistry
