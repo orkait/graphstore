@@ -26,6 +26,7 @@ import ctypes
 import logging
 import os
 import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -59,6 +60,9 @@ class GPUStatus:
 
 
 _status: GPUStatus | None = None
+# Guards setup() so concurrent callers don't both run preload + probe.
+# Cached result is fine to read without the lock once _status is set.
+_setup_lock = threading.Lock()
 
 
 def _site_packages_dirs() -> list[Path]:
@@ -168,6 +172,17 @@ def setup(probe_llama_cpp: bool = True) -> GPUStatus:
     if _status is not None:
         return _status
 
+    with _setup_lock:
+        # Re-check under the lock: another thread may have populated
+        # _status while we waited.
+        if _status is not None:
+            return _status
+        return _setup_locked(probe_llama_cpp)
+
+
+def _setup_locked(probe_llama_cpp: bool) -> GPUStatus:
+    """setup() body, run with _setup_lock held."""
+    global _status
     libs = _find_nvidia_libs()
     preloaded = _preload(libs) if libs else []
 
