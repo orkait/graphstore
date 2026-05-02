@@ -1,0 +1,85 @@
+# graphstore docker-compose.
+#
+# Two profiles:
+#   default - CPU image, lightweight, fits 90% of deploys.
+#   pro     - CUDA 12 image, pre-pulled Bonsai/jina/tinybert weights.
+#
+# Usage:
+#   docker compose up -d                       # CPU service on :7200
+#   docker compose --profile pro up -d         # GPU service (requires nvidia-container-toolkit)
+#   docker compose --profile pro run --rm graphstore-pro graphstore pro setup
+#
+# Resource limits cap CPU and RAM per Docker Rule 12 - prevents a
+# graphstore container from saturating the host.
+
+services:
+  graphstore:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GRAPHSTORE_VERSION: "0.6.0"
+    image: graphstore:0.6.0
+    container_name: graphstore
+    restart: unless-stopped
+    ports:
+      - "7200:7200"
+    volumes:
+      - gs-data:/data
+    environment:
+      GRAPHSTORE_DB_PATH: /data
+      GRAPHSTORE_HOST: 0.0.0.0
+      GRAPHSTORE_PORT: "7200"
+    deploy:
+      resources:
+        limits:
+          cpus: "8"
+          memory: 16g
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1', 7200)); s.close()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  graphstore-pro:
+    profiles: ["pro"]
+    build:
+      context: .
+      dockerfile: Dockerfile.pro
+      args:
+        GRAPHSTORE_VERSION: "0.6.0"
+    image: graphstore-pro:0.6.0
+    container_name: graphstore-pro
+    restart: unless-stopped
+    ports:
+      - "7200:7200"
+    volumes:
+      - gs-data:/data
+      - gs-cache:/root/.cache/graphstore
+      - gs-hf-cache:/root/.cache/huggingface
+    environment:
+      GRAPHSTORE_DB_PATH: /data
+      GRAPHSTORE_HOST: 0.0.0.0
+      GRAPHSTORE_PORT: "7200"
+    deploy:
+      resources:
+        limits:
+          cpus: "8"
+          memory: 16g
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1', 7200)); s.close()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  gs-data:
+  gs-cache:
+  gs-hf-cache:
