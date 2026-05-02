@@ -35,11 +35,19 @@ from graphstore.entity_resolver import (
 
 @pytest.fixture
 def gs(tmp_path):
-    """Fresh on-disk store for each test. embedder=default uses
-    Model2VecEmbedder which is core (no extras needed)."""
+    """Fresh on-disk store + clean resolver cache per test.
+
+    The process-global name->entity cache survives across pytest
+    cases without explicit reset, which would let one test's
+    resolution leak into another. Clear it in both setup and
+    teardown.
+    """
+    from graphstore.entity_resolver import reset_resolver_cache_for_tests
+    reset_resolver_cache_for_tests()
     store = GraphStore(path=str(tmp_path / "db"))
     yield store
     store.close()
+    reset_resolver_cache_for_tests()
 
 
 def _create_entity(gs, entity_id: str, canonical_name: str,
