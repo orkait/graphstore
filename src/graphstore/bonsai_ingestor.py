@@ -1160,6 +1160,9 @@ class BonsaiIngestor:
         temperature: float = 0.0,
         kv_cache_path: str | Path | None = None,
         flash_attn: bool = False,
+        ner_model_dir: str | Path | None = None,
+        ner_score_threshold: float = 0.7,
+        ner_max_hints: int = 6,
     ) -> None:
         self._model_path = Path(model_path)
         if not self._model_path.exists():
@@ -1231,6 +1234,16 @@ class BonsaiIngestor:
         # meta guards against loading stale state when the skill or config
         # changed since the cache was written.
         self._kv_cache_path = Path(kv_cache_path) if kv_cache_path else None
+
+        # Optional NER hint feed. When set, every ingest runs the input
+        # through the deterministic TinyBERT extractor and prepends a
+        # `[ner:a,b,c]` line to the user message. The model treats it as a
+        # noisy candidate list - it can keep, drop, or augment - so blind NER
+        # misses do not silently propagate into the graph. None disables.
+        self._ner_model_dir = Path(ner_model_dir) if ner_model_dir else None
+        self._ner_score_threshold = ner_score_threshold
+        self._ner_max_hints = max(0, int(ner_max_hints))
+        self._ner_disabled = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -1451,6 +1464,46 @@ class BonsaiIngestor:
                 dry_run=dry_run,
             )
 
+    def _ner_hints(self, text: str) -> str:
+        """Run TinyBERT NER on `text` and format a one-line hint.
+
+        Returns ``"[ner:a,b,c]"`` or ``""``. Failure modes are silent: any
+        extractor error disables NER for the rest of this ingestor's life
+        rather than crashing the LLM call. Empty results return "" so we
+        do not pay the prompt-token cost of a useless hint.
+        """
+        if not self._ner_model_dir or self._ner_disabled or self._ner_max_hints == 0:
+            return ""
+        try:
+            from graphstore.ingest.entity_extract import extract_entities
+            ents = extract_entities(
+                text,
+                model_dir=self._ner_model_dir,
+                score_threshold=self._ner_score_threshold,
+            )
+        except Exception as e:
+            _log.warning("bonsai: NER hint extraction failed (%s); disabling for this ingestor", e)
+            self._ner_disabled = True
+            return ""
+        if not ents:
+            return ""
+        seen: set[str] = set()
+        names: list[str] = []
+        for e in ents:
+            nm = (getattr(e, "text", "") or "").strip()
+            if not nm:
+                continue
+            key = nm.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            names.append(nm)
+            if len(names) >= self._ner_max_hints:
+                break
+        if not names:
+            return ""
+        return f"[ner:{','.join(names)}]"
+
     def _ingest_locked(
         self,
         text: str,
@@ -1463,10 +1516,13 @@ class BonsaiIngestor:
         t0 = time.perf_counter()
         llm = self._ensure_llm()
 
-        # Compose the user message: prior facts block + user text. Keeps the
-        # system prompt byte-identical so the skill stays KV-cache warm.
+        # Compose the user message: prior facts block + optional NER hint
+        # line + user text. System prompt stays byte-identical so the skill
+        # KV cache stays warm.
         facts_block = _render_known_facts_block(self._facts)
-        user_msg = f"{facts_block}\n\n{text}" if facts_block else text
+        ner_hints = self._ner_hints(text)
+        parts = [p for p in (facts_block, ner_hints, text) if p]
+        user_msg = "\n\n".join(parts) if parts else text
 
         est = self._estimate_tokens(self._system_prompt) + self._estimate_tokens(user_msg)
         budget = est + self._max_output_tokens
