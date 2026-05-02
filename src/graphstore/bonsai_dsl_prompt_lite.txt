@@ -9,6 +9,7 @@ VERB PICK RULE (read first!)
 - Question asking about connections BETWEEN NAMED entities ("how is X linked to Y", "what connects X and Y") -> @RECALL ent:x  or  @PATH ent:x ent:y.
 - Walk / path verbs REQUIRE prefixed anchor ids (ent:X or fact:X or msg:X). NEVER pass a bare topic or plain word like "location" as an anchor.
 - @RETRACT fires ONLY when the user explicitly corrects a prior fact. Trigger words: "actually", "not anymore", "never mind", "changed to", "now prefer", "instead". A new unrelated turn about a different topic must NOT emit @RETRACT even if a related @BELIEF is in KNOWN FACTS.
+- A line `[ner:a,b,c]` above the turn is a noisy upstream-tagger candidate list. Keep names that fit the context, drop false positives, add entities NER missed, and reclassify when the type is wrong. The hints inform but do not override your own judgement.
 
 VERB TABLE (pick one per line; emit exactly the shape shown)
 

@@ -908,3 +908,124 @@ def test_try_load_kv_cache_handles_wrong_shape(tmp_path: Path):
 
     ing = BonsaiIngestor(model_path=model, skill_path=skill, kv_cache_path=kv)
     assert ing._try_load_kv_cache(None) is False
+
+
+# --------------------------------------------------------------------
+# NER hints feed Bonsai
+# --------------------------------------------------------------------
+
+
+def _make_ingestor(tmp_path: Path, **kwargs) -> BonsaiIngestor:
+    """Build a BonsaiIngestor without touching llama.cpp.
+
+    Skill + model files exist on disk; the LLM is never loaded because we
+    only exercise the NER pre-pass and user-message composition.
+    """
+    skill = tmp_path / "skill.md"
+    skill.write_text("v1")
+    model = tmp_path / "fake.gguf"
+    model.write_bytes(b"x")
+    return BonsaiIngestor(model_path=model, skill_path=skill, **kwargs)
+
+
+def test_ner_hints_disabled_when_no_model_dir(tmp_path: Path):
+    ing = _make_ingestor(tmp_path)
+    assert ing._ner_hints("Maria pushed code with Kailash") == ""
+
+
+def test_ner_hints_disabled_when_max_hints_zero(tmp_path: Path):
+    ing = _make_ingestor(tmp_path,
+                         ner_model_dir=tmp_path / "fake-ner",
+                         ner_max_hints=0)
+    assert ing._ner_hints("Maria pushed code") == ""
+
+
+def test_ner_hints_formats_unique_entities_in_order(tmp_path: Path, monkeypatch):
+    from graphstore.ingest import entity_extract
+
+    class FakeEnt:
+        def __init__(self, text, label="PER", score=0.9):
+            self.text = text
+            self.label = label
+            self.score = score
+
+    def fake_extract(text, model_dir=None, score_threshold=0.7, max_length=256):
+        return [FakeEnt("Maria"), FakeEnt("OpenAI", "ORG"),
+                FakeEnt("maria"), FakeEnt("Berlin", "LOC")]
+
+    monkeypatch.setattr(entity_extract, "extract_entities", fake_extract)
+
+    ing = _make_ingestor(tmp_path, ner_model_dir=tmp_path / "fake-ner")
+    out = ing._ner_hints("Maria joined OpenAI in Berlin; Maria was happy.")
+    assert out == "[ner:Maria,OpenAI,Berlin]"
+
+
+def test_ner_hints_caps_at_max_hints(tmp_path: Path, monkeypatch):
+    from graphstore.ingest import entity_extract
+
+    class FakeEnt:
+        def __init__(self, text):
+            self.text = text
+            self.label = "PER"
+            self.score = 0.9
+
+    monkeypatch.setattr(
+        entity_extract, "extract_entities",
+        lambda text, model_dir=None, score_threshold=0.7, max_length=256:
+            [FakeEnt(c) for c in "ABCDEFGH"],
+    )
+
+    ing = _make_ingestor(tmp_path,
+                         ner_model_dir=tmp_path / "fake-ner",
+                         ner_max_hints=3)
+    assert ing._ner_hints("anything") == "[ner:A,B,C]"
+
+
+def test_ner_hints_empty_results_yield_no_line(tmp_path: Path, monkeypatch):
+    from graphstore.ingest import entity_extract
+
+    monkeypatch.setattr(
+        entity_extract, "extract_entities",
+        lambda text, model_dir=None, score_threshold=0.7, max_length=256: [],
+    )
+
+    ing = _make_ingestor(tmp_path, ner_model_dir=tmp_path / "fake-ner")
+    assert ing._ner_hints("nothing nameable here") == ""
+
+
+def test_ner_hints_disable_after_extractor_error(tmp_path: Path, monkeypatch):
+    from graphstore.ingest import entity_extract
+
+    calls = {"n": 0}
+
+    def boom(*a, **kw):
+        calls["n"] += 1
+        raise RuntimeError("ONNX session crashed")
+
+    monkeypatch.setattr(entity_extract, "extract_entities", boom)
+
+    ing = _make_ingestor(tmp_path, ner_model_dir=tmp_path / "fake-ner")
+    assert ing._ner_hints("Maria pushed code") == ""
+    # Subsequent calls short-circuit without re-invoking the extractor.
+    assert ing._ner_hints("Kailash joined OpenAI") == ""
+    assert calls["n"] == 1
+    assert ing._ner_disabled is True
+
+
+def test_ner_hints_skip_blank_text_entries(tmp_path: Path, monkeypatch):
+    from graphstore.ingest import entity_extract
+
+    class FakeEnt:
+        def __init__(self, text):
+            self.text = text
+            self.label = "PER"
+            self.score = 0.9
+
+    monkeypatch.setattr(
+        entity_extract, "extract_entities",
+        lambda text, model_dir=None, score_threshold=0.7, max_length=256:
+            [FakeEnt(""), FakeEnt("   "), FakeEnt("Alice")],
+    )
+
+    ing = _make_ingestor(tmp_path, ner_model_dir=tmp_path / "fake-ner")
+    assert ing._ner_hints("anything") == "[ner:Alice]"
