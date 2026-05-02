@@ -230,6 +230,179 @@ def cmd_config(args: argparse.Namespace) -> None:
         print(json.dumps(data, indent=2))
 
 
+def cmd_pro(args: argparse.Namespace) -> None:
+    """`graphstore pro {check,setup,probe,status}` - profile orchestrator.
+
+    PR#3 ships read-only commands fully (`check`, `status`); `setup` and
+    `probe` are stubs that explain the manual install path until the
+    probe runner ships in PR#3.5.
+    """
+    import json
+    from graphstore import pro
+
+    sub = args.pro_command
+    cache_dir = Path(args.cache_dir).expanduser() if args.cache_dir else None
+
+    # Build the spec from per-slot CLI flags. Unset → ProSpec default.
+    spec_kwargs: dict = {}
+    for slot in ("embedder", "reranker", "ingest_mode", "bonsai_quant",
+                 "bonsai_skill", "vision", "audio", "ner"):
+        val = getattr(args, slot, None)
+        if val is not None:
+            spec_kwargs[slot] = val
+    spec = pro.ProSpec(**spec_kwargs)
+
+    if sub in ("check", "status"):
+        host = pro.HostSnapshot.capture(cache_dir=cache_dir, probe_gpu=True)
+        try:
+            pro.check_extras_installed(spec, host)
+        except pro.ProExtraNotInstalled as e:
+            if args.json:
+                print(json.dumps({
+                    "fits": False,
+                    "error": "extra_not_installed",
+                    "missing_dists": e.missing_dists,
+                }, indent=2))
+            else:
+                print(f"[pro] {e}", file=sys.stderr)
+            sys.exit(2)
+
+        rc = pro.resolve(spec, host=host, cache_dir=cache_dir)
+        if args.json:
+            print(json.dumps(_pro_resolved_to_json(rc), indent=2, default=str))
+        else:
+            _print_pro_resolved(rc, host)
+        sys.exit(0 if rc.fits else (3 if rc.calibration_source == "missing" else 1))
+
+    if sub in ("setup", "probe"):
+        msg = (
+            f"`graphstore pro {sub}` is not yet implemented in this build.\n"
+            "PR#3.5 will ship the probe runner that downloads each component\n"
+            "and measures live RAM/disk/TPS into the calibration cache.\n"
+            "\n"
+            "Until then, populate the cache manually:\n"
+            "  1. Install models you need:\n"
+            "       graphstore install-embedder jina-v5-small-retrieval\n"
+            "       (Bonsai GGUF: download from "
+            "https://huggingface.co/superkaiii/Ternary-Bonsai-4B-TQ1_0-GGUF)\n"
+            "  2. Write calibration entries directly via "
+            "graphstore.pro.CalibrationCache (see tests/test_pro.py for "
+            "the schema).\n"
+            "\n"
+            "Then `graphstore pro check` will work end-to-end."
+        )
+        if args.json:
+            print(json.dumps({"error": "not_implemented",
+                              "command": sub, "message": msg}, indent=2))
+        else:
+            print(msg, file=sys.stderr)
+        sys.exit(2)
+
+    print(f"unknown pro subcommand: {sub!r}", file=sys.stderr)
+    sys.exit(2)
+
+
+def _pro_resolved_to_json(rc) -> dict:
+    """Serialize ResolvedConfig to a JSON-safe dict for `--json`."""
+    return {
+        "fits": rc.fits,
+        "spec": {f: getattr(rc.spec, f) for f in rc.spec.__struct_fields__},
+        "host": {
+            "ram_total_mb": rc.host.ram_total_mb,
+            "ram_available_mb": rc.host.ram_available_mb,
+            "disk_free_mb": rc.host.disk_free_mb,
+            "cpu_cores_physical": rc.host.cpu_cores_physical,
+            "cpu_cores_logical": rc.host.cpu_cores_logical,
+            "gpu_ready": rc.host.gpu_ready,
+            "gpu_name": rc.host.gpu_name,
+            "gpu_vram_total_mb": rc.host.gpu_vram_total_mb,
+            "gpu_vram_free_mb": rc.host.gpu_vram_free_mb,
+        },
+        "n_ctx": rc.n_ctx,
+        "bonsai_n_batch": rc.bonsai_n_batch,
+        "bonsai_n_gpu_layers": rc.bonsai_n_gpu_layers,
+        "reranker_max_len": rc.reranker_max_len,
+        "reranker_gpu_layers": rc.reranker_gpu_layers,
+        "embed_batch": rc.embed_batch,
+        "vision_offload": rc.vision_offload,
+        "projected_tps": rc.projected_tps,
+        "ram_budget_mb": rc.ram_budget_mb,
+        "vram_budget_mb": rc.vram_budget_mb,
+        "shortfalls": rc.shortfalls,
+        "warnings": rc.warnings,
+        "suggestions": rc.suggestions,
+        "calibration_source": rc.calibration_source,
+        "calibration_age_s": rc.calibration_age_s,
+    }
+
+
+def _print_pro_resolved(rc, host) -> None:
+    """Pretty text rendering of ResolvedConfig for `pro check / status`."""
+    print()
+    print("Host")
+    print(f"  CPU         {host.cpu_cores_physical} physical / "
+          f"{host.cpu_cores_logical} logical cores")
+    print(f"  RAM         {host.ram_total_mb} MB total, "
+          f"{host.ram_available_mb} MB available")
+    print(f"  Disk        {host.disk_free_mb} MB free at cache dir")
+    if host.gpu_ready:
+        print(f"  GPU         {host.gpu_name or '?'} "
+              f"({host.gpu_vram_total_mb} MB total, "
+              f"{host.gpu_vram_free_mb} MB free)")
+    else:
+        print("  GPU         not detected (or graphstore.gpu.setup() not called)")
+
+    print()
+    print("Spec")
+    for f in rc.spec.__struct_fields__:
+        print(f"  {f:<13} {getattr(rc.spec, f)}")
+
+    print()
+    print("Resolved")
+    print(f"  fits        {'YES' if rc.fits else 'NO'}")
+    if rc.fits:
+        print(f"  n_ctx       {rc.n_ctx}")
+        print(f"  bonsai      n_batch={rc.bonsai_n_batch}, "
+              f"n_gpu_layers={rc.bonsai_n_gpu_layers}")
+        print(f"  reranker    max_len={rc.reranker_max_len}, "
+              f"gpu_layers={rc.reranker_gpu_layers}")
+        print(f"  embedder    batch={rc.embed_batch}")
+        if rc.projected_tps:
+            print("  projected_tps:")
+            for cid, tps in rc.projected_tps.items():
+                print(f"    {cid:<32} {tps:.1f} tps")
+        if rc.ram_budget_mb:
+            tot = sum(rc.ram_budget_mb.values())
+            print(f"  RAM budget  {tot} MB / {host.ram_available_mb} MB available")
+        if rc.vram_budget_mb:
+            tot = sum(rc.vram_budget_mb.values())
+            print(f"  VRAM budget {tot} MB / {host.gpu_vram_free_mb} MB available")
+
+    if rc.shortfalls:
+        print()
+        print("Shortfalls")
+        for s in rc.shortfalls:
+            print(f"  - {s}")
+    if rc.suggestions:
+        print()
+        print("Suggestions")
+        for s in rc.suggestions:
+            print(f"  - {s}")
+    if rc.warnings:
+        print()
+        print("Warnings")
+        for w in rc.warnings:
+            print(f"  - {w}")
+    print()
+    if rc.calibration_source == "missing":
+        print("Calibration: missing. Run `graphstore pro setup` (PR#3.5) or "
+              "populate ~/.cache/graphstore/calibration.json manually.")
+    elif rc.calibration_age_s is not None:
+        days = rc.calibration_age_s // 86400
+        print(f"Calibration: measured ({days} days old)")
+    print()
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="graphstore", description="graphstore CLI")
     sub = parser.add_subparsers(dest="command")
@@ -289,6 +462,46 @@ def main(argv: list[str] | None = None) -> None:
     vis_sub.add_parser("logs", help="Print the sidecar log file to stdout")
     vis_sub.add_parser("models", help="List built-in VLM presets")
     vis.set_defaults(func=cmd_vision)
+
+    # pro subcommand: profile orchestrator (slotted spec + calibration)
+    pro = sub.add_parser(
+        "pro",
+        help="Pro mode: spec + host fit check, calibration, status (PR#3+)",
+    )
+    pro_sub = pro.add_subparsers(dest="pro_command", required=True)
+    for name, helptext in (
+        ("check",  "Verify spec fits the host using the calibration cache"),
+        ("setup",  "(PR#3.5) Download required models + run probes"),
+        ("probe",  "(PR#3.5) Re-run live calibration without re-downloading"),
+        ("status", "Show current host + cache state + last probe times"),
+    ):
+        sp = pro_sub.add_parser(name, help=helptext)
+        sp.add_argument("--json", action="store_true",
+                        help="Emit machine-readable JSON instead of pretty text")
+        sp.add_argument("--cache-dir", default=None,
+                        help="Calibration cache directory "
+                             "(default: ~/.cache/graphstore)")
+        # Slot overrides; defaults None so ProSpec defaults stand.
+        sp.add_argument("--embedder", default=None,
+                        choices=["jina-v5-small", "jina-v5-nano",
+                                 "model2vec-256d", "embeddinggemma-300m",
+                                 "fastembed-bge-small", "none"])
+        sp.add_argument("--reranker", default=None,
+                        choices=["jina-v3", "none"])
+        sp.add_argument("--ingest-mode", dest="ingest_mode", default=None,
+                        choices=["bonsai", "deterministic"])
+        sp.add_argument("--bonsai-quant", dest="bonsai_quant", default=None,
+                        choices=["tq1_0", "tq2_0"])
+        sp.add_argument("--bonsai-skill", dest="bonsai_skill", default=None,
+                        choices=["lite", "full"])
+        sp.add_argument("--vision", default=None,
+                        choices=["smolvlm2-2.2b", "qwen-vl-3b", "none"])
+        sp.add_argument("--audio", default=None,
+                        choices=["whisper-tiny", "whisper-base",
+                                 "whisper-small", "none"])
+        sp.add_argument("--ner", default=None,
+                        choices=["tinybert", "none"])
+    pro.set_defaults(func=cmd_pro)
 
     # config subcommand
     cfg = sub.add_parser("config", help="Show config defaults, schema, or current values")
