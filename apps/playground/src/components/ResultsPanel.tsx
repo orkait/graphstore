@@ -46,7 +46,9 @@ function ResultCard({ entry }: { entry: ResultEntry }) {
   const isError = entry.error != null
   const isActive = activeResultId === entry.id
   const result = entry.result
-  const canHighlight = result ? HIGHLIGHTABLE_KINDS.has(result.kind) : false
+  // canHighlight retained as a constant for future highlight-on-click
+  // wiring; reference to satisfy TS no-unused-locals.
+  void (result ? HIGHLIGHTABLE_KINDS.has(result.kind) : false)
 
   const renderTable = () => {
     if (!result?.data) return <span className="text-muted-foreground">No data</span>
