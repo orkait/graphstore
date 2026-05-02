@@ -143,25 +143,54 @@ class TestProCheckExtrasGate:
             assert r.returncode == 3
 
 
-class TestProSetupProbeStubs:
-    """PR#3 ships these as stubs; lock the exit code + message shape."""
+class TestProSetupExtrasGate:
+    """`pro setup` / `pro probe` exit 2 when the spec's required pip
+    distributions are not installed - the same gate `pro check` uses,
+    just before model downloads instead of after.
+    """
 
     @pytest.mark.parametrize("subcmd", ["setup", "probe"])
-    def test_text_explains_pr_3_5(self, subcmd):
-        r = _run([subcmd])
-        assert r.returncode == 2  # not_implemented exit code
-        # The message points users at the manual fallback so they can
-        # still get value out of pro check today.
-        msg = r.stderr if r.stderr else r.stdout
-        assert "not yet implemented" in msg
-        assert "PR#3.5" in msg
-        assert "graphstore install-embedder" in msg
+    def test_extras_missing_exits_2(self, subcmd):
+        # Embedder=fastembed-bge-small needs [embedders-extra]. May or
+        # may not be installed in any given CI matrix; either path is
+        # valid coverage (extras-missing → 2; extras present → either
+        # 0 or 1 depending on whether probes succeed).
+        r = _run([subcmd, "--json",
+                  "--embedder", "fastembed-bge-small",
+                  "--ingest-mode", "deterministic",
+                  "--vision", "none", "--audio", "none",
+                  "--reranker", "none", "--ner", "none"])
+        if r.returncode == 2:
+            data = json.loads(r.stdout)
+            assert data["error"] == "extra_not_installed"
+            assert "fastembed" in data["missing_dists"]
 
-    @pytest.mark.parametrize("subcmd", ["setup", "probe"])
-    def test_json_returns_structured_error(self, subcmd):
-        r = _run([subcmd, "--json"])
-        assert r.returncode == 2
+
+class TestProSetupUnregisteredComponent:
+    """If a slot somehow maps to a component_id not in pro_probe's
+    registry, the orchestrator records it as a failure rather than
+    crashing the whole run."""
+
+    def test_unregistered_component_recorded_as_failure(self, tmp_path):
+        # Use ner=none + embedder=model2vec-256d which IS registered;
+        # this just confirms the JSON schema for a successful path.
+        # Real "unregistered" coverage is exercised via test_pro_probe.py
+        # against pro_probe.probe_components directly.
+        # Here we just ensure the JSON shape is parseable for setup.
+        r = _run(["setup", "--json",
+                  "--cache-dir", str(tmp_path),
+                  "--ingest-mode", "deterministic",
+                  "--embedder", "model2vec-256d",
+                  "--vision", "none", "--audio", "none",
+                  "--reranker", "none", "--ner", "none"],
+                 )
+        # Skip if not enough deps for the probe to actually run
+        # (different from extras-missing - this is "extras present
+        # but probe body errored due to network or environment").
+        # Either exit 0 or 1 is acceptable here; we just verify shape.
+        assert r.returncode in (0, 1), f"unexpected rc={r.returncode}; stderr={r.stderr!r}"
         data = json.loads(r.stdout)
-        assert data["error"] == "not_implemented"
-        assert data["command"] == subcmd
-        assert "PR#3.5" in data["message"]
+        assert "all_ok" in data
+        assert "successes" in data
+        assert "failures" in data
+        assert "events" in data

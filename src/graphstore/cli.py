@@ -275,28 +275,71 @@ def cmd_pro(args: argparse.Namespace) -> None:
         sys.exit(0 if rc.fits else (3 if rc.calibration_source == "missing" else 1))
 
     if sub in ("setup", "probe"):
-        msg = (
-            f"`graphstore pro {sub}` is not yet implemented in this build.\n"
-            "PR#3.5 will ship the probe runner that downloads each component\n"
-            "and measures live RAM/disk/TPS into the calibration cache.\n"
-            "\n"
-            "Until then, populate the cache manually:\n"
-            "  1. Install models you need:\n"
-            "       graphstore install-embedder jina-v5-small-retrieval\n"
-            "       (Bonsai GGUF: download from "
-            "https://huggingface.co/superkaiii/Ternary-Bonsai-4B-TQ1_0-GGUF)\n"
-            "  2. Write calibration entries directly via "
-            "graphstore.pro.CalibrationCache (see tests/test_pro.py for "
-            "the schema).\n"
-            "\n"
-            "Then `graphstore pro check` will work end-to-end."
+        from graphstore import pro_probe
+        host = pro_probe.HostSnapshot.capture(cache_dir=cache_dir)
+        try:
+            pro.check_extras_installed(spec, host)
+        except pro.ProExtraNotInstalled as e:
+            if args.json:
+                print(json.dumps({
+                    "fits": False,
+                    "error": "extra_not_installed",
+                    "missing_dists": e.missing_dists,
+                }, indent=2))
+            else:
+                print(f"[pro] {e}", file=sys.stderr)
+            sys.exit(2)
+
+        component_ids = spec.component_ids()
+        events: list[dict] = []
+
+        def _emit(event: str, payload: dict) -> None:
+            payload["event"] = event
+            events.append(payload)
+            if not args.json:
+                if event == "probe_start":
+                    print(f"[pro] probing {payload['component']} ...",
+                          flush=True)
+                elif event == "probe_done":
+                    print(f"[pro] OK   {payload['component']} "
+                          f"({payload['duration_s']:.1f}s)", flush=True)
+                elif event == "probe_failed":
+                    print(f"[pro] FAIL {payload['component']}: "
+                          f"{payload['error']}", flush=True)
+
+        # `pro setup` runs full probe; `pro probe` is also full but
+        # leaves disk untouched (download is no-op when cache hits).
+        skip_probe = False  # both commands run probe in this PR
+        summary = pro_probe.probe_components(
+            component_ids,
+            host=host,
+            cache_dir=cache_dir,
+            on_event=_emit,
+            skip_probe=skip_probe,
         )
+
         if args.json:
-            print(json.dumps({"error": "not_implemented",
-                              "command": sub, "message": msg}, indent=2))
+            print(json.dumps({
+                "command": sub,
+                "all_ok": summary.all_ok,
+                "successes": [r.component_id for r in summary.successes],
+                "failures": [
+                    {"component": r.component_id, "error": r.error}
+                    for r in summary.failures
+                ],
+                "total_duration_s": summary.total_duration_s,
+                "events": events,
+            }, indent=2))
         else:
-            print(msg, file=sys.stderr)
-        sys.exit(2)
+            print()
+            print(f"[pro] done in {summary.total_duration_s:.1f}s; "
+                  f"{len(summary.successes)} ok, "
+                  f"{len(summary.failures)} failed.")
+            if summary.failures:
+                print("Failures:")
+                for r in summary.failures:
+                    print(f"  - {r.component_id}: {r.error}")
+        sys.exit(0 if summary.all_ok else 1)
 
     print(f"unknown pro subcommand: {sub!r}", file=sys.stderr)
     sys.exit(2)
@@ -471,8 +514,8 @@ def main(argv: list[str] | None = None) -> None:
     pro_sub = pro.add_subparsers(dest="pro_command", required=True)
     for name, helptext in (
         ("check",  "Verify spec fits the host using the calibration cache"),
-        ("setup",  "(PR#3.5) Download required models + run probes"),
-        ("probe",  "(PR#3.5) Re-run live calibration without re-downloading"),
+        ("setup",  "Download required models + run live probes"),
+        ("probe",  "Re-run live calibration (use after model updates)"),
         ("status", "Show current host + cache state + last probe times"),
     ):
         sp = pro_sub.add_parser(name, help=helptext)
