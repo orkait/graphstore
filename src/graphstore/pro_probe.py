@@ -501,13 +501,16 @@ class JinaV3RerankerProbe(Probe):
             raise RuntimeError(
                 "huggingface-hub not installed; pip install 'graphstore[pro]'"
             ) from e
+        # The Q8_0-only repo (jinaai/jina-reranker-v3-Q8_0-GGUF) is
+        # gated; use the public multi-quant repo and pin the Q8_0 file.
+        repo = "jinaai/jina-reranker-v3-GGUF"
         gguf = hf_hub_download(
-            repo_id="jinaai/jina-reranker-v3-Q8_0-GGUF",
+            repo_id=repo,
             filename="jina-reranker-v3-Q8_0.gguf",
             cache_dir=str(cache_dir / "models"),
         )
         proj = hf_hub_download(
-            repo_id="jinaai/jina-reranker-v3-Q8_0-GGUF",
+            repo_id=repo,
             filename="projector.safetensors",
             cache_dir=str(cache_dir / "models"),
         )
@@ -579,9 +582,8 @@ class BonsaiProbe(Probe):
             raise RuntimeError(
                 "huggingface-hub not installed; pip install 'graphstore[pro]'"
             ) from e
-        repo = "superkaiii/Ternary-Bonsai-4B-TQ1_0-GGUF"
-        if self._quant == "tq2_0":
-            repo = "superkaiii/Ternary-Bonsai-4B-TQ2_0-GGUF"
+        # Single repo holds both TQ1_0 and TQ2_0 quants; pick by filename.
+        repo = "superkaiii/Ternary-Bonsai-4B-GGUF"
         fname = f"Ternary-Bonsai-4B-{self._quant.upper()}.gguf"
         path = hf_hub_download(
             repo_id=repo, filename=fname,
@@ -604,16 +606,20 @@ class BonsaiProbe(Probe):
                       else _DEFAULT_PROMPT_PATH)
 
         # Locate the GGUF that download() just placed in the HF cache.
+        # Both TQ1_0 and TQ2_0 quants live in one repo
+        # (`superkaiii/Ternary-Bonsai-4B-GGUF`); discriminate by filename.
         from huggingface_hub import scan_cache_dir
         gguf_path: Path | None = None
-        repo_marker = "Ternary-Bonsai" + ("-TQ1_0" if self._quant == "tq1_0" else "-TQ2_0")
+        repo_marker = "Ternary-Bonsai-4B-GGUF"
+        file_marker = f"-{self._quant.upper()}.gguf"
         for repo in scan_cache_dir().repos:
-            if repo_marker in str(repo.repo_id):
-                for rev in repo.revisions:
-                    for f in rev.files:
-                        if f.file_name.endswith(".gguf"):
-                            gguf_path = Path(f.file_path)
-                            break
+            if repo_marker not in str(repo.repo_id):
+                continue
+            for rev in repo.revisions:
+                for f in rev.files:
+                    if f.file_name.endswith(file_marker):
+                        gguf_path = Path(f.file_path)
+                        break
         if gguf_path is None or not gguf_path.exists():
             raise RuntimeError(
                 f"Bonsai GGUF not found after download for {self.component_id}; "

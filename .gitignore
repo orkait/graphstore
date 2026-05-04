@@ -18,6 +18,9 @@ zen-graph-db/
 # See benchmarking.md for download instructions.
 models/
 
+# Transient docker build logs (e.g. .build-pro-v4.log)
+.build-*.log
+
 # Transient benchmark artifacts from prior exploration (pre-framework).
 benchmarks/*.log
 benchmarks/results_*.jsonl
@@ -71,3 +74,6 @@ website/.cache-loader/
 # Secrets. .env holds API keys + local overrides. Never commit it.
 # .env.example is the tracked template - copy to .env and fill in values.
 /.env
+
+# Local-only Dockerfile variants with BuildKit cache mounts (not for distribution)
+Dockerfile*.test

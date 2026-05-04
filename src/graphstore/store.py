@@ -510,13 +510,16 @@ class GraphStore:
             raise RuntimeError(
                 "huggingface-hub not installed; pip install 'graphstore[pro]'"
             ) from e
-        marker = f"-{quant.upper()}"
+        # Both TQ1_0 and TQ2_0 quants live in one repo
+        # (`superkaiii/Ternary-Bonsai-4B-GGUF`); discriminate by filename.
+        repo_marker = "Ternary-Bonsai-4B-GGUF"
+        file_marker = f"-{quant.upper()}.gguf"
         for repo in scan_cache_dir().repos:
-            if marker not in str(repo.repo_id):
+            if repo_marker not in str(repo.repo_id):
                 continue
             for rev in repo.revisions:
                 for f in rev.files:
-                    if f.file_name.endswith(".gguf"):
+                    if f.file_name.endswith(file_marker):
                         path = Path(f.file_path)
                         if path.exists():
                             return path

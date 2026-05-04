@@ -52,6 +52,7 @@ Issues = "https://github.com/orkait/graphstore/issues"
 
 [project.scripts]
 graphstore = "graphstore.cli:main"
+graphstore-mcp = "graphstore.mcp.server:main"
 
 [project.optional-dependencies]
 dev = [
@@ -98,6 +99,13 @@ playground = [
     "uvicorn>=0.20",
     "pydantic>=2.0",
 ]
+# MCP server: expose graphstore as agent-callable tools over the Model
+# Context Protocol. Required for tools/mcp/graphstore_mcp.py (used by
+# Claude Desktop, Cursor, and other MCP-aware clients). The server runs
+# in-process by default - no playground HTTP server needed.
+mcp = [
+    "mcp>=1.0",
+]
 # onnxruntime-gpu for NER (TinyBERT) CUDA acceleration. Assumes host has
 # CUDA 12 + cuDNN 9 findable by the dynamic linker. Users needing bundled
 # CUDA runtime wheels should pin nvidia-*-cu12 manually - we keep this lean.
@@ -123,6 +131,7 @@ pro = [
     "graphstore[audio]",
     "graphstore[embedders-extra]",
     "graphstore[gpu]",
+    "graphstore[mcp]",
     "tokenizers>=0.15",
     "onnxruntime>=1.17",
     "huggingface-hub>=0.24",

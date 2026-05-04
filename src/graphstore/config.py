@@ -94,12 +94,12 @@ class DslConfig(msgspec.Struct, frozen=True):
     enable_rollback: bool = True
     graph_signal_enabled: bool = True
     entity_extractor: str = "tinybert_onnx"
-    entity_model_dir: str | None = "./models/tinybert-ner"
+    entity_model_dir: str | None = f"{os.environ.get('MODELS_DIR', './models')}/misc/tinybert-ner"
     entity_score_threshold: float = 0.6
     entity_max_length: int = 256
     reranker: str | None = None
-    reranker_model_dir: str | None = "./models/jina-reranker-v3/jina-reranker-v3-Q8_0.gguf"
-    reranker_projector_path: str | None = "./models/jina-reranker-v3/projector.safetensors"
+    reranker_model_dir: str | None = f"{os.environ.get('MODELS_DIR', './models')}/jina/jina-reranker-v3/jina-reranker-v3-Q8_0.gguf"
+    reranker_projector_path: str | None = f"{os.environ.get('MODELS_DIR', './models')}/jina/jina-reranker-v3/projector.safetensors"
     reranker_max_length: int = 2048
     # CPU-only by default. Set to -1 (offload all layers) or N (offload N
     # layers) when a CUDA-built llama-cpp-python wheel is installed AND the
