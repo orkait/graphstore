@@ -18,7 +18,7 @@ An embedded memory database for AI agents. Facts get written with confidence sco
 
 Status: v0.6.0, alpha.
 
-## Install
+## 📦 Install
 
 ```bash
 pip install graphstore
@@ -32,12 +32,13 @@ pip install 'graphstore[vision]'       # local VLM for images + scanned PDFs
 pip install 'graphstore[audio]'        # faster-whisper speech-to-text
 pip install 'graphstore[playground]'   # FastAPI web UI
 pip install 'graphstore[gpu]'          # onnxruntime-gpu, Linux x86_64, CUDA 12
+pip install 'graphstore[mcp]'          # Model Context Protocol server (graphstore-mcp)
 pip install 'graphstore[pro]'          # one-shot agentic memory bundle (see Pro mode below)
 ```
 
 Full extras matrix: [Installation](website/docs/installation.md).
 
-## Quickstart
+## 🚀 Quickstart
 
 ```python
 from graphstore import GraphStore
@@ -58,7 +59,7 @@ g.execute('SIMILAR TO "capital city" LIMIT 5')            # vector only
 
 `DOCUMENT "text"` populates the vector index, FTS5 index, and blob storage in one shot. Without it, a node is structured data only.
 
-## Natural-language ingest (Bonsai)
+## 🌳 Natural-language ingest (Bonsai)
 
 For agent-conversation memory, writing DSL by hand is the wrong abstraction. graphstore ships `BonsaiIngestor`, an LLM-driven NL→DSL converter built on a 4B Ternary-Bonsai GGUF (1.1 GB, runs on CPU at ~20 tok/s, ~150 tok/s on a CUDA 12 GPU). It reads natural-language turns and emits the DSL statements that mirror them.
 
@@ -89,7 +90,7 @@ Prompt variants:
 
 Persistent KV cache (`kv_cache_path=...`) cuts cold start from ~10 s to ~1 s across process restarts.
 
-## Architecture
+## 🏗️  Architecture
 
 <p align="center">
   <img src="website/static/img/architecture.svg" alt="graphstore architecture: DSL + three storage engines + ingest pipeline + retrieval" width="760">
@@ -105,7 +106,7 @@ The **DSL** is Lark LALR(1). Every write, read, `INGEST`, and `SYS *` goes throu
 
 Deep dive: [Architecture](website/docs/concepts/architecture.md) · [Edge matrix](website/docs/concepts/edge-matrix.md).
 
-## REMEMBER
+## 🧠 REMEMBER
 
 `REMEMBER` fuses four signals at retrieval time. `SIMILAR`, `LEXICAL`, `RECALL` each expose a single leg.
 
@@ -142,7 +143,7 @@ g.execute('SYS EXPLAIN REMEMBER "Caroline counseling" LIMIT 3')
 
 Deep dive: [REMEMBER pipeline](website/docs/concepts/remember-pipeline.md).
 
-## ANSWER (retrieval + reader LLM)
+## 💬 ANSWER (retrieval + reader LLM)
 
 For a full retrieve + synthesize loop, wire a reader callable and use `ANSWER`:
 
@@ -160,7 +161,7 @@ r.meta["signals"]        # same telemetry as REMEMBER
 
 graphstore ships no LLM dependency. The reader is a plain callable; bring your own. Named readers (`GraphStore(readers={"fast": a, "careful": b})`) enable A/B via `ANSWER "q" USING "careful"`.
 
-## Typed query builder
+## 🐍 Typed query builder
 
 Every DSL verb has a typed function. Same grammar, IDE autocomplete, injection-safe.
 
@@ -182,7 +183,7 @@ q.batch(
 
 Full reference: [Query builder](website/docs/query-builder.md).
 
-## Benchmarks
+## 📊 Benchmarks
 
 **LongMemEval-S**, 500 records, Jina v5 Small 1024d, Kaggle T4 GPU, 2026-04-19. Public kernel: [kaggle.com/code/superkaiii/graphstore-jina-v5-small](https://www.kaggle.com/code/superkaiii/graphstore-jina-v5-small).
 
@@ -196,7 +197,7 @@ Query p50 46 ms / p95 76 ms. Retrieval-only, no LLM judge.
 
 Full methodology: [Benchmarks](website/docs/benchmarks/overview.md).
 
-## GPU offload (opt-in, off by default)
+## ⚡ GPU offload (opt-in, off by default)
 
 graphstore never grabs a GPU implicitly. Every `*_gpu_layers` default is 0 (CPU). To opt in, install `[gpu]` (and a CUDA-built `llama-cpp-python` wheel for Bonsai/embedder/reranker) and call `gpu.setup()`:
 
@@ -215,7 +216,7 @@ GraphStore(path="./brain", gpu_layers=-1, reranker_gpu_layers=-1)
 BonsaiIngestor(model_path=..., n_gpu_layers=-1)
 ```
 
-## Pro mode
+## ✨ Pro mode
 
 `pip install 'graphstore[pro]'` bundles ingest + vision + audio + embedders-extra + gpu plus huggingface-hub / tokenizers / onnxruntime. Pair it with a one-time calibration to get spec-driven validation and a calibrated Bonsai ingestor without writing the device-detection / sizing / fallback glue yourself.
 
@@ -242,7 +243,7 @@ Defaults match the measured-best LoCoMo configuration as of this release: `jina-
 
 Full guide: [Pro mode](website/docs/guides/pro-mode.md).
 
-## Docker
+## 🐳 Docker
 
 Two images. Both expose the playground HTTP API on `:7200` and persist the database on a `/data` volume.
 
@@ -270,7 +271,7 @@ curl -s -X POST http://127.0.0.1:7200/api/execute \
 
 Resource limits in `docker-compose.yml` cap each container at 8 CPUs / 16 GB RAM. Adjust via `deploy.resources.limits` per host.
 
-## MCP server (agentic memory)
+## 🔌 MCP server (agentic memory)
 
 graphstore ships a Model Context Protocol server that exposes the store as agent-callable tools (Claude Desktop, Cursor, any MCP-aware client). No playground HTTP server required - the server holds an in-process `GraphStore()` and translates typed tool calls into DSL.
 
@@ -296,7 +297,7 @@ Claude Desktop config snippet (see `tools/mcp/claude_desktop_config.example.json
 
 For Pro mode (Bonsai LLM + Jina + NER), add `"GRAPHSTORE_PROFILE": "pro"`. Set `GRAPHSTORE_URL=http://host:7200` to forward calls to a shared remote playground instead of running in-process.
 
-## Scope
+## 🎯 Scope
 
 - Embedded, one writer per path. For multi-tenant, wrap in your own service.
 - No SQL, no Cypher, no distributed cluster. Graph ops exist because agent memory is a graph.
@@ -304,7 +305,7 @@ For Pro mode (Bonsai LLM + Jina + NER), add `"GRAPHSTORE_PROFILE": "pro"`. Set `
 - Bonsai NL→DSL ingest is opt-in via `BonsaiIngestor(...)`. Core install never auto-loads an LLM.
 - GPU offload is opt-in via `gpu.setup()` or explicit `n_gpu_layers=...`. No silent device acquisition.
 
-## Development
+## 🛠️  Development
 
 ```bash
 git clone https://github.com/orkait/graphstore.git
@@ -320,6 +321,6 @@ Docs site under `website/` (Docusaurus). Run locally:
 cd website && bun install && bun run start
 ```
 
-## License
+## 📄 License
 
 AGPL-3.0. See [LICENSE](LICENSE).
