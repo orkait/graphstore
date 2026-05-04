@@ -250,10 +250,12 @@ Two images. Both expose the playground HTTP API on `:7200` and persist the datab
 # CPU image (~660 MB) - fits 90% of deploys
 docker compose up -d                              # builds + starts on :7200
 
-# Pro GPU image (~6 GB, includes pre-pulled Bonsai/jina/tinybert weights)
+# Pro GPU image (~5.2 GB slim, includes pre-pulled Bonsai/jina/tinybert weights)
 docker compose --profile pro up -d                # requires nvidia-container-toolkit
 docker compose --profile pro run --rm graphstore-pro graphstore pro setup   # one-time calibration
 ```
+
+The Pro image is a single-stage `python:3.12-slim` + pip-delivered nvidia CUDA wheels (cu12 runtime + cuDNN 9 + cuBLAS) + GPU-built `llama-cpp-python`. All install + symbol-strip + execution-provider prune happens in one RUN to avoid the layer-overhead bug where a later `strip` adds duplicate copies on top of originals. Set `--build-arg SKIP_MODEL_PREFETCH=1` for a ~3.5 GB image that downloads models on first use instead.
 
 The entrypoint auto-generates an auth token on first boot and writes it to `/data/.auth_token` (printed to logs). Use it as `Authorization: Bearer <token>` on every `/api/*` call. To pin a fixed token set `GRAPHSTORE_AUTH_TOKEN` in the environment; to disable auth on a private network set `GRAPHSTORE_ALLOW_UNAUTH_BIND=1`.
 
@@ -267,6 +269,32 @@ curl -s -X POST http://127.0.0.1:7200/api/execute \
 ```
 
 Resource limits in `docker-compose.yml` cap each container at 8 CPUs / 16 GB RAM. Adjust via `deploy.resources.limits` per host.
+
+## MCP server (agentic memory)
+
+graphstore ships a Model Context Protocol server that exposes the store as agent-callable tools (Claude Desktop, Cursor, any MCP-aware client). No playground HTTP server required - the server holds an in-process `GraphStore()` and translates typed tool calls into DSL.
+
+```bash
+pip install 'graphstore[mcp]'   # adds the mcp Python SDK
+graphstore-mcp                  # stdio server, ready for Claude Desktop
+```
+
+Tools exposed: `gs_remember(text)`, `gs_remember_batch(texts)`, `gs_search(query)` (3-signal fusion), `gs_recall(node_id)`, `gs_lexical(query)`, `gs_similar(text)`, `gs_traverse(from_id)`, `gs_answer(query)` (RAG via Bonsai in Pro mode), `gs_count_nodes()`, plus `gs_execute(dsl)` as a raw-DSL escape hatch. Errors return structured `{"error": "..."}` instead of crashing the transport.
+
+Claude Desktop config snippet (see `tools/mcp/claude_desktop_config.example.json`):
+
+```json
+{
+  "mcpServers": {
+    "graphstore": {
+      "command": "graphstore-mcp",
+      "env": { "GRAPHSTORE_DB_PATH": "/path/to/graphstore-agent.db" }
+    }
+  }
+}
+```
+
+For Pro mode (Bonsai LLM + Jina + NER), add `"GRAPHSTORE_PROFILE": "pro"`. Set `GRAPHSTORE_URL=http://host:7200` to forward calls to a shared remote playground instead of running in-process.
 
 ## Scope
 
