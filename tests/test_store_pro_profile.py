@@ -268,7 +268,7 @@ class TestCreateBonsaiFactory:
             files = [_FakeFile(fake_gguf)]
 
         class _FakeRepo:
-            repo_id = "superkaiii/Ternary-Bonsai-4B-TQ1_0-GGUF"
+            repo_id = "superkaiii/Ternary-Bonsai-4B-GGUF"
             revisions = [_FakeRev()]
 
         class _FakeCache:

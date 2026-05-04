@@ -1,9 +1,18 @@
-# graphstore - Pro GPU image.
+# graphstore - Pro GPU image (slim).
 #
-# CUDA 12.4 + cuDNN 9 runtime base. Installs graphstore[pro] and
-# pre-downloads every model the default ProSpec selects (Bonsai TQ1_0
-# GGUF, TinyBERT NER ONNX, Jina v5 small ONNX) at build time so the
-# container starts cold-ready.
+# Single-stage on python:3.12-slim-bookworm. CUDA 12.4 runtime is
+# delivered via the official nvidia-* pip wheels (cuda-runtime, cublas,
+# cudnn, nvrtc, nvjitlink). Slim base + pip-delivered CUDA produces a
+# ~4.5 GB image vs ~6 GB for the nvidia/cuda:cudnn-runtime base.
+#
+# CRITICAL: install + cleanup + strip + purge run in a SINGLE RUN.
+# Splitting into separate layers caused ~2 GB of duplicated unstripped
+# .so files in v3 (strip in a later layer added stripped copies on top
+# of the originals). Keep all binary mutations in the same layer.
+#
+# Pre-downloads every model the default ProSpec selects (Bonsai TQ1_0
+# GGUF, TinyBERT NER ONNX, Jina v5 small ONNX). Skip with --build-arg
+# SKIP_MODEL_PREFETCH=1 for a ~3.5 GB image (first start downloads).
 #
 # Calibration is intentionally NOT run at build time - calibration is
 # host-specific (per-CPU/per-GPU TPS measurements) and a value measured
@@ -15,15 +24,16 @@
 # The calibration cache lives on the gs-cache volume and persists across
 # container restarts.
 #
-# Build:  docker build -f Dockerfile.pro --cpus=8 --memory=16g -t graphstore-pro:latest .
+# Build:  docker buildx build -f Dockerfile.pro --builder graphstore-builder \
+#             -t graphstore-pro:latest --load .
 # Run:    docker run --gpus all --cpus=8 --memory=16g -p 7200:7200 \
 #               -v gs-data:/data -v gs-cache:/root/.cache/graphstore \
 #               graphstore-pro:latest
 
 ARG GRAPHSTORE_VERSION=0.6.0
-ARG CUDA_IMAGE=nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
-FROM ${CUDA_IMAGE}
+FROM ${PYTHON_IMAGE}
 
 ARG GRAPHSTORE_VERSION
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -36,47 +46,83 @@ ENV DEBIAN_FRONTEND=noninteractive \
     GRAPHSTORE_PORT=7200 \
     HF_HOME=/root/.cache/huggingface
 
-# Python 3.12 from the deadsnakes PPA. cuDNN 9 already lives in the
-# base image; we only need Python + curl + git for install.
+# Bring in uv as a build-only binary (deleted at end of mega-RUN).
+COPY --from=ghcr.io/astral-sh/uv:0.5.14 /uv /uvx /usr/local/bin/
+
+# Mega-RUN: install all wheels + CUDA runtime + graphstore + strip
+# symbols + delete unused ORT execution providers + purge build deps.
+# Everything lands in one layer so cleanup actually shrinks the image.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        software-properties-common ca-certificates curl git \
-    && add-apt-repository -y ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        python3.12 python3.12-venv python3.12-dev python3-pip \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.12 100 \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 100 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install graphstore + pro extras. llama-cpp-python in [pro] is the
-# CPU-only wheel; users who want GPU offload for Bonsai install the CUDA
-# wheel themselves at runtime via:
-#   pip install llama-cpp-python --extra-index-url \
-#       https://abetlen.github.io/llama-cpp-python/whl/cu124
-RUN python -m pip install --break-system-packages \
-        "graphstore[pro]==${GRAPHSTORE_VERSION}"
+        ca-certificates binutils libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --system \
+        nvidia-cuda-runtime-cu12 \
+        nvidia-cublas-cu12 \
+        nvidia-cudnn-cu12 \
+        nvidia-cuda-nvrtc-cu12 \
+        nvidia-nvjitlink-cu12 \
+    && uv pip install --system \
+        --extra-index-url "https://abetlen.github.io/llama-cpp-python/whl/cu124" \
+        "llama-cpp-python>=0.3" \
+    && uv pip install --system "onnxruntime-gpu>=1.17" \
+    && uv pip install --system \
+        "graphstore==${GRAPHSTORE_VERSION}" \
+        "tokenizers>=0.15" \
+        "huggingface-hub>=0.24" \
+        "mcp>=1.0" \
+    && find /usr/local/lib/python3.12/site-packages -depth \
+        \( -type d \( -name '__pycache__' -o -name 'tests' -o -name 'test' \) \
+        -o -name '*.pyi' -o -name '*.pyc' \) \
+        -exec rm -rf {} + 2>/dev/null \
+    && find /usr/local/lib/python3.12/site-packages -depth \
+        \( -name '*.md' -o -name '*.rst' -o -name 'AUTHORS*' \
+        -o -name 'CHANGELOG*' -o -name 'NOTICE*' \) \
+        -delete 2>/dev/null \
+    && cd /usr/local/lib/python3.12/site-packages/onnxruntime/capi \
+    && rm -f libonnxruntime_providers_tensorrt* \
+             libonnxruntime_providers_qnn* \
+             libonnxruntime_providers_dml* \
+             libonnxruntime_providers_openvino* \
+             libonnxruntime_providers_migraphx* \
+             libonnxruntime_providers_cann* \
+    && cd / \
+    && find /usr/local/lib/python3.12/site-packages/nvidia \
+            -name '*.so*' -type f \
+            -exec strip --strip-unneeded {} + 2>/dev/null || true \
+    && find /usr/local/lib/python3.12/site-packages/llama_cpp/lib \
+            -name '*.so*' -type f \
+            -exec strip --strip-unneeded {} + 2>/dev/null || true \
+    && find /usr/local/lib/python3.12/site-packages/onnxruntime \
+            -name '*.so*' -type f \
+            -exec strip --strip-unneeded {} + 2>/dev/null || true \
+    && apt-get purge -y --auto-remove binutils \
+    && rm -rf /var/lib/apt/lists/* \
+              /usr/local/bin/uv /usr/local/bin/uvx \
+              /root/.cache /tmp/*
 
 # Pre-pull every model the default ProSpec selects so a cold container
-# is functional immediately. ~5 GB total. Skip with --build-arg
-# SKIP_MODEL_PREFETCH=1 for a slim image (first start downloads).
+# is functional immediately. Public repos only - no HF_TOKEN required at
+# build time. ~1.2 GB total (Bonsai TQ1_0 GGUF ~1 GB + Jina v5 ONNX
+# ~120 MB + TinyBERT NER ONNX). Skip with --build-arg SKIP_MODEL_PREFETCH=1
+# for a ~3.5 GB image; first start downloads on demand.
 ARG SKIP_MODEL_PREFETCH=0
 RUN if [ "$SKIP_MODEL_PREFETCH" = "0" ]; then \
         python -c "from huggingface_hub import hf_hub_download; \
-            hf_hub_download('superkaiii/Ternary-Bonsai-4B-TQ1_0-GGUF', \
-                            'Ternary-Bonsai-4B-TQ1_0.gguf')"; \
-        python -c "from huggingface_hub import snapshot_download; \
+            hf_hub_download('superkaiii/Ternary-Bonsai-4B-GGUF', \
+                            'Ternary-Bonsai-4B-TQ1_0.gguf')" \
+        && python -c "from huggingface_hub import snapshot_download; \
             snapshot_download('jinaai/jina-embeddings-v3', \
-                              allow_patterns=['*.onnx','*.json','*.txt'])"; \
-        python -c "from huggingface_hub import snapshot_download; \
-            snapshot_download('Xenova/distilbert-base-multilingual-cased-finetuned-conll03-english')"; \
+                              allow_patterns=['*.onnx','*.json','*.txt'])" \
+        && python -c "from huggingface_hub import snapshot_download; \
+            snapshot_download('onnx-community/TinyBERT-finetuned-NER-ONNX')" ; \
     fi
 
 COPY docker/entrypoint.sh /usr/local/bin/graphstore-entrypoint
-RUN chmod +x /usr/local/bin/graphstore-entrypoint
+RUN chmod +x /usr/local/bin/graphstore-entrypoint \
+    && mkdir -p /data /root/.cache/graphstore
 
 WORKDIR /root
-RUN mkdir -p /data /root/.cache/graphstore
 VOLUME ["/data", "/root/.cache/graphstore", "/root/.cache/huggingface"]
 
 EXPOSE 7200

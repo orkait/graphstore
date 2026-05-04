@@ -15,6 +15,16 @@ HOST="${GRAPHSTORE_HOST:-0.0.0.0}"
 PORT="${GRAPHSTORE_PORT:-7200}"
 TOKEN_FILE="${DB}/.auth_token"
 
+# When CUDA libs ship as pip wheels (Pro image), graphstore.gpu.setup()
+# must run BEFORE any import of llama_cpp / onnxruntime - it ctypes-
+# preloads libcudart / libcublas / libcudnn from the wheels via
+# RTLD_GLOBAL so subsequent dlopens resolve symbols correctly. Skipping
+# this on hosts without the wheels is harmless (setup() returns ready=False
+# and the call is a no-op for shared libs already on the system).
+if [ "${GRAPHSTORE_GPU:-0}" = "1" ]; then
+    python -c "from graphstore import gpu; s = gpu.setup(); print('[entrypoint] gpu.setup ready=' + str(s.ready) + ' provider=' + str(s.provider) + ' err=' + str(s.error or ''))" || true
+fi
+
 if [ -z "${GRAPHSTORE_AUTH_TOKEN:-}" ] && [ "${GRAPHSTORE_ALLOW_UNAUTH_BIND:-0}" != "1" ]; then
     mkdir -p "${DB}"
     if [ ! -s "${TOKEN_FILE}" ]; then

@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "graphstore": {
+      "command": "graphstore-mcp",
+      "env": {
+        "GRAPHSTORE_DB_PATH": "/absolute/path/to/graphstore-agent.db"
+      }
+    },
+    "graphstore-pro": {
+      "command": "graphstore-mcp",
+      "env": {
+        "GRAPHSTORE_DB_PATH": "/absolute/path/to/graphstore-pro.db",
+        "GRAPHSTORE_PROFILE": "pro",
+        "HF_TOKEN": "hf_your_token_here_if_needed"
+      }
+    }
+  }
+}

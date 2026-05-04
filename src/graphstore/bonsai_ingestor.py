@@ -6,11 +6,11 @@ Download the model once before first use (models/ is gitignored):
 
     mkdir -p models/Ternary-Bonsai-4B-TQ1_0 && curl -L -o \\
       models/Ternary-Bonsai-4B-TQ1_0/Ternary-Bonsai-4B-TQ1_0.gguf \\
-      https://huggingface.co/superkaiii/Ternary-Bonsai-4B-TQ1_0-GGUF/resolve/main/Ternary-Bonsai-4B-TQ1_0.gguf
+      https://huggingface.co/superkaiii/Ternary-Bonsai-4B-GGUF/resolve/main/Ternary-Bonsai-4B-TQ1_0.gguf
 
 Publication pipeline: benchmarks/kaggle/pack_ternary_bonsai/ converts
 prism-ml/Ternary-Bonsai-4B-unpacked (FP16) to TQ1_0 via a Kaggle kernel and
-publishes the result to superkaiii/Ternary-Bonsai-4B-TQ1_0-GGUF on HF.
+publishes the result to superkaiii/Ternary-Bonsai-4B-GGUF on HF.
 
 The public surface is `BonsaiIngestor`. Every call:
   1. Loads the skill prompt once, fingerprints it, pins that fingerprint into
