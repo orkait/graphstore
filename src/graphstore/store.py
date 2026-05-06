@@ -99,6 +99,7 @@ class GraphStore:
                  initial_capacity=_UNSET,
                  reader=None,
                  readers=None,
+                 ingestor=None,
                  profile: str | None = None,
                  pro_spec=None,
                  pro_strict: bool = True,
@@ -332,7 +333,14 @@ class GraphStore:
             self._vault_sync = None
             self._vault_executor = None
 
-        # Trace binding for log layer
+        if ingestor is not None and not callable(ingestor):
+            raise TypeError(
+                "ingestor must be a callable (GraphStore) -> object_with_ingest; "
+                f"got {type(ingestor).__name__}"
+            )
+        self._ingestor_factory = ingestor
+        self._ingestor: object | None = None
+
         self._active_trace: str | None = None
 
         self._counters: dict = {
@@ -498,35 +506,8 @@ class GraphStore:
         return BonsaiIngestor(**kwargs)
 
     def _locate_bonsai_gguf(self, quant: str) -> Path:
-        """Find the Bonsai GGUF in the HuggingFace cache.
-
-        Mirrors the discovery in ``pro_probe.BonsaiProbe.measure`` so an
-        ingestor built via ``create_bonsai()`` always points at the same
-        weight file the calibration probe measured.
-        """
-        try:
-            from huggingface_hub import scan_cache_dir
-        except ImportError as e:
-            raise RuntimeError(
-                "huggingface-hub not installed; pip install 'graphstore[pro]'"
-            ) from e
-        # Both TQ1_0 and TQ2_0 quants live in one repo
-        # (`superkaiii/Ternary-Bonsai-4B-GGUF`); discriminate by filename.
-        repo_marker = "Ternary-Bonsai-4B-GGUF"
-        file_marker = f"-{quant.upper()}.gguf"
-        for repo in scan_cache_dir().repos:
-            if repo_marker not in str(repo.repo_id):
-                continue
-            for rev in repo.revisions:
-                for f in rev.files:
-                    if f.file_name.endswith(file_marker):
-                        path = Path(f.file_path)
-                        if path.exists():
-                            return path
-        raise RuntimeError(
-            f"Bonsai GGUF for quant={quant!r} not found in HF cache. "
-            "Run `graphstore pro setup` to download required models."
-        )
+        from graphstore._models import resolve_bonsai_gguf
+        return resolve_bonsai_gguf(quant)
 
     def _build_embedder(self, cfg, embedder_arg):
         """Resolve the embedder instance from kwarg + cfg. Explicit instance
@@ -608,6 +589,68 @@ class GraphStore:
         if self._queue is not None:
             return self._queue.submit(query)
         return self._execute_internal(query)
+
+    def ask(
+        self,
+        question: str,
+        *,
+        limit: int | None = None,
+        using: str | None = None,
+    ) -> Result:
+        """Requires a ``reader=`` callable configured at construction.
+
+        Question-shape routing across REMEMBER / SIMILAR / LEXICAL / RECALL /
+        PATH is not performed here - use ``write()`` with a Bonsai-style
+        ingestor for that.
+        """
+        if not question or not question.strip():
+            raise ValueError("ask requires a non-empty question")
+        escaped_q = question.replace("\\", "\\\\").replace('"', '\\"')
+        parts: list[str] = [f'ANSWER "{escaped_q}"']
+        if limit is not None:
+            parts.append(f"LIMIT {int(limit)}")
+        if using is not None:
+            escaped_u = using.replace("\\", "\\\\").replace('"', '\\"')
+            parts.append(f'USING "{escaped_u}"')
+        return self.execute(" ".join(parts))
+
+    def write(
+        self,
+        text: str,
+        *,
+        msg_id: str,
+        session_id: str = "default",
+        role: str = "user",
+        dry_run: bool = False,
+    ) -> object:
+        """Requires ``ingestor=<callable>`` at construction.
+
+        The factory is invoked lazily on first call so the ingestor receives
+        a fully-initialised ``GraphStore`` (avoids a chicken-and-egg between
+        ``BonsaiIngestor(gs=...)`` and the store still being under
+        construction).
+        """
+        return self._get_ingestor().ingest(
+            text,
+            msg_id=msg_id,
+            session_id=session_id,
+            role=role,
+            dry_run=dry_run,
+        )
+
+    def _get_ingestor(self) -> object:
+        if self._ingestor is not None:
+            return self._ingestor
+        if self._ingestor_factory is None:
+            raise RuntimeError(
+                "GraphStore.write() requires an ingestor. Pass "
+                "`ingestor=<callable>` at construction; the callable receives "
+                "the GraphStore and returns an object exposing "
+                ".ingest(text, *, msg_id, ...) -> result. Example: "
+                "GraphStore(ingestor=lambda gs: BonsaiIngestor(gs=gs))"
+            )
+        self._ingestor = self._ingestor_factory(self)
+        return self._ingestor
 
     def _build_reranker(self, cfg):
         """Build reranker from config. Returns None if not configured."""

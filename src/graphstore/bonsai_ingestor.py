@@ -1119,9 +1119,16 @@ class BonsaiIngestor:
 
     Parameters
     ----------
-    model_path : str | Path
-        Path to a .gguf file. The matching manifest under the same directory
-        is not required; this class talks to llama.cpp directly.
+    model_path : str | Path | None
+        Path to a .gguf file. When omitted, the GGUF is auto-resolved via
+        ``graphstore._models.resolve_bonsai_gguf`` - it is read from the
+        HuggingFace cache or, on first use, downloaded into it. The matching
+        manifest under the same directory is not required; this class talks
+        to llama.cpp directly.
+    quant : str | None
+        Quantization to resolve when ``model_path`` is not provided. Defaults
+        to ``$GRAPHSTORE_BONSAI_QUANT`` or ``"TQ1_0"``. Ignored when
+        ``model_path`` is given.
     gs : GraphStore | None
         Target store. Required for non-dry-run ingests. Dry-runs don't need one.
     skill_path : str | Path | None
@@ -1147,8 +1154,9 @@ class BonsaiIngestor:
 
     def __init__(
         self,
-        model_path: str | Path,
+        model_path: str | Path | None = None,
         *,
+        quant: str | None = None,
         gs: Any | None = None,
         skill_path: str | Path | None = None,
         n_ctx: int | None = None,
@@ -1164,9 +1172,13 @@ class BonsaiIngestor:
         ner_score_threshold: float = 0.7,
         ner_max_hints: int = 6,
     ) -> None:
-        self._model_path = Path(model_path)
-        if not self._model_path.exists():
-            raise FileNotFoundError(f"bonsai model not found: {self._model_path}")
+        if model_path is None:
+            from graphstore._models import resolve_bonsai_gguf
+            self._model_path = resolve_bonsai_gguf(quant)
+        else:
+            self._model_path = Path(model_path)
+            if not self._model_path.exists():
+                raise FileNotFoundError(f"bonsai model not found: {self._model_path}")
         self._gs = gs
         self._skill_path = Path(skill_path) if skill_path else _DEFAULT_PROMPT_PATH
         # Dense user turns can legitimately need 10-15 ops (30-100 tokens).
