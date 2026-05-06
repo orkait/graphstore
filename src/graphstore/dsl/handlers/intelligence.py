@@ -1012,14 +1012,71 @@ class IntelligenceHandlers:
             "candidates": retrieval.data,
             "reader": reader_name,
         }
-        try:
-            answer_text = reader(prompt)
-            data["answer"] = answer_text or ""
-        except Exception as e:
-            data["error"] = f"{type(e).__name__}: {e}"
+        timeout_s = getattr(self, "_reader_timeout_seconds", 60.0)
+        data["answer"], data["error"], timed_out = self._call_reader_with_timeout(
+            reader, prompt, timeout_s,
+        )
+        if data["error"] is None:
+            data.pop("error", None)
 
         meta = dict(retrieval.meta or {})
+        if timed_out:
+            meta.setdefault("warnings", []).append(
+                f"reader timed out after {timeout_s:.1f}s; answer is empty"
+            )
         return Result(kind="answer", data=data, count=1, meta=meta)
+
+    @staticmethod
+    def _call_reader_with_timeout(
+        reader: object,
+        prompt: str,
+        timeout_s: float,
+    ) -> tuple[str, str | None, bool]:
+        """Run reader(prompt) with a wall-clock timeout.
+
+        Daemon thread runs the call; on timeout we abandon it (Python cannot
+        cancel a running thread). The leak is bounded by how many readers
+        genuinely hang; in normal operation the thread completes well before
+        timeout and is garbage-collected.
+
+        Returns ``(answer, error_message, timed_out)``. Exactly one of
+        ``answer`` (non-empty) or ``error_message`` is populated under
+        non-timeout paths; on timeout, ``answer == ""`` and ``error_message``
+        is the timeout description.
+        """
+        import logging
+        import threading
+
+        logger = logging.getLogger(__name__)
+        result: dict[str, object] = {}
+
+        def _runner() -> None:
+            try:
+                result["ok"] = reader(prompt)  # type: ignore[operator]
+            except BaseException as exc:
+                # Catch BaseException: an unhandled SystemExit / KeyboardInterrupt
+                # in the user-supplied reader would die silently in the daemon
+                # thread, leaving the main thread to wait out the full timeout.
+                result["err"] = exc
+
+        worker = threading.Thread(target=_runner, daemon=True, name="graphstore-reader")
+        worker.start()
+        worker.join(timeout=timeout_s)
+
+        if worker.is_alive():
+            logger.warning(
+                "ANSWER reader timed out after %.1fs; daemon thread leaked "
+                "(reader may continue running in the background)",
+                timeout_s,
+            )
+            return "", f"reader timed out after {timeout_s:.1f}s", True
+
+        if "err" in result:
+            err = result["err"]
+            return "", f"{type(err).__name__}: {err}", False
+
+        ok = result.get("ok") or ""
+        return str(ok), None, False
 
     def _resolve_reader(self, name: str | None):
         """Look up a reader callable by name, or fall back to the default.

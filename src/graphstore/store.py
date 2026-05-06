@@ -99,6 +99,7 @@ class GraphStore:
                  initial_capacity=_UNSET,
                  reader=None,
                  readers=None,
+                 reader_timeout_seconds: float = 60.0,
                  ingestor=None,
                  profile: str | None = None,
                  pro_spec=None,
@@ -262,8 +263,13 @@ class GraphStore:
         self._executor._ensure_vector_store_cb = self._ensure_vector_store
         # Reader LLM(s) for the ANSWER verb. Pluggable callables, not a
         # config-layer setting - held as live references on the executor.
+        if reader_timeout_seconds <= 0:
+            raise ValueError(
+                f"reader_timeout_seconds must be > 0; got {reader_timeout_seconds!r}"
+            )
         self._executor._reader = reader
         self._executor._readers = dict(readers) if readers else {}
+        self._executor._reader_timeout_seconds = float(reader_timeout_seconds)
         if reader is not None and not callable(reader):
             raise TypeError("reader must be a callable: reader(prompt, max_tokens=...) -> str")
         if readers:
