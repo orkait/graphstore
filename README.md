@@ -80,9 +80,13 @@ ing.ingest("I prefer tea to coffee.",    msg_id="m2")  # @BELIEF
 ing.ingest("Maria moved to Berlin.",     msg_id="m3")
 ing.ingest("Actually I drink coffee now.", msg_id="m4")  # @RETRACT + @BELIEF
 
-# Retrieval is the same NL surface
-ing.ingest("Where does Maria work?", msg_id="q1", dry_run=True)  # -> @ANSWER
+# Retrieval is the same NL surface. Question-shaped turns emit @ANSWER /
+# @REMEMBER / @SIMILAR / @LEXICAL / @RECALL / @PATH depending on phrasing.
+res = ing.ingest("Where does Maria work?", msg_id="q1")          # executes @ANSWER (needs reader=)
+preview = ing.ingest("Where does Maria work?", msg_id="q1", dry_run=True)  # returns DSL only
 ```
+
+`dry_run=True` returns the synthesized DSL without touching the store - useful for previewing or building training data, but it does NOT produce an answer. To get the answer, leave `dry_run=False` (the default) and configure a reader on the `GraphStore` (see [ANSWER](#-answer-retrieval--reader-llm) below).
 
 Prompt variants:
 - `bonsai_dsl_prompt_lite.txt` (~600 system tokens, 16 verbs, ingest+retrieval): production sweet spot.
