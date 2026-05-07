@@ -165,6 +165,38 @@ r.meta["signals"]        # same telemetry as REMEMBER
 
 graphstore ships no LLM dependency. The reader is a plain callable; bring your own. Named readers (`GraphStore(readers={"fast": a, "careful": b})`) enable A/B via `ANSWER "q" USING "careful"`.
 
+A wall-clock `reader_timeout_seconds` (default 60s) bounds every reader invocation. On timeout the result still comes back, with `data["answer"] == ""`, `data["error"]` describing the timeout, and a `meta["warnings"]` entry — the executor never blocks indefinitely on a hung LLM.
+
+```python
+GraphStore(reader=slow_local_llm, reader_timeout_seconds=120.0)
+```
+
+## 🪶 Python sugar: `g.ask(...)` and `g.write(...)`
+
+Two thin wrappers for agent apps that don't want to hand-write DSL:
+
+```python
+from graphstore import GraphStore
+from graphstore.bonsai_ingestor import BonsaiIngestor
+
+g = GraphStore(
+    path="./store",
+    reader=my_reader,
+    ingestor=lambda gs: BonsaiIngestor(gs=gs),     # auto-fetches Bonsai GGUF on first use
+)
+
+g.write("Maria moved to Berlin.", msg_id="m1")     # NL turn -> @UPSERT/@EDGE -> DSL -> execute
+g.write("I prefer tea to coffee.", msg_id="m2")    # NL turn -> @BELIEF -> DSL -> execute
+
+answer = g.ask("Where does Maria work?", limit=5)  # ANSWER DSL with proper escaping
+print(answer.data["answer"], answer.data["cited_slots"])
+```
+
+- **`g.ask(question, *, limit=None, using=None) -> Result`** — equivalent to `execute('ANSWER "..." [LIMIT n] [USING "name"]')` with quote/backslash escaping handled. Requires a `reader=` callable.
+- **`g.write(text, *, msg_id, session_id="default", role="user", dry_run=False)`** — NL turn through the configured `ingestor=` factory. The factory is called lazily on first invocation so the ingestor receives a fully-initialised `GraphStore`. Without the factory, `write()` raises with a copy-pasteable example.
+
+For graph-aware retrieval (`@REMEMBER`/`@SIMILAR`/`@LEXICAL`/`@RECALL`/`@PATH`), drive the ingestor directly via `g.write(question, msg_id=..., dry_run=True)` and inspect the synthesized DSL — the question-shape routing lives in the Bonsai prompt.
+
 ## 🐍 Typed query builder
 
 Every DSL verb has a typed function. Same grammar, IDE autocomplete, injection-safe.
