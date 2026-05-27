@@ -28,6 +28,23 @@ from graphstore.dsl.ast_nodes import (
 from graphstore.core.errors import BatchRollback, GraphStoreError, NodeNotFound
 from graphstore.core.types import Result
 
+_ner_unavailable_warned = False
+
+
+def _warn_ner_unavailable(exc: Exception) -> None:
+    """Log once that NER is unavailable. Entity extraction is opt-in (onnxruntime
+    + tokenizers + model files); when it is missing, writes proceed without
+    entities instead of failing."""
+    global _ner_unavailable_warned
+    if not _ner_unavailable_warned:
+        _ner_unavailable_warned = True
+        logger.warning(
+            "entity extraction (NER) unavailable; nodes are stored without "
+            "extracted entities. Install onnxruntime + tokenizers and the NER "
+            "model to enable it. (%s: %s)",
+            type(exc).__name__, exc,
+        )
+
 
 class MutationHandlers:
 
@@ -259,13 +276,19 @@ class MutationHandlers:
             # Parse parent's EVENT_AT for inheritance by sentence nodes
             parent_event_ms = self._parse_event_at(getattr(q, 'event_at', None))
 
-            # Batch NER across all sentences (1 ONNX run instead of N)
+            # Batch NER across all sentences (1 ONNX run instead of N).
+            # NER is opt-in: degrade to no entities rather than failing the
+            # write when onnxruntime/tokenizers or the model files are absent.
             if entity_model_dir:
-                all_ents = extract_batch(
-                    sentences, model_dir=entity_model_dir,
-                    score_threshold=entity_score_threshold,
-                    max_length=entity_max_length,
-                )
+                try:
+                    all_ents = extract_batch(
+                        sentences, model_dir=entity_model_dir,
+                        score_threshold=entity_score_threshold,
+                        max_length=entity_max_length,
+                    )
+                except (ImportError, FileNotFoundError, OSError) as e:
+                    _warn_ner_unavailable(e)
+                    all_ents = [[] for _ in sentences]
             else:
                 all_ents = [[] for _ in sentences]
 

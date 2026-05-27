@@ -213,10 +213,18 @@ class IngestHandlers:
         chunk_ents: list[list] = [[] for _ in chunks]
         if entity_model_dir:
             from graphstore.ingest.entity_extract import extract_batch, slug as _ent_slug
-            chunk_ents = extract_batch(
-                [c.text for c in chunks], model_dir=entity_model_dir,
-                score_threshold=entity_score_threshold, max_length=entity_max_length,
-            )
+            try:
+                chunk_ents = extract_batch(
+                    [c.text for c in chunks], model_dir=entity_model_dir,
+                    score_threshold=entity_score_threshold, max_length=entity_max_length,
+                )
+            except (ImportError, FileNotFoundError, OSError) as e:
+                # NER is opt-in: skip entities rather than failing ingest when
+                # onnxruntime/tokenizers or the model files are unavailable.
+                logger.warning(
+                    "entity extraction (NER) unavailable during ingest; chunks "
+                    "stored without entities (%s: %s)", type(e).__name__, e,
+                )
 
         for i, chunk in enumerate(chunks):
             chunk_id = f"{parent_id}:chunk:{chunk.index}"

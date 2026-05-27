@@ -494,8 +494,13 @@ class GraphStore:
             else _DEFAULT_PROMPT_PATH
         )
         cfg = self._config
+        # entity_model_dir defaults to None (NER opt-in for general writes), but
+        # pro mode with ner="tinybert" explicitly opts in, so resolve a concrete
+        # model dir here even when the global default is unset.
         ner_dir = (
-            cfg.dsl.entity_model_dir if self._pro_spec.ner == "tinybert" else None
+            (cfg.dsl.entity_model_dir
+             or f"{os.environ.get('MODELS_DIR', './models')}/tinybert-ner")
+            if self._pro_spec.ner == "tinybert" else None
         )
         kwargs = dict(
             model_path=str(gguf_path),

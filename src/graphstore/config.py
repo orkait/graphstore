@@ -94,7 +94,11 @@ class DslConfig(msgspec.Struct, frozen=True):
     enable_rollback: bool = True
     graph_signal_enabled: bool = True
     entity_extractor: str = "tinybert_onnx"
-    entity_model_dir: str | None = f"{os.environ.get('MODELS_DIR', './models')}/tinybert-ner"
+    # NER entity extraction is opt-in. Default off: writes do not require
+    # onnxruntime + the NER model and never extract entities unless a model dir
+    # is set here (or via GRAPHSTORE_DSL_ENTITY_MODEL_DIR), e.g.
+    # f"{os.environ.get('MODELS_DIR', './models')}/tinybert-ner".
+    entity_model_dir: str | None = None
     entity_score_threshold: float = 0.6
     entity_max_length: int = 256
     reranker: str | None = None
