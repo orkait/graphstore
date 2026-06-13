@@ -263,7 +263,13 @@ class SysPipelineHandlers:
 
     @handles_sys(SysReembed)
     def _reembed(self, q: SysReembed) -> Result:
-        """SYS REEMBED: re-embed all summaries with current embedder."""
+        """SYS REEMBED: re-encode EVERY embedder-produced vector with the current
+        embedder, recovering each node's source text from the document store
+        (DOCUMENT blob / summary), the legacy 'summary' column, or the kind's
+        embed_field - not just the 'summary' column. Reports reembedded + skipped;
+        the caller clears the embedder-dirty flag only when skipped == 0 (full
+        coverage), so a swap never falsely reports all-clear while document
+        vectors are left in the old embedder's space."""
         if not self._embedder:
             raise GraphStoreError("No embedder configured")
 
@@ -271,23 +277,59 @@ class SysPipelineHandlers:
         if vs is None:
             raise GraphStoreError("No vector store initialized")
 
+        from graphstore.document.store import _is_text_content_type
+
         store = self.store
+        ds = self._document_store
+        schema = self.schema
         n = store._next_slot
         live = store.compute_live_mask(n)
+        lookup = store.string_table.lookup
+
+        summary_col = (
+            store.columns.get_column("summary", n)
+            if store.columns.has_column("summary") else None
+        )
+
+        def _col_text(col_info, slot):
+            if col_info is None:
+                return None
+            data, pres, dtype = col_info
+            if slot >= len(pres) or not pres[slot] or dtype != "int32_interned":
+                return None
+            return lookup(int(data[slot]))
+
+        def _recover_text(slot):
+            # priority mirrors how the vector was originally produced
+            if ds is not None:
+                doc = ds.get_document(slot)
+                if doc is not None:
+                    content, ctype = doc
+                    if _is_text_content_type(ctype):
+                        return content.decode("utf-8", errors="ignore")
+                summ = ds.get_summary(slot)
+                if summ and summ.get("summary"):
+                    return summ["summary"]
+            text = _col_text(summary_col, slot)
+            if text:
+                return text
+            kind = lookup(int(store.node_kinds[slot]))
+            kdef = schema.describe_node_kind(kind) if schema else None
+            ef = kdef.get("embed_field") if kdef else None
+            if ef and store.columns.has_column(ef):
+                return _col_text(store.columns.get_column(ef, n), slot)
+            return None
 
         pairs: list[tuple[int, str]] = []
-        if store.columns.has_column("summary"):
-            col_info = store.columns.get_column("summary", n)
-            if col_info is not None:
-                col_data, col_pres, col_dtype = col_info
-                if col_dtype == "int32_interned":
-                    lookup = store.string_table.lookup
-                    for slot in range(n):
-                        if not live[slot] or not col_pres[slot]:
-                            continue
-                        text = lookup(int(col_data[slot]))
-                        if text:
-                            pairs.append((slot, text))
+        skipped = 0
+        for slot in range(n):
+            if not live[slot] or not vs.has_vector(slot):
+                continue
+            text = _recover_text(slot)
+            if text:
+                pairs.append((slot, text))
+            else:
+                skipped += 1
 
         if pairs:
             texts = [t for _, t in pairs]
@@ -295,5 +337,6 @@ class SysPipelineHandlers:
             for (slot, _), vec in zip(pairs, vecs):
                 vs.add(slot, vec)
 
-        # Clear dirty flag on the GraphStore (set by caller after return)
-        return Result(kind="ok", data={"reembedded": len(pairs)}, count=len(pairs))
+        # dirty flag cleared by the caller ONLY when skipped == 0 (full coverage)
+        return Result(kind="ok", data={"reembedded": len(pairs), "skipped": skipped},
+                      count=len(pairs))

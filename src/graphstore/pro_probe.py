@@ -816,8 +816,8 @@ class VisionSidecarProbe(Probe):
             raise RuntimeError(
                 "vision sidecar deps missing; pip install 'graphstore[vision]'"
             ) from e
-        path = vs.pull_model(self._model)
-        return int(Path(path).stat().st_size / (1024 * 1024))
+        model_path, mmproj_path = vs.download_weights(self._model)
+        return int((model_path.stat().st_size + mmproj_path.stat().st_size) / (1024 * 1024))
 
     def measure(
         self,
