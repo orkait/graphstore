@@ -281,3 +281,18 @@ class TestMeasurementHelpers:
     def test_measure_callable_tps_handles_zero_tokens(self):
         tps = pro_probe._measure_callable_tps(lambda: 0, n_iters=3)
         assert tps == 0.0
+
+
+def test_probe_lazy_import_symbols_exist():
+    """Probe download()/measure() lazily import runtime symbols, so a rename
+    there only surfaces at live `pro setup`, not in unit tests. Assert the
+    symbols the jina embedder + reranker probes depend on exist - regression
+    guard for the stale-import bugs (get_install_dir / LlamaCppReranker / rerank)."""
+    from graphstore.registry.installer import (  # noqa: F401
+        install_embedder,
+        load_installed_embedder,
+    )
+    from graphstore.embedding.reranker import GGUFReranker
+
+    # JinaV3RerankerProbe.measure() calls reranker.score(query, documents)
+    assert hasattr(GGUFReranker, "score")
