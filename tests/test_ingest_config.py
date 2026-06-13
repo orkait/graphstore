@@ -20,3 +20,16 @@ def test_ingest_config_is_frozen():
     import msgspec
     c = IngestConfig()
     assert isinstance(c, msgspec.Struct)
+
+
+def test_graphstore_nl_kwarg_shortcuts():
+    from graphstore import GraphStore
+    gs = GraphStore(
+        embedder="none",
+        nl_backend="cloud",
+        nl_models=["groq/llama-3.1-8b-instant"],
+        nl_max_tokens=500,
+    )
+    assert gs._config.ingest.nl_backend == "cloud"
+    assert gs._config.ingest.nl_models == ["groq/llama-3.1-8b-instant"]
+    assert gs._config.ingest.nl_max_tokens == 500

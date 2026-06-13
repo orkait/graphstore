@@ -231,6 +231,23 @@ def test_gs_cloud_auto_wires_answer_reader(monkeypatch):
     assert gs._executor._reader("any prompt") == "@UPSERT a A"  # backed by the cloud runner
 
 
+def test_cloud_eager_wires_reader_at_construction(monkeypatch):
+    from graphstore import GraphStore
+    _patch_cloud(monkeypatch, output="x")
+    gs = GraphStore(embedder="none", enable_sentence_nodes=False, nl_backend="cloud")
+    assert callable(gs._executor._reader)   # wired eagerly, no ingest needed
+
+
+def test_cloud_eager_no_key_is_graceful(monkeypatch):
+    for k in ("GROQ_API_KEY", "CEREBRAS_API_KEY", "CLOUDFLARE_API_KEY",
+              "GOOGLE_AISTUDIO_API_KEY", "OPENROUTER_API_KEY", "OLLAMA_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    from graphstore import GraphStore
+    # no provider key -> construction must NOT raise; reader stays unset
+    gs = GraphStore(embedder="none", enable_sentence_nodes=False, nl_backend="cloud")
+    assert gs._executor._reader is None
+
+
 def test_gs_cloud_respects_user_supplied_reader(monkeypatch):
     from graphstore import GraphStore
     from graphstore.config import GraphStoreConfig, IngestConfig
