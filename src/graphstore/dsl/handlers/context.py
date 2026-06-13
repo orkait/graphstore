@@ -15,6 +15,12 @@ class ContextHandlers:
     @handles(BindContext, write=True)
     def _bind_context(self, q: BindContext) -> Result:
         """BIND CONTEXT: set active context on store."""
+        if getattr(self.store, "_active_namespace", None) is not None:
+            from graphstore.core.errors import GraphStoreError
+            raise GraphStoreError(
+                "cannot BIND CONTEXT while a NAMESPACE is bound (filters would "
+                "AND to empty); DISCARD NAMESPACE first"
+            )
         self.store._active_context = q.name
         return Result(kind="ok", data={"context": q.name}, count=0)
 
@@ -27,6 +33,12 @@ class ContextHandlers:
         from the default (unbound) view, so a harness can populate an isolated
         intelligence corpus without polluting the general agentic memory.
         """
+        if self.store._active_context is not None:
+            from graphstore.core.errors import GraphStoreError
+            raise GraphStoreError(
+                "cannot BIND NAMESPACE while a CONTEXT is bound (filters would "
+                "AND to empty); DISCARD CONTEXT first"
+            )
         self.store._active_namespace = q.name
         return Result(kind="ok", data={"namespace": q.name}, count=0)
 
