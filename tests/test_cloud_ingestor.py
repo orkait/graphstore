@@ -88,3 +88,62 @@ def test_synthesis_shim_reexports_bonsai_pipeline():
     r = S.IngestResult(statements=["x"], executed=1, rejected=[],
                        entities_new=[], beliefs_changed=[], duration_ms=0)
     assert r.executed == 1
+
+
+class _FakeRunner:
+    """Stand-in for LLMRunner: returns canned @-verb output."""
+    def __init__(self, output="", deltas=None):
+        self._output = output
+        self._deltas = deltas or []
+        self.last_model = "fake/model"
+
+    def complete_messages(self, messages, *, max_tokens=1000, temperature=0.0):
+        return self._output
+
+    def stream_messages(self, messages, *, max_tokens=1000, temperature=0.0):
+        for d in self._deltas:
+            yield d
+
+
+def _make_cloud(monkeypatch, gs, output="", deltas=None):
+    from graphstore.ingest.llm import cloud as cloud_mod
+    # avoid needing real provider keys / network in CloudIngestor.__init__
+    monkeypatch.setattr(
+        cloud_mod, "build_provider_chain",
+        lambda *a, **k: [{"pid": "fake", "litellm_model": "fake/m",
+                          "api_base": None, "api_key": "k"}],
+    )
+    monkeypatch.setattr(
+        cloud_mod, "LLMRunner",
+        lambda chain, **kw: _FakeRunner(output=output, deltas=deltas),
+    )
+    return cloud_mod.CloudIngestor(gs=gs)
+
+
+def test_cloud_batch_ingest_writes_graph(monkeypatch):
+    from graphstore import GraphStore
+    gs = GraphStore(embedder="none", enable_sentence_nodes=False)  # in-memory, no embedder download
+    ci = _make_cloud(monkeypatch, gs, output="@UPSERT alice Alice\n@FACT fav blue")
+    res = ci.ingest("alice likes blue", msg_id="msg:1")
+    assert res.executed > 0
+    assert not res.rejected
+    assert gs.execute('NODE "msg:1"').count == 1
+
+
+def test_cloud_batch_empty_output_raises(monkeypatch):
+    from graphstore import GraphStore
+    from graphstore.ingest.llm.synthesis import IngestEmpty
+    gs = GraphStore(embedder="none", enable_sentence_nodes=False)
+    ci = _make_cloud(monkeypatch, gs, output="<think>nothing</think>")
+    with pytest.raises(IngestEmpty):
+        ci.ingest("noop", msg_id="msg:2")
+
+
+def test_cloud_batch_dry_run_does_not_write(monkeypatch):
+    from graphstore import GraphStore
+    gs = GraphStore(embedder="none", enable_sentence_nodes=False)
+    ci = _make_cloud(monkeypatch, gs, output="@UPSERT bob Bob")
+    res = ci.ingest("bob", msg_id="msg:3", dry_run=True)
+    assert res.dry_run is True
+    assert res.executed == 0
+    assert gs.execute('NODE "msg:3"').count == 0
