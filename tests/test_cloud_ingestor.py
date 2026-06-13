@@ -220,3 +220,24 @@ def test_gs_ingest_nl_stream_requires_cloud():
     gs = GraphStore(embedder="none")  # nl_backend=None
     with pytest.raises(ValueError, match="cloud"):
         list(gs.ingest_nl_stream("hi"))
+
+
+def test_gs_cloud_auto_wires_answer_reader(monkeypatch):
+    # @ANSWER needs executor._reader; cloud backend should wire it from the chain
+    gs = _cloud_gs(monkeypatch, output="@UPSERT a A")
+    assert gs._executor._reader is None          # unset before ingestor built
+    gs.ingest_nl("seed", msg_id="m")
+    assert callable(gs._executor._reader)         # wired lazily by _get_nl_ingestor
+    assert gs._executor._reader("any prompt") == "@UPSERT a A"  # backed by the cloud runner
+
+
+def test_gs_cloud_respects_user_supplied_reader(monkeypatch):
+    from graphstore import GraphStore
+    from graphstore.config import GraphStoreConfig, IngestConfig
+    _patch_cloud(monkeypatch, output="@UPSERT a A")
+    def sentinel(prompt, max_tokens=512):
+        return "USER_READER"
+    gs = GraphStore(embedder="none", enable_sentence_nodes=False, reader=sentinel)
+    gs._config = GraphStoreConfig(ingest=IngestConfig(nl_backend="cloud"))
+    gs.ingest_nl("seed", msg_id="m")
+    assert gs._executor._reader is sentinel       # do not clobber a user reader

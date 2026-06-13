@@ -789,6 +789,18 @@ class GraphStore:
                 max_tokens=ic.nl_max_tokens,
                 temperature=ic.nl_temperature,
             )
+            # Auto-wire the ANSWER reader from the same cloud chain when the
+            # caller didn't supply one. Without this, @ANSWER raises
+            # "ANSWER requires a configured reader". A user-passed reader= wins.
+            if getattr(self._executor, "_reader", None) is None:
+                _runner = self._nl_ingestor._runner
+
+                def _cloud_reader(prompt: str, max_tokens: int = 512) -> str:
+                    return _runner.complete_messages(
+                        [{"role": "user", "content": prompt}], max_tokens=max_tokens
+                    )
+
+                self._executor._reader = _cloud_reader
         elif backend == "local":
             raise ValueError(
                 "ingest.nl_backend='local' is not wired through config yet; "
