@@ -81,7 +81,7 @@ def _infer_rpm(providers: list[dict]) -> int:
     if has_free:
         return FREE_TIER_RPM
     has_local = any(
-        "localhost" in p.get("api_base", "") or "127.0.0.1" in p.get("api_base", "")
+        "localhost" in (p.get("api_base") or "") or "127.0.0.1" in (p.get("api_base") or "")
         for p in providers
     )
     if has_local and len(providers) == 1:
@@ -246,6 +246,95 @@ class LLMRunner:
         """Sync call returning (content, model_used). For autoresearch logging."""
         content = self.call_sync(prompt, max_tokens=max_tokens, temperature=temperature)
         return content, self.last_model
+
+    def complete_messages(
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float = 0.0,
+    ) -> str:
+        """Sync chat-shaped completion with provider fallback.
+
+        Tries each provider in order across `retries` rounds; returns the first
+        non-empty content. Returns "" on total failure. Unlike call_one this
+        accepts a full messages list (system + user) and runs synchronously -
+        the rpm cap is not enforced here (interactive ingestion is per-message,
+        not bulk). Use call_many for rpm-bounded batch throughput.
+        """
+        import litellm
+        litellm.suppress_debug_info = True
+        for attempt in range(self._retries):
+            for provider in self._providers:
+                extra = {"account_id": provider["account_id"]} if provider.get("account_id") else {}
+                try:
+                    resp = litellm.completion(
+                        model=provider["litellm_model"],
+                        messages=messages,
+                        api_base=provider.get("api_base"),
+                        api_key=provider["api_key"],
+                        stream=False,
+                        timeout=self._timeout_s,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **extra,
+                    )
+                    content = resp.choices[0].message.content or ""
+                    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                    if content:
+                        self.last_model = provider["litellm_model"]
+                        return content
+                except Exception as err:
+                    wait = _parse_retry_after(err)
+                    if wait > 0:
+                        time.sleep(wait)
+                    _log.debug("complete_messages failed on %s: %s", provider.get("pid"), err)
+            time.sleep(2 ** attempt)
+        return ""
+
+    def stream_messages(
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float = 0.0,
+    ):
+        """Sync streaming completion. Yields content deltas.
+
+        Provider fallback only happens before the first chunk; once a provider
+        starts streaming we commit to it (no cross-provider mid-stream resume).
+        Raises RuntimeError if every provider fails before yielding a token.
+        """
+        import litellm
+        litellm.suppress_debug_info = True
+        last_err: Exception | None = None
+        for provider in self._providers:
+            extra = {"account_id": provider["account_id"]} if provider.get("account_id") else {}
+            try:
+                stream = litellm.completion(
+                    model=provider["litellm_model"],
+                    messages=messages,
+                    api_base=provider.get("api_base"),
+                    api_key=provider["api_key"],
+                    stream=True,
+                    timeout=self._timeout_s,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **extra,
+                )
+                self.last_model = provider["litellm_model"]
+                for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    delta = getattr(chunk.choices[0].delta, "content", None)
+                    if delta:
+                        yield delta
+                return
+            except Exception as err:
+                last_err = err
+                _log.debug("stream_messages failed on %s: %s", provider.get("pid"), err)
+                continue
+        raise RuntimeError(f"all providers failed to stream: {last_err}")
 
 
 _SHARED: "LLMRunner | None" = None

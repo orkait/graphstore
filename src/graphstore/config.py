@@ -163,6 +163,19 @@ class ComputeConfig(msgspec.Struct, frozen=True):
     disable_battery_scaling: bool = False
 
 
+class IngestConfig(msgspec.Struct, frozen=True):
+    # NL->DSL ingestion backend. None disables NL ingest (explicit opt-in);
+    # "cloud" uses the litellm multi-provider CloudIngestor; "local" uses the
+    # GGUF BonsaiIngestor (requires a model; wire via GraphStore(profile="pro")).
+    nl_backend: str | None = None
+    # Candidate provider-prefixed model ids for the cloud chain. Empty list =
+    # use resolve.DEFAULT_FREE_FIRST_CHAIN.
+    nl_models: list[str] = msgspec.field(default_factory=list)
+    free_first: bool = True
+    nl_max_tokens: int = 1000
+    nl_temperature: float = 0.0
+
+
 class GraphStoreConfig(msgspec.Struct, frozen=True):
     core: CoreConfig = msgspec.field(default_factory=CoreConfig)
     vector: VectorConfig = msgspec.field(default_factory=VectorConfig)
@@ -174,6 +187,7 @@ class GraphStoreConfig(msgspec.Struct, frozen=True):
     server: ServerConfig = msgspec.field(default_factory=ServerConfig)
     evolution: EvolutionConfig = msgspec.field(default_factory=EvolutionConfig)
     compute: ComputeConfig = msgspec.field(default_factory=ComputeConfig)
+    ingest: IngestConfig = msgspec.field(default_factory=IngestConfig)
 
 
 _decoder = msgspec.json.Decoder(GraphStoreConfig)
@@ -191,6 +205,7 @@ _SECTION_MAP: dict[str, tuple[type, dict[str, type]]] = {
     "server": (ServerConfig, {f: type(getattr(ServerConfig(), f)) for f in ServerConfig.__struct_fields__}),
     "evolution": (EvolutionConfig, {f: type(getattr(EvolutionConfig(), f)) for f in EvolutionConfig.__struct_fields__}),
     "compute": (ComputeConfig, {f: type(getattr(ComputeConfig(), f)) for f in ComputeConfig.__struct_fields__}),
+    "ingest": (IngestConfig, {f: type(getattr(IngestConfig(), f)) for f in IngestConfig.__struct_fields__}),
 }
 
 # Flat kwarg name -> (section, field) for constructor shortcuts
