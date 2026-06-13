@@ -244,6 +244,10 @@ _KWARG_SHORTCUTS: dict[str, tuple[str, str]] = {
     "similarity_threshold": ("vector", "similarity_threshold"),
     "duplicate_threshold":  ("vector", "duplicate_threshold"),
     "fts_tokenizer":        ("document", "fts_tokenizer"),
+    "nl_backend":           ("ingest", "nl_backend"),
+    "nl_models":            ("ingest", "nl_models"),
+    "nl_max_tokens":        ("ingest", "nl_max_tokens"),
+    "nl_temperature":       ("ingest", "nl_temperature"),
 }
 
 

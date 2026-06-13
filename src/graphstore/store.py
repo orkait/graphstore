@@ -97,6 +97,10 @@ class GraphStore:
                  quantize_binary=_UNSET,
                  use_compression=_UNSET,
                  initial_capacity=_UNSET,
+                 nl_backend=_UNSET,
+                 nl_models=_UNSET,
+                 nl_max_tokens=_UNSET,
+                 nl_temperature=_UNSET,
                  reader=None,
                  readers=None,
                  reader_timeout_seconds: float = 60.0,
@@ -167,6 +171,7 @@ class GraphStore:
             "reranker_model_dir", "reranker_projector_path",
             "reranker_max_length", "reranker_gpu_layers", "quantize_binary",
             "use_compression", "initial_capacity",
+            "nl_backend", "nl_models", "nl_max_tokens", "nl_temperature",
         )
         _loc = locals()
         overrides = {k: _loc[k] for k in _kwarg_names if _loc[k] is not self._UNSET}
