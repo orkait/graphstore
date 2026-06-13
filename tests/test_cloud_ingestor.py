@@ -147,3 +147,27 @@ def test_cloud_batch_dry_run_does_not_write(monkeypatch):
     assert res.dry_run is True
     assert res.executed == 0
     assert gs.execute('NODE "msg:3"').count == 0
+
+
+def test_cloud_stream_emits_phases_and_writes(monkeypatch):
+    from graphstore import GraphStore
+    gs = GraphStore(embedder="none", enable_sentence_nodes=False)
+    ci = _make_cloud(monkeypatch, gs, deltas=["@UPSERT alice ", "Alice\n", "@FACT fav blue"])
+    events = list(ci.ingest_stream("alice likes blue", msg_id="msg:s1"))
+    phases = [e["phase"] for e in events]
+    assert "generating" in phases
+    assert "synthesizing" in phases
+    assert "executing" in phases
+    assert phases[-1] == "done"
+    assert events[-1]["status"] == "ok"
+    assert gs.execute('NODE "msg:s1"').count == 1
+    assert any(e["phase"] == "executing" and e.get("status") == "ok" for e in events)
+
+
+def test_cloud_stream_empty_output_done_empty(monkeypatch):
+    from graphstore import GraphStore
+    gs = GraphStore(embedder="none", enable_sentence_nodes=False)
+    ci = _make_cloud(monkeypatch, gs, deltas=["<think>", "nothing", "</think>"])
+    events = list(ci.ingest_stream("noop", msg_id="msg:s2"))
+    assert events[-1] == {"phase": "done", "status": "empty"}
+    assert gs.execute('NODE "msg:s2"').count == 0
