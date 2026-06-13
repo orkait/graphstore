@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time as _time
 from collections import defaultdict
 from pathlib import Path
@@ -106,6 +107,15 @@ def _get_store() -> GraphStore:
             kwargs["config_path"] = config_path
         if ingest_root:
             kwargs["ingest_root"] = ingest_root
+        # GRAPHSTORE_NER falsy -> entity_model_dir=None, skips the NER extractor.
+        if os.environ.get("GRAPHSTORE_NER", "1").strip().lower() in ("0", "false", "off", "no"):
+            kwargs["entity_model_dir"] = None
+        # FastAPI serves these sync endpoints from a threadpool, so multiple
+        # requests can hit this shared store concurrently. The storage engine
+        # is single-writer - concurrent writers corrupt node_count / id_to_slot
+        # and crash ColumnStore._grow. queued=True serializes execute() through
+        # one worker, making the shared instance safe across request threads.
+        kwargs["queued"] = True
         _store = GraphStore(**kwargs)
     return _store
 
@@ -135,16 +145,26 @@ def _json_bytes_response(payload: Any) -> Response:
 
 class ExecuteRequest(BaseModel):
     query: str
+    namespace: str | None = None
 
 
 class BatchRequest(BaseModel):
     queries: list[str]
+    namespace: str | None = None
 
 
 class ConfigRequest(BaseModel):
     ceiling_mb: int | None = None
     cost_threshold: int | None = None
     eviction_target_ratio: float | None = None
+
+
+class BonsaiIngestRequest(BaseModel):
+    text: str
+    msg_id: str | None = None
+    session_id: str = "default"
+    role: str = "user"
+    dry_run: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +199,7 @@ def execute(req: ExecuteRequest):
         return _json_bytes_response({"kind": "error", "data": err, "count": 0, "elapsed_us": 0})
     store = _get_store()
     try:
-        result = store.execute(req.query)
+        result = store.execute(req.query, namespace=req.namespace)
     except Exception as exc:
         # Catch all exceptions (including ValueError, KeyError, etc.) and
         # return them as soft 200 errors. Pre-fix only GraphStoreError was
@@ -213,7 +233,7 @@ def execute_batch(req: BatchRequest):
             results.append({"kind": "error", "data": err, "count": 0, "elapsed_us": 0})
             continue
         try:
-            r = store.execute(q)
+            r = store.execute(q, namespace=req.namespace)
             results.append(_result_payload(r))
         except Exception as exc:
             # Same widening as /api/execute — a single unexpected error
@@ -228,6 +248,95 @@ def execute_batch(req: BatchRequest):
                 "elapsed_us": 0,
             })
     return _json_bytes_response(results)
+
+
+def _detect_cpu_quota() -> int:
+    """Effective CPU count from the cgroup CFS quota (cgroup v2 then v1), falling
+    back to affinity/cpu_count. Quota reflects the real limit; affinity sees host cores."""
+    try:
+        with open("/sys/fs/cgroup/cpu.max") as f:
+            quota, period = f.read().split()
+        if quota != "max":
+            return max(1, round(int(quota) / int(period)))
+    except (OSError, ValueError):
+        pass
+    try:
+        q = int(open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read())
+        p = int(open("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read())
+        if q > 0:
+            return max(1, round(q / p))
+    except (OSError, ValueError):
+        pass
+    try:
+        return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return os.cpu_count() or 2
+
+
+_bonsai = None
+_bonsai_lock = threading.Lock()
+
+
+def _get_bonsai():
+    """Lazily build a CPU BonsaiIngestor (n_gpu_layers=0) from
+    GRAPHSTORE_BONSAI_GGUF. Bypasses the CUDA-gated pro resolver, which refuses
+    to build on a host without a GPU - Bonsai itself runs fine on CPU."""
+    global _bonsai
+    if _bonsai is None:
+        with _bonsai_lock:
+            if _bonsai is None:
+                gguf = os.environ.get("GRAPHSTORE_BONSAI_GGUF")
+                if not gguf:
+                    raise GraphStoreError(
+                        "Bonsai not configured: set GRAPHSTORE_BONSAI_GGUF to the GGUF path"
+                    )
+                from graphstore.bonsai_ingestor import BonsaiIngestor, _DEFAULT_LITE_PROMPT_PATH
+                threads_env = os.environ.get("GRAPHSTORE_BONSAI_THREADS")
+                if threads_env:
+                    n_threads = int(threads_env)
+                else:
+                    # Use the cgroup CFS quota, not the visible core count. llama.cpp's
+                    # default (and sched_getaffinity) read HOST cores, which massively
+                    # oversubscribes a quota-limited container (e.g. Railway: 24 vCPU
+                    # quota on a 48-core host). Reserve one only when there's headroom.
+                    avail = _detect_cpu_quota()
+                    n_threads = avail - 1 if avail > 2 else avail
+                    n_threads = max(1, n_threads)
+                _bonsai = BonsaiIngestor(
+                    model_path=gguf,
+                    gs=_get_store(),
+                    skill_path=str(_DEFAULT_LITE_PROMPT_PATH),
+                    n_gpu_layers=0,
+                    n_threads=n_threads,
+                )
+    return _bonsai
+
+
+@app.post("/api/ingest")
+def ingest(req: BonsaiIngestRequest):
+    """Natural-language -> DSL via Ternary-Bonsai (CPU). dry_run=True returns the
+    synthesized DSL without writing to the store."""
+    import logging
+    import uuid
+    try:
+        bonsai = _get_bonsai()
+        result = bonsai.ingest(
+            req.text,
+            msg_id=req.msg_id or f"msg_{uuid.uuid4().hex[:16]}",
+            session_id=req.session_id,
+            role=req.role,
+            dry_run=req.dry_run,
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).warning("ingest: %s: %s", type(exc).__name__, exc)
+        return _json_bytes_response({"kind": "error", "data": f"{type(exc).__name__}: {exc}"})
+    import dataclasses
+    try:
+        payload = dataclasses.asdict(result) if dataclasses.is_dataclass(result) else dict(result)
+    except Exception:
+        payload = {k: getattr(result, k) for k in ("statements", "executed", "parsed", "rejected")
+                   if hasattr(result, k)}
+    return _json_bytes_response({"kind": "ingest", "data": payload})
 
 
 @app.get("/api/graph")

@@ -45,8 +45,13 @@ class CommandQueue:
         self._seq += 1
         return seq
 
-    def submit(self, query: str) -> Any:
-        """Submit interactive query, block until result."""
+    def submit(self, query: str, namespace: str | None = None) -> Any:
+        """Submit interactive query, block until result.
+
+        ``namespace`` is applied for the duration of this query only, inside
+        the worker thread (serialized), so a scoped read never leaks global
+        _active_namespace state to other queries.
+        """
         future: Future = Future()
         # Atomic: _running check + seq allocation + put. If shutdown()
         # is waiting for the lock, it will run AFTER this put completes,
@@ -55,10 +60,10 @@ class CommandQueue:
         with self._lock:
             if not self._running:
                 raise RuntimeError("CommandQueue is shut down")
-            self._queue.put((INTERACTIVE, self._next_seq_locked(), query, future))
+            self._queue.put((INTERACTIVE, self._next_seq_locked(), query, future, namespace))
         return future.result()
 
-    def submit_background(self, query: str) -> Future:
+    def submit_background(self, query: str, namespace: str | None = None) -> Future:
         """Submit background query, return Future immediately.
 
         Failed background jobs are logged at WARNING level even if
@@ -69,7 +74,7 @@ class CommandQueue:
         with self._lock:
             if not self._running:
                 raise RuntimeError("CommandQueue is shut down")
-            self._queue.put((BACKGROUND, self._next_seq_locked(), query, future))
+            self._queue.put((BACKGROUND, self._next_seq_locked(), query, future, namespace))
         return future
 
     @staticmethod
@@ -90,18 +95,23 @@ class CommandQueue:
             if not self._running:
                 return
             self._running = False
-            self._queue.put((999, 0, _SHUTDOWN, None))
+            self._queue.put((999, 0, _SHUTDOWN, None, None))
         self._worker.join(timeout=5)
 
     def _run(self) -> None:
         """Worker loop: drain queue, execute, set results."""
         while True:
             item = self._queue.get()
-            priority, seq, query, future = item
+            priority, seq, query, future, namespace = item
             if query is _SHUTDOWN:
                 break
             try:
-                result = self._execute_fn(query)
+                # Only thread namespace when set, so generic execute_fn(query)
+                # callers (and tests) keep working unchanged.
+                if namespace is None:
+                    result = self._execute_fn(query)
+                else:
+                    result = self._execute_fn(query, namespace=namespace)
                 future.set_result(result)
             except Exception as e:
                 future.set_exception(e)

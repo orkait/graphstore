@@ -613,11 +613,17 @@ class GraphStore:
         executor._vision_base_url = doc.vision_base_url
         executor._vision_max_tokens = doc.vision_max_tokens
 
-    def execute(self, query: str) -> Result:
-        """Execute a DSL query. Thread-safe if queued=True."""
+    def execute(self, query: str, *, namespace: str | None = None) -> Result:
+        """Execute a DSL query. Thread-safe if queued=True.
+
+        ``namespace`` scopes this single query to a graphstore namespace
+        (reads see only it; writes are tagged with it) WITHOUT leaving global
+        _active_namespace state set - safe to call concurrently against a
+        shared, queued server, unlike a separate ``BIND NAMESPACE`` statement.
+        """
         if self._queue is not None:
-            return self._queue.submit(query)
-        return self._execute_internal(query)
+            return self._queue.submit(query, namespace=namespace)
+        return self._execute_internal(query, namespace=namespace)
 
     def ask(
         self,
@@ -704,8 +710,25 @@ class GraphStore:
             )
         return None
 
-    def _execute_internal(self, query: str) -> Result:
-        """Execute a DSL query directly (no queue). Internal use only."""
+    def _execute_internal(self, query: str, *, namespace: str | None = None) -> Result:
+        """Execute a DSL query directly (no queue). Internal use only.
+
+        Runs on the single-writer worker thread when queued, so applying
+        ``namespace`` here (set on entry, restore on exit) is race-free: no
+        other query runs between set and restore, and global state never
+        leaks past this call.
+        """
+        if namespace is None:
+            return self._execute_internal_body(query)
+        store = self._runtime.store
+        prev = store._active_namespace
+        store._active_namespace = namespace
+        try:
+            return self._execute_internal_body(query)
+        finally:
+            store._active_namespace = prev
+
+    def _execute_internal_body(self, query: str) -> Result:
         if self._optimizer.optimizing:
             raise OptimizationInProgress()
 
