@@ -287,6 +287,9 @@ class GraphStore:
         # Cron scheduler (requires queued mode for background execution)
         self._cron: CronScheduler | None = None
 
+        # NL->DSL ingestor (built lazily from config.ingest.nl_backend)
+        self._nl_ingestor = None
+
         # WAL manager
         self._wal = WALManager(
             self._runtime, self._executor,
@@ -716,6 +719,66 @@ class GraphStore:
     def execute_batch(self, queries: list[str]) -> list[Result]:
         """Execute multiple queries. Each is independent (not transactional)."""
         return [self.execute(q) for q in queries]
+
+    def _get_nl_ingestor(self):
+        """Build (once) and cache the NL ingestor selected by config.ingest.nl_backend."""
+        if self._nl_ingestor is not None:
+            return self._nl_ingestor
+        backend = self._config.ingest.nl_backend
+        if backend == "cloud":
+            from graphstore.ingest.llm.cloud import CloudIngestor
+            ic = self._config.ingest
+            self._nl_ingestor = CloudIngestor(
+                gs=self,
+                models=list(ic.nl_models) or None,
+                free_first=ic.free_first,
+                max_tokens=ic.nl_max_tokens,
+                temperature=ic.nl_temperature,
+            )
+        elif backend == "local":
+            raise ValueError(
+                "ingest.nl_backend='local' is not wired through config yet; "
+                "construct a BonsaiIngestor directly or use GraphStore(profile='pro') "
+                "+ gs.create_bonsai()"
+            )
+        else:
+            raise ValueError(
+                "NL ingestion is disabled: set config.ingest.nl_backend='cloud' "
+                "(or 'local') to enable gs.ingest_nl()"
+            )
+        return self._nl_ingestor
+
+    def ingest_nl(self, text: str, *, msg_id: str | None = None,
+                  session_id: str = "default", role: str = "user",
+                  dry_run: bool = False):
+        """Ingest natural-language text as DSL via the configured LLM backend.
+
+        Returns an ingest IngestResult (statements / executed / rejected). A
+        msg_id is auto-generated when not supplied. Requires
+        config.ingest.nl_backend to be set.
+        """
+        import uuid
+        ingestor = self._get_nl_ingestor()
+        mid = msg_id or f"msg:{uuid.uuid4().hex}"
+        return ingestor.ingest(text, msg_id=mid, session_id=session_id,
+                               role=role, dry_run=dry_run)
+
+    def ingest_nl_stream(self, text: str, *, msg_id: str | None = None,
+                         session_id: str = "default", role: str = "user"):
+        """Stream NL ingestion progress events. Cloud backend only.
+
+        Yields {"phase": "generating"|"synthesizing"|"executing"|"done", ...}.
+        Raises ValueError when nl_backend is not 'cloud'.
+        """
+        import uuid
+        if self._config.ingest.nl_backend != "cloud":
+            raise ValueError(
+                "ingest_nl_stream requires config.ingest.nl_backend='cloud' "
+                "(streaming is a cloud-only feature)"
+            )
+        ingestor = self._get_nl_ingestor()
+        mid = msg_id or f"msg:{uuid.uuid4().hex}"
+        return ingestor.ingest_stream(text, msg_id=mid, session_id=session_id, role=role)
 
     @contextmanager
     def deferred_embeddings(self, batch_size: int = 64):

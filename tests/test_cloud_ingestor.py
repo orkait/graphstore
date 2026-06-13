@@ -171,3 +171,52 @@ def test_cloud_stream_empty_output_done_empty(monkeypatch):
     events = list(ci.ingest_stream("noop", msg_id="msg:s2"))
     assert events[-1] == {"phase": "done", "status": "empty"}
     assert gs.execute('NODE "msg:s2"').count == 0
+
+
+def _patch_cloud(monkeypatch, output="", deltas=None):
+    from graphstore.ingest.llm import cloud as cloud_mod
+    monkeypatch.setattr(
+        cloud_mod, "build_provider_chain",
+        lambda *a, **k: [{"pid": "fake", "litellm_model": "fake/m",
+                          "api_base": None, "api_key": "k"}],
+    )
+    monkeypatch.setattr(
+        cloud_mod, "LLMRunner",
+        lambda chain, **kw: _FakeRunner(output=output, deltas=deltas),
+    )
+
+
+def _cloud_gs(monkeypatch, output="", deltas=None):
+    from graphstore import GraphStore
+    from graphstore.config import GraphStoreConfig, IngestConfig
+    _patch_cloud(monkeypatch, output=output, deltas=deltas)
+    gs = GraphStore(embedder="none", enable_sentence_nodes=False)
+    gs._config = GraphStoreConfig(ingest=IngestConfig(nl_backend="cloud"))
+    return gs
+
+
+def test_gs_ingest_nl_requires_backend():
+    from graphstore import GraphStore
+    gs = GraphStore(embedder="none")  # default nl_backend=None
+    with pytest.raises(ValueError, match="nl_backend"):
+        gs.ingest_nl("hello", msg_id="m1")
+
+
+def test_gs_ingest_nl_cloud(monkeypatch):
+    gs = _cloud_gs(monkeypatch, output="@UPSERT alice Alice")
+    res = gs.ingest_nl("alice", msg_id="m2")
+    assert res.executed > 0
+    assert gs.execute('NODE "m2"').count == 1
+
+
+def test_gs_ingest_nl_auto_msg_id(monkeypatch):
+    gs = _cloud_gs(monkeypatch, output="@FACT mood good")
+    res = gs.ingest_nl("i feel good")  # no msg_id -> auto
+    assert res.executed > 0
+
+
+def test_gs_ingest_nl_stream_requires_cloud():
+    from graphstore import GraphStore
+    gs = GraphStore(embedder="none")  # nl_backend=None
+    with pytest.raises(ValueError, match="cloud"):
+        list(gs.ingest_nl_stream("hi"))
