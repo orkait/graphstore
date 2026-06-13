@@ -65,3 +65,18 @@ def test_lexical_retrieval_respects_namespace():
     hit = _ids(gs.execute('LEXICAL SEARCH "secret breach" LIMIT 10'))
     gs.execute('DISCARD NAMESPACE')
     assert "i1" in hit                                                                # visible when bound
+
+
+def test_edges_isolated_by_namespace_in_count():
+    # an edge between two namespaced nodes must not leak into the default COUNT EDGES
+    gs = GraphStore(embedder="none", enable_sentence_nodes=False)
+    gs.execute('CREATE NODE "g1" kind = "memory"')
+    gs.execute('CREATE NODE "g2" kind = "memory"')
+    gs.execute('CREATE EDGE "g1" -> "g2" kind = "rel"')
+    gs.execute('BIND NAMESPACE "intel"')
+    gs.execute('CREATE NODE "i1" kind = "evidence"')
+    gs.execute('CREATE NODE "i2" kind = "evidence"')
+    gs.execute('CREATE EDGE "i1" -> "i2" kind = "about"')
+    gs.execute('DISCARD NAMESPACE')
+    assert gs.execute('COUNT EDGES').count == 1                       # intel edge excluded
+    assert gs.execute('COUNT EDGES', namespace="intel").count == 1   # only intel edge when bound

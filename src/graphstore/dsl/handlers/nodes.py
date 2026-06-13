@@ -176,7 +176,34 @@ class NodeHandlers:
                     count = len(self.store._edges_by_type.get(kind_filter, []))
                 else:
                     edges = self.store.get_all_edges()
-                    count = sum(1 for e in edges if self._eval_where(q.where.expr, e))
+                    count = sum(
+                        1 for e in edges
+                        if self._eval_where(q.where.expr, e) and self._edge_visible(e)
+                    )
             else:
-                count = self.store.edge_count
+                # Honor namespace/context isolation: an edge is visible only when
+                # BOTH endpoints are visible under the current view, else a raw
+                # edge_count leaks edges between namespaced (or context) nodes.
+                if (getattr(self.store, "_active_namespace", None) is not None
+                        or self.store.columns.has_column("__namespace__")
+                        or self.store._active_context is not None):
+                    n = self.store._next_slot
+                    live = self._compute_live_mask(n)
+                    count = sum(
+                        1
+                        for edges in self.store._edges_by_type.values()
+                        for (s, t, _d) in edges
+                        if s < n and t < n and live[s] and live[t]
+                    )
+                else:
+                    count = self.store.edge_count
         return Result(kind="count", data=count, count=count)
+
+    def _edge_visible(self, edge: dict) -> bool:
+        """True when both edge endpoints are visible under the current view
+        (namespace/context/TTL/retraction). Cheap no-op when nothing is scoped."""
+        if (getattr(self.store, "_active_namespace", None) is None
+                and not self.store.columns.has_column("__namespace__")
+                and self.store._active_context is None):
+            return True
+        return self._is_visible_by_id(edge["source"]) and self._is_visible_by_id(edge["target"])
