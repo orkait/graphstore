@@ -67,3 +67,24 @@ def test_stream_messages_yields_deltas(monkeypatch):
     runner = LLMRunner(PROVIDERS)
     got = list(runner.stream_messages([{"role": "user", "content": "x"}]))
     assert "".join(got) == "@U alice Alice"
+
+
+def test_synthesis_shim_reexports_bonsai_pipeline():
+    from graphstore.ingest.llm import synthesis as S
+    # @-verb parse -> ParsedTurn (v6 verbs are full words: UPSERT / FACT / ...)
+    turn = S.parse_verb_output('@UPSERT alice Alice\n@FACT fav_color blue')
+    assert ("alice", "Alice") in turn.entities
+    assert ("fact:fav_color", "blue") in turn.beliefs
+    # whole-turn synthesis (gs=None => dry, mints entities) yields DSL lines
+    dsl = S.synthesize_dsl(
+        turn, msg_id="msg:1", session_id="s", role="user",
+        text="alice likes blue", gs=None,
+    )
+    assert any(line.startswith('CREATE NODE "msg:1"') for line in dsl)
+    assert any(line.startswith("ASSERT ") for line in dsl)
+    # types + errors are re-exported
+    assert S.IngestError is S.BonsaiError
+    assert issubclass(S.IngestEmpty, S.IngestError)
+    r = S.IngestResult(statements=["x"], executed=1, rejected=[],
+                       entities_new=[], beliefs_changed=[], duration_ms=0)
+    assert r.executed == 1
