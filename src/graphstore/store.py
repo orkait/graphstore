@@ -388,6 +388,16 @@ class GraphStore:
             self._cron.start()
             self._sys_executor._cron = self._cron
 
+        # Eagerly build the cloud NL ingestor so the ANSWER reader is wired
+        # before any ingest, and so a misconfiguration (missing provider key)
+        # surfaces as a startup warning instead of a confusing first-call
+        # failure. Best-effort: never let it abort construction.
+        if self._config.ingest.nl_backend == "cloud":
+            try:
+                self._get_nl_ingestor()
+            except Exception as e:
+                logger.warning("cloud NL ingestion not ready: %s", e)
+
     # --------------------------------------------------------------
     # profile="pro" support
     # --------------------------------------------------------------
