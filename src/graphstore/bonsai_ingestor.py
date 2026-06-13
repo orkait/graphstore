@@ -1055,17 +1055,51 @@ def _synthesize_dsl(
     # rewrite each reference to the matching entity_id from the turn
     # map, falling back to the literal slug when unknown so debug
     # output remains traceable.
+    # Build a cross-turn slug -> entity_id map so walk/path verbs can resolve
+    # entities created in earlier turns (graph ids are content-hashed, not
+    # slugs, so the model's `ent:marie_curie` only matches via slugified
+    # canonical_name). Only paid for when statements actually carry ent: refs.
+    graph_slugs: dict[str, str] | None = None
+    if gs is not None and any("ent:" in s for s in turn.statements):
+        from graphstore.ingest.entity_extract import slug as _ent_slug
+        graph_slugs = {}
+        try:
+            for n in gs.execute('NODES WHERE kind = "entity"').data or []:
+                cn = n.get("canonical_name")
+                if cn:
+                    graph_slugs.setdefault(_ent_slug(cn), n["id"])
+        except Exception:
+            graph_slugs = None
+
     for stmt in turn.statements:
-        out.append(_rewrite_ent_refs(stmt, slug_to_entity))
+        out.append(_rewrite_ent_refs(stmt, slug_to_entity, graph_slugs))
 
     return out
 
 
-def _rewrite_ent_refs(stmt: str, slug_to_entity: dict[str, str]) -> str:
+def _rewrite_ent_refs(
+    stmt: str,
+    slug_to_entity: dict[str, str],
+    graph_slugs: dict[str, str] | None = None,
+) -> str:
+    """Rewrite ``ent:slug`` references to real entity ids.
+
+    ``_ENT_FROM_ID_RE`` captures the WITH-prefix form (``ent:marie_curie``),
+    so we strip the prefix before looking the bare slug up. Resolution order:
+    this turn's freshly-minted entities (``slug_to_entity``) -> entities
+    already in the graph (``graph_slugs``, keyed by slugified canonical_name)
+    -> unresolved. Unresolved refs fall back to a SINGLE ``ent:`` prefix; the
+    pre-fix code emitted ``f'"ent:{slug}"'`` with ``slug`` still carrying its
+    own ``ent:``, producing the ``ent:ent:`` double-prefix that made every
+    cross-turn walk/path query miss (audit 2026-06-13).
+    """
     def _sub(match: re.Match) -> str:
-        slug = match.group(1)
-        eid = slug_to_entity.get(slug)
-        return f'"{eid}"' if eid else f'"ent:{slug}"'
+        ref = match.group(1)
+        bare = ref[4:] if ref.startswith("ent:") else ref
+        eid = slug_to_entity.get(bare)
+        if not eid and graph_slugs:
+            eid = graph_slugs.get(bare)
+        return f'"{eid}"' if eid else f'"ent:{bare}"'
     return _ENT_FROM_ID_RE.sub(_sub, stmt)
 
 
