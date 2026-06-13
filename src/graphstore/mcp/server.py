@@ -18,6 +18,8 @@ Environment:
     GRAPHSTORE_URL        optional remote playground URL; if set, in-process
                           store is bypassed and DSL is forwarded over HTTP
     GRAPHSTORE_AUTH_TOKEN optional bearer token for the remote URL
+    GRAPHSTORE_INGEST_NL_BACKEND  "cloud" to enable the gs_ingest structured
+                          NL->graph tool (needs a provider key, e.g. GROQ_API_KEY)
 """
 from __future__ import annotations
 
@@ -108,10 +110,52 @@ def _esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _ingest_nl(text: str) -> dict:
+    """Structured NL ingestion via gs.ingest_nl (in-process only).
+
+    Extracts entities / relationships / beliefs through the configured LLM
+    backend and writes them as nodes + edges. Enable by launching with
+    GRAPHSTORE_INGEST_NL_BACKEND=cloud and a provider key (e.g. GROQ_API_KEY).
+    """
+    if _REMOTE_URL:
+        return {"error": "gs_ingest needs the in-process LLM pipeline; "
+                         "not available in remote (GRAPHSTORE_URL) mode. Use gs_execute."}
+    try:
+        r = _get_store().ingest_nl(text)
+        return {
+            "executed": r.executed,
+            "rejected": len(r.rejected),
+            "statements": r.statements,
+        }
+    except Exception as e:
+        logger.exception("graphstore ingest_nl failed")
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+@mcp.tool()
+def gs_ingest(text: str) -> dict:
+    """Ingest natural language as a STRUCTURED graph update.
+
+    The configured LLM extracts entities, relationships, and beliefs and
+    writes them as nodes + edges (e.g. "Alice works at OpenAI" -> Alice and
+    OpenAI entities + a works_at edge), with cross-message entity dedup. This
+    is the cognitive ingestion path - prefer it over gs_remember when the text
+    contains people/orgs/facts worth structuring.
+
+    Requires NL ingestion enabled: launch with GRAPHSTORE_INGEST_NL_BACKEND=cloud
+    and a provider key (e.g. GROQ_API_KEY). Returns executed/rejected counts and
+    the synthesized DSL statements. In-process only (not remote mode).
+
+    Example: gs_ingest("Marie Curie discovered radium and won a Nobel Prize")
+    """
+    return _ingest_nl(text)
+
+
 @mcp.tool()
 def gs_remember(text: str) -> dict:
-    """Store a fact in graphstore. Use for any agent observation, decision,
-    or piece of context worth recalling later.
+    """Store text as a SINGLE node (blob), unstructured. Use for raw notes /
+    observations you only need to retrieve later by search - NOT for building
+    an entity graph (use gs_ingest for that).
 
     Internally emits CREATE NODE AUTO content="..." DOCUMENT "..." which
     persists the text into the column store, splits sentences, indexes
