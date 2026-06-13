@@ -375,9 +375,7 @@ class JinaOnnxEmbedderProbe(Probe):
         self._dims = dims
 
     def download(self, cache_dir: Path, host: HostSnapshot) -> int:
-        from graphstore.registry.installer import (
-            install_embedder, get_install_dir,
-        )
+        from graphstore.registry.installer import install_embedder
         target = install_embedder(self._install_name)
         total = sum(p.stat().st_size for p in target.rglob("*") if p.is_file())
         return int(total / (1024 * 1024))
@@ -501,18 +499,22 @@ class JinaV3RerankerProbe(Probe):
             raise RuntimeError(
                 "huggingface-hub not installed; pip install 'graphstore[pro]'"
             ) from e
+        # Download to the exact paths measure()/runtime read from config, not the
+        # HF cache layout - otherwise the files land where nothing looks for them.
+        from graphstore.config import GraphStoreConfig
+        cfg = GraphStoreConfig()
+        model_path = Path(cfg.dsl.reranker_model_dir or "")
+        proj_path = Path(cfg.dsl.reranker_projector_path or "")
+        target_dir = model_path.parent
+        target_dir.mkdir(parents=True, exist_ok=True)
         # The Q8_0-only repo (jinaai/jina-reranker-v3-Q8_0-GGUF) is
         # gated; use the public multi-quant repo and pin the Q8_0 file.
         repo = "jinaai/jina-reranker-v3-GGUF"
         gguf = hf_hub_download(
-            repo_id=repo,
-            filename="jina-reranker-v3-Q8_0.gguf",
-            cache_dir=str(cache_dir / "models"),
+            repo_id=repo, filename=model_path.name, local_dir=str(target_dir),
         )
         proj = hf_hub_download(
-            repo_id=repo,
-            filename="projector.safetensors",
-            cache_dir=str(cache_dir / "models"),
+            repo_id=repo, filename=proj_path.name, local_dir=str(target_dir),
         )
         return int((Path(gguf).stat().st_size + Path(proj).stat().st_size)
                    / (1024 * 1024))
@@ -523,7 +525,7 @@ class JinaV3RerankerProbe(Probe):
         host: HostSnapshot,
         disk_mb: int,
     ) -> CalibrationEntry:
-        from graphstore.embedding.reranker import LlamaCppReranker
+        from graphstore.embedding.reranker import GGUFReranker
         # Reranker reads default paths from config. Probe assumes the
         # default config; users with custom paths re-probe via
         # `graphstore pro probe`.
@@ -531,7 +533,7 @@ class JinaV3RerankerProbe(Probe):
         cfg = GraphStoreConfig()
 
         rss_baseline = _process_rss_mb()
-        reranker = LlamaCppReranker(
+        reranker = GGUFReranker(
             model_path=cfg.dsl.reranker_model_dir or "",
             projector_path=cfg.dsl.reranker_projector_path or "",
             n_gpu_layers=0,  # CPU baseline; GPU measured separately
@@ -543,7 +545,7 @@ class JinaV3RerankerProbe(Probe):
 
         def _rerank_batch():
             nonlocal peak_rss
-            scored = reranker.rerank(_PROBE_TEXT, [d for _, d in _PROBE_QUERY_DOC_PAIRS])
+            scored = reranker.score(_PROBE_TEXT, [d for _, d in _PROBE_QUERY_DOC_PAIRS])
             peak_rss = max(peak_rss, _process_rss_mb())
             return len(scored) * 32
 
