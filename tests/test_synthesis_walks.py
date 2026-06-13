@@ -35,3 +35,9 @@ def test_path_pair_resolves_both_anchors_cross_turn():
     path = next(s for s in stmts if s.startswith("PATH"))
     assert "ent:ent:" not in path
     assert "entity:aaa" in path and "entity:bbb" in path
+
+
+def test_search_aliases_to_lexical():
+    # models frequently emit @SEARCH; alias it to @LEXICAL instead of dropping
+    turn = S.parse_verb_output("@SEARCH radium isotopes")
+    assert any(s.startswith('LEXICAL SEARCH "radium isotopes"') for s in turn.statements)

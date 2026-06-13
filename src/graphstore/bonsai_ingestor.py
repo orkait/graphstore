@@ -788,7 +788,7 @@ _VERB_HANDLERS: dict[str, Any] = {
     # Retrieval (user asked a question)
     "REMEMBER": _H_RM,
     "SIMILAR": _H_SM, "SIMILAR_TO": _H_SM,
-    "LEXICAL": _H_LX, "LEXICAL_SEARCH": _H_LX,
+    "LEXICAL": _H_LX, "LEXICAL_SEARCH": _H_LX, "SEARCH": _H_LX,
     "ANSWER": _H_AQ,
 
     # Counts
