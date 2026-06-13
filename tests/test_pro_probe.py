@@ -296,3 +296,46 @@ def test_probe_lazy_import_symbols_exist():
 
     # JinaV3RerankerProbe.measure() calls reranker.score(query, documents)
     assert hasattr(GGUFReranker, "score")
+
+
+def test_all_probe_lazy_symbols_resolve():
+    """Static guard for the probe lazy-import bug class: every graphstore symbol
+    a probe imports inside download()/measure(), or calls as <module>.<attr>, must
+    exist. In-method imports hide renames from normal tests until live `pro setup`.
+    Caught: jina get_install_dir / LlamaCppReranker / .rerank() and vision pull_model.
+    Skips modules whose import fails on an ABSENT OPTIONAL DEP (not a stale symbol)."""
+    import ast
+    import importlib
+    import graphstore.pro_probe as pp
+
+    tree = ast.parse(open(pp.__file__).read())
+    problems = []
+    alias_to_mod = {}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("graphstore"):
+            try:
+                mod = importlib.import_module(node.module)
+            except ImportError:
+                continue  # optional dep missing - not a stale-symbol bug
+            for a in node.names:
+                alias_to_mod[a.asname or a.name] = f"{node.module}.{a.name}"
+                if not hasattr(mod, a.name):
+                    try:
+                        importlib.import_module(f"{node.module}.{a.name}")
+                    except ImportError:
+                        problems.append(f"{node.module}.{a.name} MISSING")
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            full = alias_to_mod.get(node.value.id)
+            if not full:
+                continue
+            try:
+                m = importlib.import_module(full)
+            except ImportError:
+                continue
+            if not hasattr(m, node.attr):
+                problems.append(f"{full}.{node.attr} MISSING (called as {node.value.id}.{node.attr})")
+
+    assert not sorted(set(problems)), f"stale probe symbols: {sorted(set(problems))}"

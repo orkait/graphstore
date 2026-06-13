@@ -767,9 +767,14 @@ class GraphStore:
                 else:
                     result = self._sys_executor.execute(ast)
                     if isinstance(ast, ast_nodes.SysReembed):
-                        self._embedder_dirty = False
-                        self._executor._embedder_dirty = False
-                        self._update_embedder_identity()
+                        # Only declare all-clear if every embedder-produced vector
+                        # was actually re-encoded; otherwise stay dirty so reads
+                        # keep refusing rather than serve stale-space vectors.
+                        data = result.data if isinstance(result.data, dict) else {}
+                        if data.get("skipped", 0) == 0:
+                            self._embedder_dirty = False
+                            self._executor._embedder_dirty = False
+                            self._update_embedder_identity()
             else:
                 is_write = is_write_op(ast)
 
