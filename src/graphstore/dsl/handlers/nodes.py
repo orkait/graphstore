@@ -160,7 +160,15 @@ class NodeHandlers:
                             nodes = self.store.get_all_nodes(kind=kind_filter)
                             count = sum(1 for n in nodes if self._eval_where(q.where.expr, n))
             else:
-                count = self.store.node_count
+                # Honor namespace/context isolation: a raw node_count would
+                # leak namespaced (and context) nodes into the default view.
+                if (getattr(self.store, "_active_namespace", None) is not None
+                        or self.store.columns.has_column("__namespace__")
+                        or self.store._active_context is not None):
+                    n = self.store._next_slot
+                    count = int(self._compute_live_mask(n).sum()) if n else 0
+                else:
+                    count = self.store.node_count
         else:
             if q.where:
                 kind_filter = self._extract_kind_from_where(q.where)

@@ -3,7 +3,9 @@
 import numpy as np
 
 from graphstore.dsl.handlers._registry import handles
-from graphstore.dsl.ast_nodes import BindContext, DiscardContext
+from graphstore.dsl.ast_nodes import (
+    BindContext, DiscardContext, BindNamespace, DiscardNamespace,
+)
 from graphstore.core.types import Result
 from graphstore.core.errors import NodeNotFound
 
@@ -15,6 +17,28 @@ class ContextHandlers:
         """BIND CONTEXT: set active context on store."""
         self.store._active_context = q.name
         return Result(kind="ok", data={"context": q.name}, count=0)
+
+    @handles(BindNamespace, write=True)
+    def _bind_namespace(self, q: BindNamespace) -> Result:
+        """BIND NAMESPACE: enter an isolated namespace.
+
+        While bound, reads show ONLY nodes tagged __namespace__==name and new
+        writes are tagged with it. Unlike CONTEXT, namespaced nodes are EXCLUDED
+        from the default (unbound) view, so a harness can populate an isolated
+        intelligence corpus without polluting the general agentic memory.
+        """
+        self.store._active_namespace = q.name
+        return Result(kind="ok", data={"namespace": q.name}, count=0)
+
+    @handles(DiscardNamespace, write=True)
+    def _discard_namespace(self, q: DiscardNamespace) -> Result:
+        """DISCARD NAMESPACE: unbind the active namespace (non-destructive).
+
+        Unlike DISCARD CONTEXT, the namespaced corpus is NOT deleted - it simply
+        becomes invisible to the default view again. The corpus persists.
+        """
+        self.store._active_namespace = None
+        return Result(kind="ok", data={"namespace_unbound": q.name}, count=0)
 
     @handles(DiscardContext, write=True)
     def _discard_context(self, q: DiscardContext) -> Result:

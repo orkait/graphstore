@@ -21,6 +21,17 @@ class VisibilityMixin:
                 # No __context__ column at all - nothing has context
                 mask = np.zeros(n, dtype=bool)
 
+        # Namespace isolation: when a namespace is bound, show ONLY that
+        # namespace; when unbound (default view), EXCLUDE every namespaced node
+        # so an isolated intelligence corpus never pollutes general memory.
+        ns = getattr(self.store, '_active_namespace', None)
+        if ns:
+            ns_mask = self.store.columns.get_mask("__namespace__", "=", ns, n)
+            mask = (mask & ns_mask) if ns_mask is not None else np.zeros(n, dtype=bool)
+        elif self.store.columns.has_column("__namespace__"):
+            has_ns = self.store.columns._presence["__namespace__"][:n]
+            mask = mask & ~has_ns
+
         return mask
 
     def _resolve_slot(self, node_id: str) -> int | None:
@@ -68,6 +79,23 @@ class VisibilityMixin:
             else:
                 # No context column at all - nothing has context
                 return False
+        # Check namespace isolation
+        ns = getattr(self.store, '_active_namespace', None)
+        slot_has_ns = (
+            self.store.columns.has_column("__namespace__")
+            and self.store.columns._presence["__namespace__"][slot]
+        )
+        if ns:
+            if not slot_has_ns:
+                return False
+            if ns not in self.store.string_table:
+                return False
+            ns_id = self.store.string_table.intern(ns)
+            if int(self.store.columns._columns["__namespace__"][slot]) != ns_id:
+                return False
+        elif slot_has_ns:
+            # Namespaced node but no namespace bound - excluded from default view
+            return False
         return True
 
     def _is_visible_by_id(self, node_id: str) -> bool:
@@ -82,7 +110,11 @@ class VisibilityMixin:
         has_retracted = self.store.columns.has_column("__retracted__")
         has_expires = self.store.columns.has_column("__expires_at__")
         has_context = self.store._active_context is not None
-        if not has_retracted and not has_expires and not has_context:
+        has_namespace = (
+            getattr(self.store, '_active_namespace', None) is not None
+            or self.store.columns.has_column("__namespace__")
+        )
+        if not has_retracted and not has_expires and not has_context and not has_namespace:
             return nodes
         result = []
         for node in nodes:

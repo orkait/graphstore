@@ -56,6 +56,11 @@ class CoreStore:
         # Active context (for BIND/DISCARD CONTEXT)
         self._active_context: str | None = None
 
+        # Active namespace (for BIND/DISCARD NAMESPACE). Unlike context,
+        # namespaced nodes are excluded from the default (unbound) view, giving
+        # an isolated partition that does not pollute the general memory.
+        self._active_namespace: str | None = None
+
         # Named snapshots storage (for SYS SNAPSHOT/ROLLBACK)
         self._snapshots: dict[str, dict] = {}
         self._tombstone_mask_cache: tuple[int, int, np.ndarray] | None = None  # (n, len(tombstones), mask)
@@ -203,6 +208,10 @@ class CoreStore:
         now_ms = int(time.time() * 1000)
         self.columns.set_reserved(slot, "__created_at__", now_ms)
         self.columns.set_reserved(slot, "__updated_at__", now_ms)
+        # Tag the active namespace so the node is isolated to it. Single write
+        # chokepoint: covers CREATE / UPSERT(new) / ASSERT uniformly.
+        if self._active_namespace:
+            self.columns.set_reserved(slot, "__namespace__", self._active_namespace)
 
         # Update secondary indices
         for field in self._indexed_fields:
