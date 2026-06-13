@@ -58,6 +58,8 @@ from graphstore.dsl.ast_nodes import (
     PropagateStmt,
     BindContext,
     DiscardContext,
+    BindNamespace,
+    DiscardNamespace,
     IngestStmt,
     RecallQuery,
     CounterfactualQuery,
@@ -813,6 +815,12 @@ class DSLTransformer(Transformer):
 
     def discard_context(self, args):
         return DiscardContext(name=self._str(args[0]))
+
+    def bind_namespace(self, args):
+        return BindNamespace(name=self._str(args[0]))
+
+    def discard_namespace(self, args):
+        return DiscardNamespace(name=self._str(args[0]) if args else None)
 
     def ingest_stmt(self, args):
         file_path = self._str(args[0])

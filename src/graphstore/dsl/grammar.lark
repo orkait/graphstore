@@ -88,6 +88,7 @@ arrow: "-[" expr? "]->"
             | assert_stmt | retract_stmt | update_nodes | merge_stmt
             | propagate_stmt
             | bind_context | discard_context
+            | bind_namespace | discard_namespace
             | ingest_stmt
             | connect_node
             | forget_node
@@ -121,6 +122,9 @@ propagate_stmt: "PROPAGATE" STRING "FIELD" IDENTIFIER "DEPTH" NUMBER
 
 bind_context: "BIND" "CONTEXT" STRING
 discard_context: "DISCARD" "CONTEXT" STRING
+
+bind_namespace: "BIND" "NAMESPACE" STRING
+discard_namespace: "DISCARD" "NAMESPACE" STRING?
 
 ingest_stmt: "INGEST" STRING ingest_as? ingest_kind? ingest_using?
 ingest_as: "AS" STRING

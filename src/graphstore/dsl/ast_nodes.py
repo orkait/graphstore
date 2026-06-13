@@ -339,6 +339,14 @@ class DiscardContext:
     name: str
 
 @dataclass(slots=True)
+class BindNamespace:
+    name: str
+
+@dataclass(slots=True)
+class DiscardNamespace:
+    name: str | None = None
+
+@dataclass(slots=True)
 class IngestStmt:
     file_path: str
     node_id: str | None = None
