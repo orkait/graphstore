@@ -59,6 +59,10 @@ def resolve_model(model_id: str, aliases: dict[str, str] | None = None) -> dict:
         slug = model_id[len("aistudio/"):]
         return {"litellm_model": f"gemini/{slug}", "api_base": None,
                 "api_key": os.getenv("GOOGLE_AISTUDIO_API_KEY", "")}
+    if model_id.startswith("nvidia_nim/"):
+        slug = model_id[len("nvidia_nim/"):]
+        return {"litellm_model": f"nvidia_nim/{slug}", "api_base": None,
+                "api_key": os.getenv("NVIDIA_NIM_API_KEY", "")}
     if model_id.startswith("ollama/"):
         slug = model_id[len("ollama/"):]
         return {"litellm_model": f"openai/{slug}", "api_base": OLLAMA_CLOUD_BASE,
