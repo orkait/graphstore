@@ -106,6 +106,13 @@ playground = [
 mcp = [
     "mcp>=1.0",
 ]
+# Cloud NL->DSL ingestion: multi-provider LLM transport via litellm. Powers
+# CloudIngestor (graphstore.ingest.llm) and gs.ingest_nl / ingest_nl_stream.
+# Until the in-house compressed model is wired, cloud providers carry NL
+# ingestion (the local BonsaiIngestor manages only ~2 TPS on CPU).
+cloud = [
+    "litellm>=1.72",
+]
 # onnxruntime-gpu for NER (TinyBERT) CUDA acceleration. Assumes host has
 # CUDA 12 + cuDNN 9 findable by the dynamic linker. Users needing bundled
 # CUDA runtime wheels should pin nvidia-*-cu12 manually - we keep this lean.
