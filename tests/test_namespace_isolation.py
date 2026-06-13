@@ -80,3 +80,18 @@ def test_edges_isolated_by_namespace_in_count():
     gs.execute('DISCARD NAMESPACE')
     assert gs.execute('COUNT EDGES').count == 1                       # intel edge excluded
     assert gs.execute('COUNT EDGES', namespace="intel").count == 1   # only intel edge when bound
+
+
+def test_namespace_and_context_are_mutually_exclusive():
+    # binding both silently AND'd filters to empty - a footgun. Guard it.
+    import pytest
+    from graphstore.core.errors import GraphStoreError
+    gs = GraphStore(embedder="none", enable_sentence_nodes=False)
+    gs.execute('BIND CONTEXT "c1"')
+    with pytest.raises(GraphStoreError, match="(?i)namespace.*context|context.*namespace"):
+        gs.execute('BIND NAMESPACE "intel"')
+    gs.execute('DISCARD CONTEXT "c1"')
+    gs.execute('BIND NAMESPACE "intel"')
+    with pytest.raises(GraphStoreError, match="(?i)namespace.*context|context.*namespace"):
+        gs.execute('BIND CONTEXT "c1"')
+    gs.execute('DISCARD NAMESPACE')
