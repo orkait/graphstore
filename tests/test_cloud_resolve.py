@@ -29,6 +29,14 @@ def test_resolve_bare_id_defaults_openrouter():
     assert r["litellm_model"] == "openrouter/some/unknown-model"
 
 
+def test_resolve_nvidia_nim_prefix(monkeypatch):
+    monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nvapi-x")
+    r = resolve_model("nvidia_nim/meta/llama-3.3-70b-instruct")
+    assert r["litellm_model"] == "nvidia_nim/meta/llama-3.3-70b-instruct"
+    assert r["api_base"] is None
+    assert r["api_key"] == "nvapi-x"
+
+
 def test_build_chain_drops_keyless_and_orders_free_first(monkeypatch):
     for k in ("GROQ_API_KEY", "CEREBRAS_API_KEY", "CLOUDFLARE_API_KEY",
               "GOOGLE_AISTUDIO_API_KEY", "OPENROUTER_API_KEY", "OLLAMA_API_KEY"):
