@@ -167,6 +167,15 @@ class BonsaiIngestRequest(BaseModel):
     dry_run: bool = False
 
 
+class MediaIngestRequest(BaseModel):
+    id: str
+    mime: str
+    data_b64: str
+    namespace: str | None = None
+    prompt: str | None = None
+    models: list[str] | None = None
+
+
 # ---------------------------------------------------------------------------
 # Input validation
 # ---------------------------------------------------------------------------
@@ -337,6 +346,51 @@ def ingest(req: BonsaiIngestRequest):
         payload = {k: getattr(result, k) for k in ("statements", "executed", "parsed", "rejected")
                    if hasattr(result, k)}
     return _json_bytes_response({"kind": "ingest", "data": payload})
+
+
+_MAX_MEDIA_BYTES = int(os.environ.get("GRAPHSTORE_MAX_MEDIA_BYTES", str(20 * 1024 * 1024)))
+
+
+def _dsl_str(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+@app.post("/api/ingest-media")
+def ingest_media(req: MediaIngestRequest):
+    """Understand media (image/audio) into descriptive text via a cloud multimodal
+    model, then store it as an embedded DOCUMENT - so it is searchable like any
+    other memory. graphstore owns the understanding; callers just hand over bytes."""
+    import base64
+    import logging
+
+    from graphstore.ingest.media import MediaUnsupported, understand_media
+
+    try:
+        data = base64.b64decode(req.data_b64, validate=True)
+    except Exception as exc:
+        return _json_bytes_response({"kind": "error", "data": f"invalid data_b64: {exc}"})
+    if len(data) > _MAX_MEDIA_BYTES:
+        return _json_bytes_response({"kind": "error", "data": f"media exceeds {_MAX_MEDIA_BYTES} bytes"})
+    try:
+        text = understand_media(data, req.mime, models=req.models, prompt=req.prompt)
+    except MediaUnsupported as exc:
+        return _json_bytes_response({"kind": "error", "data": str(exc)})
+    except Exception as exc:
+        logging.getLogger(__name__).warning("ingest-media: %s: %s", type(exc).__name__, exc)
+        return _json_bytes_response({"kind": "error", "data": f"{type(exc).__name__}: {exc}"})
+    if not text:
+        return _json_bytes_response({"kind": "error", "data": "empty understanding"})
+    store = _get_store()
+    dsl = (
+        f"CREATE NODE {_dsl_str(req.id)} kind = \"media\" "
+        f"media_mime = {_dsl_str(req.mime)} DOCUMENT {_dsl_str(text)}"
+    )
+    result = store.execute(dsl, namespace=req.namespace)
+    return _json_bytes_response({
+        "kind": "media",
+        "data": {"id": req.id, "mime": req.mime, "text": text, "chars": len(text),
+                 "stored": getattr(result, "kind", None)},
+    })
 
 
 @app.get("/api/graph")
