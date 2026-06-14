@@ -12,7 +12,8 @@ set -eu
 
 DB="${GRAPHSTORE_DB_PATH:-/data}"
 HOST="${GRAPHSTORE_HOST:-0.0.0.0}"
-PORT="${GRAPHSTORE_PORT:-7200}"
+# GRAPHSTORE_PORT wins; else a platform-injected PORT (Railway/Heroku/Fly); else 7200
+PORT="${GRAPHSTORE_PORT:-${PORT:-7200}}"
 TOKEN_FILE="${DB}/.auth_token"
 
 # When CUDA libs ship as pip wheels (Pro image), graphstore.gpu.setup()
