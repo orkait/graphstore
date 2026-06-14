@@ -10,6 +10,7 @@ from .core import compute_profile as _compute_profile_init  # noqa: F401
 from . import gpu  # noqa: F401  - expose graphstore.gpu.{setup, is_ready, status}
 from . import pro  # noqa: F401  - expose graphstore.pro.{ProSpec, resolve, ...}
 from .store import GraphStore
+from .research import Research
 from .core.store import CoreStore
 from .core.schema import SchemaRegistry
 from .core.types import Result, Edge
@@ -37,7 +38,7 @@ from .query import (
 )
 
 __all__ = [
-    "GraphStore", "CoreStore", "SchemaRegistry",
+    "GraphStore", "Research", "CoreStore", "SchemaRegistry",
     "Result", "Edge",
     "parse", "clear_cache", "Executor", "SystemExecutor",
     "GraphStoreError", "QueryError", "NodeNotFound", "NodeExists",
