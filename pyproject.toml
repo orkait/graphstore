@@ -143,6 +143,35 @@ pro = [
     "onnxruntime>=1.17",
     "huggingface-hub>=0.24",
 ]
+
+# No-GPU serverless deploys (Railway / Fly / Render / Cloud Run). Everything that
+# needs "understanding" - NL->DSL ingestion AND image/audio/video/pdf media -
+# goes to CLOUD LLMs via litellm, so no GPU and no local 4B/VLM/whisper models.
+# model2vec (in the base deps) is the fast CPU embedder; pymupdf handles PDFs;
+# CPU onnxruntime powers TinyBERT NER. Lean image, fast build. This is the
+# install for siphon-on-Railway.
+#   Deliberately EXCLUDES: gpu (onnxruntime-gpu, no CUDA), vision/audio sidecars
+#   (cloud media replaces them), embedders-extra (llama-cpp / GGUF, CPU-slow),
+#   ingest-pro (docling pulls torch ~1 GB).
+cloud-cpu = [
+    "graphstore[cloud]",
+    "graphstore[ingest]",
+    "graphstore[playground]",
+    "graphstore[mcp]",
+    "onnxruntime>=1.17",
+    "tokenizers>=0.15",
+    "huggingface-hub>=0.24",
+]
+
+# Everything, for dev machines / GPU hosts. NOT for no-GPU serverless - pulls
+# onnxruntime-gpu (dead without CUDA) + docling (torch ~1 GB) + local VLM/whisper
+# /4B-GGUF (CPU-slow). On Railway use [cloud-cpu] instead.
+all = [
+    "graphstore[pro]",
+    "graphstore[cloud]",
+    "graphstore[ingest-pro]",
+    "graphstore[playground]",
+]
 [tool.setuptools.package-dir]
 "" = "src"
 
