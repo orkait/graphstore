@@ -1,10 +1,12 @@
 # Architecture
 
-supergraph has two parts. Nothing else.
+supergraph is the substrate. An agent harness sits on top of it, out of tree:
+[orkait/superbot](https://github.com/orkait/superbot) is the one this repository
+was built for.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ superclaw/                           the harness            │
+│ a harness, out of tree (orkait/superbot)                    │
 │   identity · permission · modes · planning · compaction     │
 │   delegation · completion                                   │
 └───────────────────────────┬─────────────────────────────────┘
@@ -44,27 +46,28 @@ cross-process `flock` on `.supergraph.lock` keeps two processes off one path.
 
 ## The harness
 
-See `superclaw/README.md`. A terminal coding agent: one loop, a tool registry
-behind a permission gate, compaction and guardrails, with sessions, plan state
-and long-term memory stored in the substrate instead of on disk. Runs as the
-`superclaw` command.
+superbot lives in [its own repository](https://github.com/orkait/superbot) and
+depends on this one. A terminal coding agent: one loop, a tool registry behind a
+permission gate, compaction and guardrails, with sessions, plan state and
+long-term memory stored in the substrate instead of on disk.
 
-What the harness writes into the substrate, all through `gs.execute`:
+The shape below is the contract any harness can follow, not a private one. All
+of it goes through `gs.execute`:
 
 | Node kind | Meaning | Namespace | Lifetime |
 |---|---|---|---|
-| `session`, `event` | the session record: prompt, message, tool_result, plan, error | `superclaw` | kept |
-| `obs` | tool output bodies behind a `§ref` | `superclaw` | kept; web pages `EXPIRES IN 7d` |
+| `session`, `event` | the session record: prompt, message, tool_result, plan, error | `superbot` | kept |
+| `obs` | tool output bodies behind a `§ref` | `superbot` | kept; web pages `EXPIRES IN 7d` |
 | `memory` | facts the user stated | default | kept, optional `EXPIRES` |
-| `fact` | facts learned from a source, asserted with confidence, source and event time | `superclaw` | kept until `RETRACT` |
-| `document`, `chunk`, `section` | a file parsed by `INGEST` on request, its retrieval chunks and sections | `superclaw` | `EXPIRES IN 30d` unless pinned |
-| `kernel` | python namespace checkpoint per session | `superclaw` | overwritten |
-| `maintenance` | one node, `maint:last`, with the time and counts of the last maintenance pass | `superclaw` | overwritten |
-| `cronjob` | scheduled prompts | `superclaw` | until deleted |
+| `fact` | facts learned from a source, asserted with confidence, source and event time | `superbot` | kept until `RETRACT` |
+| `document`, `chunk`, `section` | a file parsed by `INGEST` on request, its retrieval chunks and sections | `superbot` | `EXPIRES IN 30d` unless pinned |
+| `kernel` | python namespace checkpoint per session | `superbot` | overwritten |
+| `maintenance` | one node, `maint:last`, with the time and counts of the last maintenance pass | `superbot` | overwritten |
+| `cronjob` | scheduled prompts | `superbot` | until deleted |
 
-Edges: `session -> session` (`fork`), `session -> file` (`read`, `wrote`), `obs -> session` (`produced`), `fact -> session` (`learned_in`), `fact -> obs` (`from`), `fact -> fact` (`supersedes`), `document -> session` (`ingested_in`), `document -> section` (`has_section`, made by the substrate). `file` nodes hold the absolute path and live in the `superclaw` namespace. Memories carry no edges: they sit in the default namespace, and an edge across namespaces is accepted but invisible from both sides.
+Edges: `session -> session` (`fork`), `session -> file` (`read`, `wrote`), `obs -> session` (`produced`), `fact -> session` (`learned_in`), `fact -> obs` (`from`), `fact -> fact` (`supersedes`), `document -> session` (`ingested_in`), `document -> section` (`has_section`, made by the substrate). `file` nodes hold the absolute path and live in the `superbot` namespace. Memories carry no edges: they sit in the default namespace, and an edge across namespaces is accepted but invisible from both sides.
 
-## Why they live together
+## Why a harness builds on this
 
 The prompt-layer harnesses in the field cannot date a stored fact or expire
 one. Every one of them ships a staleness warning and none ships a mechanism.
@@ -72,12 +75,12 @@ The substrate already has valid time, transaction time, TTL with automatic
 expiry, soft retraction, contradiction detection and additive
 episodic-to-semantic consolidation.
 
-That is the whole reason the harness sits next to the substrate rather than on
-top of a vector store.
+That is the whole reason a harness stores its memory here rather than on top of
+a vector store.
 
 ## Going deeper
 
-This file is the two-part map. For the substrate internals - the three storage
+This file is the map. For the substrate internals - the three storage
 engines, the DSL verb surface, the ingest tiers and the retrieval fusion - see
 [website/docs/concepts/architecture.md](website/docs/concepts/architecture.md).
 
