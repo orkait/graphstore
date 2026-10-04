@@ -16,7 +16,7 @@
 
 An embedded memory database for AI agents. Facts get written with confidence scores, expire, get contradicted, decay by recency. Retrieval fuses vector similarity, BM25, graph structure, and recency in one call. Everything goes through a typed DSL. Runs in-process, persists to SQLite.
 
-Status: v0.7.0, alpha. Two parts: this substrate (`import supergraph`) and the [superclaw](superclaw/README.md) terminal agent that uses it as memory.
+Status: v0.7.0, alpha. This is the substrate (`import supergraph`); the terminal agent that uses it as memory lives in [orkait/superbot](https://github.com/orkait/superbot).
 
 ## 📦 Install
 
@@ -30,11 +30,6 @@ plain name was already taken on PyPI by an unrelated project.
 `supergraphdb` is not published yet, so the `pip install` lines below describe the
 extras rather than a command that works today. Install from the repository until it
 is: `uv pip install 'supergraphdb[<extra>] @ git+https://github.com/orkait/supergraph'`.
-For superclaw specifically, `install.sh` does this and brings uv with it:
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/orkait/supergraph/main/install.sh | sh
-```
 
 Core ships with [model2vec](https://github.com/MinishLab/model2vec) as the default embedder. Swap for Jina v5, bge-*, EmbeddingGemma, or any ONNX / GGUF model via `supergraph install-embedder`. PDFs, images, audio, GPU, and the web UI are opt-in extras.
 
@@ -46,7 +41,6 @@ pip install 'supergraphdb[playground]'   # FastAPI web UI
 pip install 'supergraphdb[gpu]'          # onnxruntime-gpu, Linux x86_64, CUDA 12
 pip install 'supergraphdb[mcp]'          # Model Context Protocol server (supergraph-mcp)
 pip install 'supergraphdb[pro]'          # one-shot agentic memory bundle (see Pro mode below)
-pip install 'supergraphdb[superclaw]'    # the superclaw terminal coding agent (TUI + headless exec)
 ```
 
 Full extras matrix: [Installation](website/docs/installation.md).
@@ -123,7 +117,7 @@ The **DSL** is Lark LALR(1). Every write, read, `INGEST`, and `SYS *` goes throu
 
 Deep dive: [Architecture](website/docs/concepts/architecture.md) · [Edge matrix](website/docs/concepts/edge-matrix.md).
 
-The two parts of the project - this substrate and the `superclaw` harness - are mapped in [ARCHITECTURE.md](ARCHITECTURE.md).
+The substrate and the contract a harness follows on top of it are mapped in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## 🧠 REMEMBER
 
